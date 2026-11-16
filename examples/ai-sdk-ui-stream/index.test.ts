@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import type { UIMessageChunk } from "ai";
-import { createAgentRuntime, runToQuiescence, type AgentRequestExecutor } from "@statelyai/agent";
+import { type AgentRequestExecutor, runAgent } from "@statelyai/agent";
 import {
   agentRunToUIMessageStream,
   aiSdkUiStreamMachine,
@@ -86,14 +86,10 @@ test("machine exports a runnable definition", () => {
 });
 
 test("each finished stream leaves a word-count lane in the output", async () => {
-  const result = await runToQuiescence(
-    createAgentRuntime(aiSdkUiStreamMachine, {
-      executors: { streamText: mockStreamText([TAGLINE, PITCH]) },
-    }),
-    {
-      input: { product: "a state-machine agent framework" },
-    },
-  );
+  const result = await runAgent(aiSdkUiStreamMachine, {
+    executors: { streamText: mockStreamText([TAGLINE, PITCH]) },
+    input: { product: "a state-machine agent framework" },
+  });
 
   expect(result.status).toBe("done");
   const summary = result.status === "done" ? result.output.streamSummary : "";
@@ -102,19 +98,15 @@ test("each finished stream leaves a word-count lane in the output", async () => 
 });
 
 test("a stream that fails lands in `failed` with no pitch", async () => {
-  const result = await runToQuiescence(
-    createAgentRuntime(aiSdkUiStreamMachine, {
-      executors: {
-        streamText: async (request) => {
-          if (request.name === "streamPitch") throw new Error("stream dropped");
-          return { result: TAGLINE };
-        },
+  const result = await runAgent(aiSdkUiStreamMachine, {
+    executors: {
+      streamText: async (request) => {
+        if (request.name === "streamPitch") throw new Error("stream dropped");
+        return { result: TAGLINE };
       },
-    }),
-    {
-      input: { product: "a state-machine agent framework" },
     },
-  );
+    input: { product: "a state-machine agent framework" },
+  });
 
   expect(result.status).toBe("done");
   if (result.status !== "done") return;

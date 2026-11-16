@@ -4,10 +4,10 @@
  */
 import { describe, expect, test } from "vitest";
 import {
-  createAgentRuntime,
+  type AgentRunInit,
   eventFromInteraction,
   getInteraction,
-  runToQuiescence,
+  runAgent,
 } from "@statelyai/agent";
 import { createMockModelExecutors } from "../mock-model.js";
 import { CUSTOMERS, runSplits } from "./contract.js";
@@ -103,11 +103,11 @@ describe("one improvement round on the real desk", () => {
 describe("the demo contract", () => {
   test("the desk idles in deciding with a renderable interaction and resumes from a persisted snapshot", async () => {
     const scenario = SCENARIOS.find((s) => s.id === "small-clean")!;
-    const runtime = () =>
-      createAgentRuntime(refundDeskMachine, { actors: createWorldActors(createWorld(scenario)) });
+    const run = (init: AgentRunInit<typeof refundDeskMachine>) =>
+      runAgent(refundDeskMachine, { actors: createWorldActors(createWorld(scenario)), ...init });
 
     // No decider at all: the plain desk waits for whoever drives it.
-    const idle = await runToQuiescence(runtime(), {
+    const idle = await run({
       input: { ticket: scenario.ticket, customerId: scenario.customerId },
     });
     expect(idle.status).toBe("idle");
@@ -121,7 +121,7 @@ describe("the demo contract", () => {
 
     const persist = (result: { persist(): unknown }) =>
       JSON.parse(JSON.stringify(result.persist()));
-    const asking = await runToQuiescence(runtime(), {
+    const asking = await run({
       snapshot: persist(idle),
       event: { type: "VERIFY_IDENTITY" },
     });
@@ -134,11 +134,11 @@ describe("the demo contract", () => {
     const claim = eventFromInteraction(asking.snapshot, { text: scenario.identityClaim });
     expect(claim).toEqual({ type: "IDENTITY_CLAIM", claim: scenario.identityClaim });
 
-    const verified = await runToQuiescence(runtime(), { snapshot: persist(asking), event: claim });
+    const verified = await run({ snapshot: persist(asking), event: claim });
     expect(verified.snapshot.matches("deciding")).toBe(true);
     expect(verified.snapshot.context.identityVerified).toBe(true);
 
-    const done = await runToQuiescence(runtime(), {
+    const done = await run({
       snapshot: persist(verified),
       event: { type: "CLOSE", reason: "not a refund request" },
     });
@@ -156,11 +156,11 @@ describe("the plain desk on the sample world (what the demo runs)", () => {
   /** Drives the desk with no actors bound: a person picks choices and types answers. */
   async function play(ticket: string, steps: ({ choice: string } | { text: string })[]) {
     // No `actors`: the machine's default tools act on the sample world.
-    const runtime = () => createAgentRuntime(refundDeskMachine);
-    let result = await runToQuiescence(runtime(), { input: { ticket, customerId: ada.id } });
+    const run = (init: AgentRunInit<typeof refundDeskMachine>) => runAgent(refundDeskMachine, init);
+    let result = await run({ input: { ticket, customerId: ada.id } });
     for (const step of steps) {
       if (result.status !== "idle") break;
-      result = await runToQuiescence(runtime(), {
+      result = await run({
         snapshot: persist(result),
         event: eventFromInteraction(result.snapshot, step),
       });

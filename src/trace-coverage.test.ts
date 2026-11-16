@@ -5,12 +5,12 @@ import type { AgentDecisionExecutor } from "./decision.js";
 import {
   createAgentRuntime,
   createAgentSchemas,
-  runToQuiescence,
   serializeTraceEvent,
   setupAgent,
   traceTransitions,
   type AgentTraceEvent,
 } from "./index.js";
+import { runToQuiescence } from "./run-agent.js";
 import { explorePaths } from "./testing/index.js";
 import { traceCoverage } from "./trace-coverage.js";
 

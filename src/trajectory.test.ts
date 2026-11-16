@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { createAgentRuntime, runToQuiescence, setupAgent } from "./index.js";
+import { createAgentRuntime, setupAgent } from "./index.js";
+import { runToQuiescence } from "./run-agent.js";
 import { matchesTrajectory } from "./testing/index.js";
 import { z } from "zod";
 

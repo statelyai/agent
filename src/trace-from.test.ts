@@ -2,11 +2,11 @@ import { describe, expect, test } from "vitest";
 import { createActor, createAsyncLogic, createMachine, toPromise } from "xstate";
 import {
   createAgentRuntime,
-  runToQuiescence,
   serializeTraceEvent,
   traceTransitions,
   type AgentTraceEvent,
 } from "./index.js";
+import { runToQuiescence } from "./run-agent.js";
 
 const machine = createMachine({
   id: "job",

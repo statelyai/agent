@@ -6,10 +6,10 @@ import {
   getAcceptedEvents,
   parseAgentEvent,
   createAgentRuntime,
-  runToQuiescence,
   setupAgent,
   type ChosenEvent,
 } from "./index.js";
+import { runToQuiescence } from "./run-agent.js";
 import { AGENT_USAGE_EVENT_TYPE, type AgentUsageEvent } from "./usage.js";
 
 const schemas = createAgentSchemas({

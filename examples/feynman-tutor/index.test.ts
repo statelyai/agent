@@ -1,11 +1,6 @@
 import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
-import {
-  getInteraction,
-  getStatePath,
-  createAgentRuntime,
-  runToQuiescence,
-} from "@statelyai/agent";
+import { getInteraction, getStatePath, runAgent } from "@statelyai/agent";
 import { lintAgentMachine } from "@statelyai/agent/testing";
 import { createMockJudge, type MockJudgeEntry } from "../mock-judge.js";
 import { createMockModelExecutors } from "../mock-model.js";
@@ -161,15 +156,11 @@ test("SKIP records the checkpoint as skipped without scoring it", async () => {
 test("idle → persist() → resume round-trips through JSON", async () => {
   const scripted = executors();
   const actors = { verifyExplanation: createVerifyExplanation(grader([pass]).model) };
-  const first = await runToQuiescence(
-    createAgentRuntime(feynmanTutorMachine, {
-      executors: scripted,
-      actors,
-    }),
-    {
-      input: { topic: "RSA" },
-    },
-  );
+  const first = await runAgent(feynmanTutorMachine, {
+    executors: scripted,
+    actors,
+    input: { topic: "RSA" },
+  });
   expect(first.status).toBe("idle");
   if (first.status !== "idle") return;
   expect(getStatePath(first.snapshot)).toBe("awaitingExplanation");
@@ -177,16 +168,12 @@ test("idle → persist() → resume round-trips through JSON", async () => {
   expect(interaction?.textEvent).toBe("EXPLAIN");
   expect(interaction?.events.map((choice) => choice.type)).toEqual(["EXPLAIN", "SKIP"]);
 
-  const second = await runToQuiescence(
-    createAgentRuntime(feynmanTutorMachine, {
-      executors: scripted,
-      actors,
-    }),
-    {
-      snapshot: JSON.parse(JSON.stringify(first.persist())),
-      event: explain("public encrypts, private decrypts"),
-    },
-  );
+  const second = await runAgent(feynmanTutorMachine, {
+    executors: scripted,
+    actors,
+    snapshot: JSON.parse(JSON.stringify(first.persist())),
+    event: explain("public encrypts, private decrypts"),
+  });
   expect(second.status).toBe("idle");
   if (second.status !== "idle") return;
   expect(second.snapshot.context.checkpointIndex).toBe(1);
@@ -195,13 +182,11 @@ test("idle → persist() → resume round-trips through JSON", async () => {
 
 test("no key idea is in context before the learner explains", async () => {
   const scripted = executors();
-  const first = await runToQuiescence(
-    createAgentRuntime(feynmanTutorMachine, {
-      executors: scripted,
-      actors: { verifyExplanation: createVerifyExplanation(grader([weak]).model) },
-    }),
-    { input: { topic: "RSA" } },
-  );
+  const first = await runAgent(feynmanTutorMachine, {
+    executors: scripted,
+    actors: { verifyExplanation: createVerifyExplanation(grader([weak]).model) },
+    input: { topic: "RSA" },
+  });
   if (first.status !== "idle") throw new Error("expected idle");
   // A host renders changed context: the plan is titles only, the answer key unset.
   expect(first.snapshot.context.checkpoints).toEqual(checkpoints);
@@ -210,13 +195,12 @@ test("no key idea is in context before the learner explains", async () => {
   expect(scripted.calls.map((call) => call.name)).not.toContain("distillKeyIdea");
 
   // The first explanation distills it from the intro the learner was shown.
-  const second = await runToQuiescence(
-    createAgentRuntime(feynmanTutorMachine, {
-      executors: scripted,
-      actors: { verifyExplanation: createVerifyExplanation(grader([weak]).model) },
-    }),
-    { snapshot: first.persist(), event: explain("private encrypts?") },
-  );
+  const second = await runAgent(feynmanTutorMachine, {
+    executors: scripted,
+    actors: { verifyExplanation: createVerifyExplanation(grader([weak]).model) },
+    snapshot: first.persist(),
+    event: explain("private encrypts?"),
+  });
   if (second.status !== "idle") throw new Error("expected idle");
   expect(second.snapshot.context.keyIdea).toBe(keyIdeas[0]);
   const distill = scripted.calls.find((call) => call.name === "distillKeyIdea")!;

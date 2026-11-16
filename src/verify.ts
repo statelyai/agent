@@ -1968,6 +1968,22 @@ function stepsOf(log: StepLog | undefined): ExploreStep[] {
 // undelivered, and a live run delivers it. Pending invokes skip them.
 type FinishedChild = { id: string; output: unknown } | { id: string; error: unknown };
 
+// The finished children as invokes, for the coupled pump to register.
+function finishedInvokes(step: AgentStep): PendingInvoke[] {
+  const children = (step.snapshot.children ?? {}) as Record<string, ChildRef | undefined>;
+  return finishedChildren(step).map(({ id }) => {
+    const ref = children[id]!;
+    const own = ref as { src?: unknown; logic?: unknown };
+    return {
+      id,
+      src: typeof own.src === "string" ? own.src : id,
+      input: ref.options?.input,
+      logic: own.logic,
+      ref,
+    };
+  });
+}
+
 function finishedChildren(step: AgentStep): FinishedChild[] {
   const children = (step.snapshot.children ?? {}) as Record<string, ChildRef | undefined>;
   return Object.keys(children)
@@ -2007,6 +2023,9 @@ function explore(
   stepping = false,
   // canReach's ordering target: checked on the step log, not a snapshot.
   ordering?: CanReachOrdering,
+  // canReach's state target matches states passed through, so it is checked
+  // while coupled children are still starting; a predicate sees settled steps.
+  stateTarget = false,
 ): {
   report: AgentPathReport;
   witness?: ChosenEvent[];
@@ -2461,10 +2480,13 @@ function explore(
       return undefined;
     }
     const invokes = pendingInvokes(step);
-    if (!invokes.some(isExploredChild)) {
+    // Coupled: a finished child machine is stepped like the others, so
+    // `register` delivers its entry sends before its completion.
+    const finishedKids = coupled ? finishedInvokes(step).filter(isExploredChild) : [];
+    if (!invokes.some(isExploredChild) && finishedKids.length === 0) {
       return undefined;
     }
-    const kids = coupled ? invokes.filter(isExploredChild) : [];
+    const kids = coupled ? [...invokes.filter(isExploredChild), ...finishedKids] : [];
     const blocked: string[] = [];
     const asFork = (
       settle: ReturnType<typeof settleFor>,
@@ -2507,12 +2529,15 @@ function explore(
         .flatMap((invoke) =>
           asFork(settleFor(invoke.id, invoke.src, false, invoke), invoke.id, invoke.src, false),
         ),
-      // Coupled: `register` settles a finished child in id order with the rest.
-      ...(coupled ? [] : finishedChildren(step)).map((finished) =>
-        "error" in finished
-          ? { id: finished.id, errors: [finished.error], outputs: [] }
-          : { id: finished.id, errors: [], outputs: [finished.output] },
-      ),
+      // Coupled: `register` settles a finished child machine in id order with
+      // the rest; any other finished child settles as a fork.
+      ...finishedChildren(step)
+        .filter((finished) => !finishedKids.some((kid) => kid.id === finished.id))
+        .map((finished) =>
+          "error" in finished
+            ? { id: finished.id, errors: [finished.error], outputs: [] }
+            : { id: finished.id, errors: [], outputs: [finished.output] },
+        ),
     ];
     // Each pending decision's choices are branches of the same node; its
     // `errors` entry, if any, is a failing settlement like the others.
@@ -2640,9 +2665,6 @@ function explore(
       );
   if (initial) {
     recordState(initial, childRef?._initialEffects ?? initial.actions);
-    if (stops(initial)) {
-      witness = [];
-    }
   }
 
   // Advance a step deterministically through any non-branching text or scripted
@@ -2703,7 +2725,7 @@ function explore(
     for (let i = 0; i < MAX_ADVANCE_STEPS; i++) {
       // A step whose sends to coupled children are not delivered yet is not a
       // state the machines are in: they apply at once.
-      if (!awaitsKids(current, kids) && stops(current, kids)) {
+      if ((stateTarget || !awaitsKids(current, kids)) && stops(current, kids)) {
         return { step: current, hit: true };
       }
       if (current.done) {
@@ -3016,20 +3038,9 @@ function explore(
   // False when priming a child ran past the delivery cap.
   const register = (step: AgentStep, kids: Map<string, KidState>, queue: Delivery[]): boolean => {
     // A child machine that finished as it started is registered too: its
-    // completion is queued in id order with the other children's entry sends.
-    const children = (step.snapshot.children ?? {}) as Record<string, ChildRef | undefined>;
-    const finished = finishedChildren(step).map(({ id }): PendingInvoke => {
-      const ref = children[id]!;
-      const own = ref as { src?: unknown; logic?: unknown };
-      return {
-        id,
-        src: typeof own.src === "string" ? own.src : id,
-        input: ref.options?.input,
-        logic: own.logic,
-        ref,
-      };
-    });
-    const live = [...pendingInvokes(step), ...finished]
+    // entry sends, then its completion, are queued in id order with the
+    // other children's.
+    const live = [...pendingInvokes(step), ...finishedInvokes(step)]
       .filter(isExploredChild)
       .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
     const sessions = new Set(live.map((invoke) => childSession(invoke.id, invoke.ref)));
@@ -3103,7 +3114,7 @@ function explore(
     }
     const held = kids ?? new Map<string, KidState>();
     if (
-      pendingInvokes(step)
+      [...pendingInvokes(step), ...finishedInvokes(step)]
         .filter(isExploredChild)
         .some((invoke) => !held.has(childSession(invoke.id, invoke.ref)))
     ) {
@@ -3176,16 +3187,22 @@ function explore(
           `coupled: a child sent '${route.event.type}' to an actor the search does not model, at path [${pathTypes(link)}]`,
       );
     };
+    // What a newly registered child queued as it started (its entry sends, a
+    // finished child's completion): it applies at once, so no step is
+    // checked while any of it is still queued.
+    const starting = new WeakSet<Delivery>();
     const flush = (at: AgentStep): void => {
       if (pumped.has(at)) {
         return;
       }
       pumped.add(at);
+      const queued = queue.length;
       if (!register(at, kids, queue)) {
         overflow = true;
         endPath(link, at, { status: "max-depth", state: at.snapshot.value });
         return;
       }
+      for (const item of queue.slice(queued)) starting.add(item);
       for (const effect of Array.isArray(at.actions) ? at.actions : []) {
         if (
           !isRecord(effect) ||
@@ -3264,7 +3281,11 @@ function explore(
       recordState(step);
       outbound.push(...outboundOf(step.actions, outParent, step.snapshot.children));
       flush(step);
-      if (!overflow && stops(step, kids)) {
+      if (
+        !overflow &&
+        (stateTarget || !queue.some((queuedItem) => starting.has(queuedItem))) &&
+        stops(step, kids)
+      ) {
         witness = pathOf(link);
         break;
       }
@@ -3893,6 +3914,11 @@ function explore(
     };
   }
 
+  // Coupled children still starting apply their entry sends first; the pump
+  // checks the initial step once they have.
+  if (initial && (stateTarget || !awaitsKids(initial, undefined)) && stops(initial)) {
+    witness = [];
+  }
   const root: ExploreNode = { step: initial!, path: undefined, depth: 0 };
   if (witness === undefined && stopWhen) {
     // Breadth-first by path length, so the first witness found is a shortest
@@ -4106,6 +4132,7 @@ export async function canReach(
     undefined,
     false,
     ordering,
+    resolvedTarget !== undefined,
   );
   if (witness !== undefined) {
     return {

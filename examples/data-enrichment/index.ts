@@ -68,13 +68,7 @@ import { createAsyncLogic } from "xstate";
 import { experimental_decide, type Experimental_DecisionModel } from "ai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import {
-  getStatePath,
-  createAgentRuntime,
-  runToQuiescence,
-  setupAgent,
-  type AgentRequestExecutors,
-} from "@statelyai/agent";
+import { getStatePath, setupAgent, type AgentRequestExecutors, runAgent } from "@statelyai/agent";
 
 const models = {
   researcher: openai("gpt-6-luna"),
@@ -549,22 +543,18 @@ export async function runDataEnrichmentExample(
 ): Promise<DataEnrichmentResult> {
   const { company = "Northwind Robotics", fields, generateText, judge, onProgress } = options;
   const progress: string[] = [];
-  const result = await runToQuiescence(
-    createAgentRuntime(dataEnrichmentMachine, {
-      ...(generateText
-        ? { executors: { generateText } }
-        : { executors: createAiSdkExecutors(dataEnrichmentMachine) }),
-      ...(judge ? { actors: { reviewRecord: createReviewRecord(judge) } } : {}),
-      onTransition: (snapshot) => {
-        const state = getStatePath(snapshot);
-        progress.push(state);
-        onProgress?.(state);
-      },
-    }),
-    {
-      input: { company, ...(fields ? { fields } : {}) },
+  const result = await runAgent(dataEnrichmentMachine, {
+    ...(generateText
+      ? { executors: { generateText } }
+      : { executors: createAiSdkExecutors(dataEnrichmentMachine) }),
+    ...(judge ? { actors: { reviewRecord: createReviewRecord(judge) } } : {}),
+    onTransition: (snapshot) => {
+      const state = getStatePath(snapshot);
+      progress.push(state);
+      onProgress?.(state);
     },
-  );
+    input: { company, ...(fields ? { fields } : {}) },
+  });
   if (result.status !== "done") {
     throw new Error(`Data enrichment example did not complete: ${result.status}`);
   }

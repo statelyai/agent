@@ -57,13 +57,7 @@ import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic } from "xstate";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import {
-  getStatePath,
-  createAgentRuntime,
-  runToQuiescence,
-  setupAgent,
-  type AgentRequestExecutors,
-} from "@statelyai/agent";
+import { getStatePath, setupAgent, type AgentRequestExecutors, runAgent } from "@statelyai/agent";
 
 const models = {
   proposer: openai("gpt-6-luna"),
@@ -437,21 +431,17 @@ export async function runTreeOfThoughtsExample(
   const { numbers = [4, 9, 10, 13], generateText, onProgress } = options;
 
   const progress: string[] = [];
-  const result = await runToQuiescence(
-    createAgentRuntime(treeOfThoughtsMachine, {
-      ...(generateText
-        ? { executors: { generateText } }
-        : { executors: createAiSdkExecutors(treeOfThoughtsMachine) }),
-      onTransition: (snapshot) => {
-        const state = getStatePath(snapshot);
-        progress.push(state);
-        onProgress?.(state);
-      },
-    }),
-    {
-      input: { numbers },
+  const result = await runAgent(treeOfThoughtsMachine, {
+    ...(generateText
+      ? { executors: { generateText } }
+      : { executors: createAiSdkExecutors(treeOfThoughtsMachine) }),
+    onTransition: (snapshot) => {
+      const state = getStatePath(snapshot);
+      progress.push(state);
+      onProgress?.(state);
     },
-  );
+    input: { numbers },
+  });
 
   if (result.status !== "done") {
     throw new Error(`Tree-of-thoughts example did not complete: ${result.status}`);

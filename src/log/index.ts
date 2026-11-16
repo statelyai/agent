@@ -25,7 +25,6 @@ export {
   getSnapshotStateHash,
   getUsageFromEvents,
   initEntry,
-  rebindActorSession,
   recordLog,
   replay,
   validateReplayEntries,

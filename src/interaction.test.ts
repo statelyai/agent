@@ -7,9 +7,9 @@ import {
   getInteraction,
   interactionMetaSchema,
   createAgentRuntime,
-  runToQuiescence,
   setupAgent,
 } from "./index.js";
+import { runToQuiescence } from "./run-agent.js";
 
 describe("interactions", () => {
   const agent = setupAgent({

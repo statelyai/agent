@@ -52,7 +52,7 @@ deciding: {
 
 The `allowedEvents` list is typed against the machine's user-authored event schema, so a typo is a compile error. Framework events such as `@agent.usage` can be handled by the machine but are never model-facing candidates. Listing events explicitly also makes the candidate set visible in the machine.
 
-> **Note:** `agent.decide` needs a snapshot-aware host such as `runToQuiescence` to know which events are currently legal. With a [long-lived actor](choosing-a-run-mode.md#long-lived-actor), list `allowedEvents` explicitly. Wildcards and the omitted default cannot expand there.
+> **Note:** `agent.decide` needs a snapshot-aware host such as `runAgent` to know which events are currently legal. With a [long-lived actor](choosing-a-run-mode.md#long-lived-actor), list `allowedEvents` explicitly. Wildcards and the omitted default cannot expand there.
 
 ### `allowedEvents` patterns
 
@@ -100,7 +100,7 @@ Guards are transition functions that return `undefined`. See [Transitions](machi
 
 The candidate set is the `allowedEvents` list intersected with the events the state statically accepts. After the model picks one, `snapshot.can(event)` decides whether it is legal in the current snapshot. A chosen `ASK` on the final turn is rejected, and the model is asked again.
 
-`runToQuiescence` performs this check for you. When you call `resolveDecision` directly with a [long-lived actor](choosing-a-run-mode.md#long-lived-actor), pass the check through `canTake`:
+`runAgent` performs this check for you. When you call `resolveDecision` directly with a [long-lived actor](choosing-a-run-mode.md#long-lived-actor), pass the check through `canTake`:
 
 ```ts
 import { resolveDecision } from "@statelyai/agent";
@@ -375,7 +375,8 @@ A decision model such as Jev answers only closed choices. `'pick-then-fill'` tur
 A decision can be answered by another machine: a policy that applies a rule when the facts are enough and asks a model only for the rest. `createPolicyDecider` turns a policy machine into a decide executor.
 
 ```ts no-check
-import { createPolicyDecider, runAgent } from "@statelyai/agent";
+import { runAgent } from "@statelyai/agent";
+import { createPolicyDecider } from "@statelyai/agent/policy";
 
 const decide = createPolicyDecider(policyMachine, { executors: modelExecutors });
 
@@ -408,7 +409,7 @@ A machine does not have to know about AI. `decideNext` asks a model to pick one 
 - It never sends. The host sends the event, after checking `can` again, because the actor may have moved while the model was choosing.
 
 ```ts
-import { decideNext } from "@statelyai/agent";
+import { decideNext } from "@statelyai/agent/policy";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import { openai } from "@ai-sdk/openai";
 import { createActor, createMachine } from "xstate";

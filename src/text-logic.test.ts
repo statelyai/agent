@@ -5,12 +5,12 @@ import {
   createAgentSchemas,
   createTextLogic,
   createAgentRuntime,
-  runToQuiescence,
   setupAgent,
   type AgentRequestExecutor,
   type AgentTextRequest,
   type AgentTools,
 } from "./index.js";
+import { runToQuiescence } from "./run-agent.js";
 import { bindRequestExecutor, parseProviderOutput } from "./index.js";
 import { type AgentRequest } from "./index.js";
 import {

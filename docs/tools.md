@@ -105,13 +105,13 @@ export const toolCallingMachine = agentSetup.createMachine({
 Run the machine with any executor set. The machine is the same for scripted and real models.
 
 ```ts
-import { runToQuiescence } from "@statelyai/agent";
+import { runAgent } from "@statelyai/agent";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
-const result = await runToQuiescence(
-  createAgentRuntime(toolCallingMachine, { executors: createAiSdkExecutors({ models }) }),
-  { input: { query: "What is 42 times 17?" } },
-);
+const result = await runAgent(toolCallingMachine, {
+  executors: createAiSdkExecutors({ models }),
+  input: { query: "What is 42 times 17?" },
+});
 ```
 
 For approval and progress around real tools, see [review-tool-calls](https://github.com/statelyai/agent/blob/next/examples/review-tool-calls/index.ts).
@@ -135,7 +135,7 @@ Two consequences follow:
 - Tool-carrying requests do not retry. The AI SDK adapter retries invalid structured output only when the request has no tools, because a tool loop may already have caused side effects.
 - `metadata` is host-owned. A host that does not understand a key ignores it, so requests stay portable.
 
-The raw executor result, including tool calls and results, reaches host code through `runToQuiescence`'s `onResult(request, { raw })` and the `request.end` trace event. See [Observability](observability.md).
+The raw executor result, including tool calls and results, reaches host code through `runAgent`'s `onResult(request, { raw })` and the `request.end` trace event. See [Observability](observability.md).
 
 ## Tool results in messages
 
@@ -161,14 +161,12 @@ answering: {
 
 Build these parts by hand only when the machine owns the loop, such as in a ReAct-style machine or when replaying a transcript. With a host-run tool loop, the intermediate calls stay inside the executor. See [Messages](messages.md).
 
-## Presets and ejecting
+## Beyond one request
 
-`createToolLoopMachine` from `@statelyai/agent/machines` is a prebuilt version of the machine above: one `answering` state and one tool-carrying request. See [Preset machines](machines-presets.md) for its options, including `maxSteps`.
-
-Eject from the preset when the tool loop needs machine states of its own:
+Model the tool loop as machine states when it needs states of its own:
 
 - To approve or reject each of a turn's tool calls before it runs, use `createApprovalBatchMachine`. See [Approval gate](#approval-gate).
-- To model approval as machine states, with approve, edit, and reject steps that persist and resume, eject to [examples/review-tool-calls](https://github.com/statelyai/agent/blob/next/examples/review-tool-calls/index.ts).
+- To model approval as machine states, with approve, edit, and reject steps that persist and resume, start from [examples/review-tool-calls](https://github.com/statelyai/agent/blob/next/examples/review-tool-calls/index.ts).
 - To model each think, act, and observe turn as its own transition, use explicit request, tool, and observation states.
 
 > **Note:** There is no built-in MCP client. MCP discovery, auth, and transport are the host's responsibility. Pass the discovered tool descriptors into `tools` like any other tool. See [Scope](scope.md).
@@ -246,4 +244,4 @@ await generateText({
 - Read more about [Text requests](text-requests.md), the request a tool attaches to, including structured and streaming output.
 - Read more about [Hosts](hosts.md), including executors, model aliases, and writing your own adapter.
 - Read more about [Messages](messages.md), the message model that tool parts live in.
-- Read more about [Preset machines](machines-presets.md), including `createToolLoopMachine`.
+- Read more about [Preset machines](machines-presets.md), including `createApprovalBatchMachine`.

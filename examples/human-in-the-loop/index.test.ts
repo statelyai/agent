@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { getInteraction, createAgentRuntime, runToQuiescence } from "@statelyai/agent";
+import { getInteraction, runAgent } from "@statelyai/agent";
 import { MAX_REJECTIONS, humanInTheLoopMachine, runHumanInTheLoopExample } from "./index.js";
 
 /** Canned draft; the real model is only used on direct run. */
@@ -21,14 +21,10 @@ test("drafts, rejects once with feedback, and publishes across two JSON round-tr
 });
 
 test("the rejection budget ends the run in `abandoned` instead of looping forever", async () => {
-  let snapshot = await runToQuiescence(
-    createAgentRuntime(humanInTheLoopMachine, {
-      executors: { generateText },
-    }),
-    {
-      input: { topic: "release notes" },
-    },
-  );
+  let snapshot = await runAgent(humanInTheLoopMachine, {
+    executors: { generateText },
+    input: { topic: "release notes" },
+  });
 
   // One more REJECT than the budget allows.
   for (let rejection = 0; rejection <= MAX_REJECTIONS; rejection++) {
@@ -39,15 +35,11 @@ test("the rejection budget ends the run in `abandoned` instead of looping foreve
       "APPROVE",
       "REJECT",
     ]);
-    snapshot = await runToQuiescence(
-      createAgentRuntime(humanInTheLoopMachine, {
-        executors: { generateText },
-      }),
-      {
-        snapshot: snapshot.persist(),
-        event: { type: "REJECT", text: "Try again." },
-      },
-    );
+    snapshot = await runAgent(humanInTheLoopMachine, {
+      executors: { generateText },
+      snapshot: snapshot.persist(),
+      event: { type: "REJECT", text: "Try again." },
+    });
   }
 
   expect(snapshot.status).toBe("done");

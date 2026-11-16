@@ -1,13 +1,8 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
 import { createAsyncLogic, createMachine } from "xstate";
-import {
-  createTextLogic,
-  createAgentRuntime,
-  runToQuiescence,
-  setupAgent,
-  type ChosenEvent,
-} from "./index.js";
+import { createTextLogic, createAgentRuntime, setupAgent, type ChosenEvent } from "./index.js";
+import { runToQuiescence } from "./run-agent.js";
 import {
   AgentLintError,
   canReach,

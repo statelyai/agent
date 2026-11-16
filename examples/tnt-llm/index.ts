@@ -61,11 +61,10 @@ import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
   createTextLogic,
   getStatePath,
-  createAgentRuntime,
-  runToQuiescence,
   setupAgent,
   type AgentRequestExecutors,
   type DoneActorEventOf,
+  runAgent,
 } from "@statelyai/agent";
 
 const models = { taxonomist: openai("gpt-6-luna") };
@@ -420,21 +419,17 @@ export interface TntLlmResult {
 export async function runTntLlmExample(options: RunTntLlmOptions = {}): Promise<TntLlmResult> {
   const { documents, batchSize, generateText, onProgress } = options;
   const progress: string[] = [];
-  const result = await runToQuiescence(
-    createAgentRuntime(tntLlmMachine, {
-      ...(generateText
-        ? { executors: { generateText } }
-        : { executors: createAiSdkExecutors(tntLlmMachine) }),
-      onTransition: (snapshot) => {
-        const state = getStatePath(snapshot);
-        progress.push(state);
-        onProgress?.(state);
-      },
-    }),
-    {
-      input: { documents, batchSize: batchSize ?? DEFAULT_BATCH_SIZE },
+  const result = await runAgent(tntLlmMachine, {
+    ...(generateText
+      ? { executors: { generateText } }
+      : { executors: createAiSdkExecutors(tntLlmMachine) }),
+    onTransition: (snapshot) => {
+      const state = getStatePath(snapshot);
+      progress.push(state);
+      onProgress?.(state);
     },
-  );
+    input: { documents, batchSize: batchSize ?? DEFAULT_BATCH_SIZE },
+  });
 
   if (result.status !== "done") {
     throw new Error(`TNT-LLM example did not complete: ${result.status}`);
