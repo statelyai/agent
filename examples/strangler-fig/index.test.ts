@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 import { canReach, checkParity, createRecorder } from "@statelyai/agent/testing";
 import { MAX_ATTEMPTS, runTicket } from "./before.js";
+import { runTicketBeforeExtract } from "./before-extract.js";
 import { createFakeWorld } from "./effects.js";
 import { runStranglerFigExample, SCENARIOS, step0, supportMachine } from "./index.js";
 import { runTicketStep1 } from "./step1.js";
@@ -33,6 +34,16 @@ test("step 0: a recorder on a normal run is the golden recording", async () => {
       false, // the output
     ],
   );
+});
+
+test("extract: splitting runTicket into phases keeps parity with the one-function original", async () => {
+  const report = await checkParity({
+    scenarios: SCENARIOS,
+    effects,
+    before: runTicketBeforeExtract,
+    after: runTicket,
+  });
+  expect(report.scenarios.filter((row) => !row.equivalent)).toEqual([]);
 });
 
 test("step 1: carving the classify phase keeps parity", async () => {

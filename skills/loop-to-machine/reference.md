@@ -51,11 +51,19 @@ const proofOptions: ExplorePathsOptions = {
 
 ## A phase in the middle of a method
 
-When the phase has no seam at its edges, copy only its lines into the carved actor and mark the copy:
+When the phase has no seam at its edges, extract it at step 0: move its lines into a function or a method (protected when the carve is a subclass that builds its actors in the class body, public `@internal` otherwise), commit that alone, and check it with the old suite and `checkParity` against the code before the extract. The carved actor then calls it:
 
 ```ts
-// Copied verbatim from src/runtime.ts:412-470 (prepareToolCall) and :88-97 (normalizeArgs).
-// checkParity call-args fail if this copy drifts from the original.
+const prepare = createAsyncLogic<Prepared, ToolCall>({
+  run: ({ input }) => runtime.prepareToolCall(input),
+});
+```
+
+Only for code you can't edit (vendored, `node_modules`), copy its lines into the carved actor, mark the copy, and pin it with a hash test:
+
+```ts
+// Copied verbatim from vendor-lib/dist/runtime.js:412-470 (prepareToolCall).
+// copied-ranges.test.ts hashes this range in the original and fails on drift.
 const prepare = createAsyncLogic<Prepared, ToolCall>({
   run: async ({ input }) => {
     /* copied lines */

@@ -9,12 +9,15 @@ with `checkParity` against the original at every step.
   and replies or escalates. Every side effect goes through `effects`.
 - **`effects.ts`**: fake effects for tests: a scripted classifier that can fail
   with a 503, an order table, write logs.
+- **`before-extract.ts`**: `runTicket` as one function, before the
+  extract-method commit split it into `classifyTicket` and `resolveTicket`.
 - **`step0.ts`**: `wrapWorkflow` around `runTicket`, unchanged. Each effect call
   is an `effect.call` then `effect.done` transition.
 - **`step1.ts`**: the classify retry loop becomes `classifying` and `retrying`
   states; the rest is `resolveTicket` from `before.ts`, invoked as one actor.
   Same `(ticket, effects)` signature.
-- **`index.test.ts`**: `checkParity` for step 0 and step 1 against `before.ts`
+- **`index.test.ts`**: `checkParity` for the extract against `before-extract.ts`,
+  for step 0 and step 1 against `before.ts`
   on five scenarios, a carve that drops the retry caught as a divergence, and a
   `canReach` proof that the classifier runs at most `MAX_ATTEMPTS` times.
 
@@ -23,6 +26,7 @@ with `checkParity` against the original at every step.
 | Step | Change to `before.ts` | Gained                                                       |
 | ---- | --------------------- | ------------------------------------------------------------ |
 | 0    | none                  | transitions, traces, event log, `signal`, a golden recording |
+| 0    | phases extracted      | step 1 calls `resolveTicket` instead of copying its lines    |
 | 1    | classify phase carved | a bounded retry, proven with `canReach`                      |
 
 Run it: `pnpm vitest run examples/strangler-fig`.
