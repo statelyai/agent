@@ -40,7 +40,7 @@ OPENAI_API_KEY=... TYPESAFE_AI_API_KEY=... pnpm exec tsx examples/tic-tac-toe/be
 
 > **Experimental:** self-improvement is experimental. The gates are stable, but the round itself may change, and on a loop with no decision point it mostly proposes wording, cap, and approval-rule changes. Code-level causes come back as change requests for a person.
 
-The [`improve-machine`](../../skills/improve-machine/SKILL.md) skill runs the same rounds with Claude Code as the reflection model and `evaluate.ts` as the measurement:
+The [`improve-machine`](https://github.com/statelyai/skills/blob/main/plugins/stately-agent/skills/improve-machine/SKILL.md) skill runs the same rounds with Claude Code as the reflection model and `evaluate.ts` as the measurement:
 
 ```bash
 claude -p "Use the improve-machine skill on examples/tic-tac-toe. Environment: ticTacToeMachine in game.ts; never edit it, features.ts, improve.ts, or proof.ts. Policy: policies/v0.json; write each candidate as policies/v<n>.json and record every round in policies/CHANGELOG.md. Objective (confirmed): objective() in improve.ts; score a candidate with 'pnpm exec tsx examples/tic-tac-toe/evaluate.ts <candidate> <current>' and promote only on PROMOTE. Traces: the proof's losing games and the losing lines that evaluate.ts prints; there is no held-out split, because the proof covers every opponent. Vocabulary: the FEATURES table in features.ts; no invokes, model calls, named guards, or actions. Never open test-fixtures/ or test-doubles.ts. Stop when evaluate.ts prints 'PROVEN never to lose', or after 3 rounds without a promotion."
