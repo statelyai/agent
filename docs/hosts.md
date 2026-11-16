@@ -309,7 +309,7 @@ Each operation is described in [The runtime loop](steps.md).
 
 ### Host events mid-run
 
-`runtime.send(event)` puts a host event in the run's mailbox, behind whatever already arrived. A `nextEvent()` parked on a pending request resolves with it; the loop applies it with `transition` like any other event.
+`runtime.send(event)` queues a host event behind earlier host sends and ahead of completions the run holds but has not handed out. A `nextEvent()` parked on a pending request resolves with it; the loop applies it with `transition` like any other event.
 
 ```ts no-check
 const runtime = createAgentRuntime(machine, { executors });
@@ -325,7 +325,7 @@ for (let event; (event = await runtime.nextEvent());) {
 const result = await runtime.finish();
 ```
 
-- **Ordering.** One FIFO with request completions, child messages, and timers. A send during a pending invoke is handed out by the next `nextEvent()`; the invoke keeps running unless the transition leaves its state, which aborts its `signal`.
+- **Ordering.** Host sends keep their own order and go ahead of request completions, child messages, and timers the run already holds, which keep theirs. A send during a pending invoke is handed out by the next `nextEvent()`; the invoke keeps running unless the transition leaves its state, which aborts its `signal`.
 - **Journal.** A sent event is a log entry, the same as `runAgent({ event })`. Replaying `result.events` lands on the same state.
 - **Unhandled.** A sent event the state has no transition for is reported as `result.ignored`.
 - **Before `start`.** Queued; the first `nextEvent()` hands it out. Returns `true`.

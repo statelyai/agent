@@ -55,7 +55,8 @@ function carve(
     const pass = createAsyncLogic<{ kind: string }, { pass: number }>({
       run: async ({ input }) => {
         const step = await bridge.forward(legacyPass(input.pass));
-        return { kind: step.closed ? "closed" : step.value };
+        // A resumed unwind returns `undefined`, as `yield*` does: no `continue`.
+        return { kind: step.closed ? "closed" : (step.value ?? "done") };
       },
     });
     const result = yield* bridge.stream(
@@ -198,7 +199,9 @@ describe("createGeneratorBridge", () => {
     const gen = loop();
     expect(await gen.next()).toEqual({ done: false, value: "a" });
     expect(await gen.return(undefined as never)).toEqual({ done: false, value: "cleanup" });
-    expect(await gen.next()).toEqual({ done: true, value: { kind: "closed", passes: 1 } });
+    // Pulling again resumes the unwinding pass, which completes as `yield*`
+    // completes it: normally, without `continue`, so the loop ends `done`.
+    expect(await gen.next()).toEqual({ done: true, value: { kind: "done", passes: 1 } });
   });
 
   test("`.throw()` reaches the legacy generator", async () => {
@@ -250,5 +253,118 @@ describe("createGeneratorBridge", () => {
     await expect(orphan).resolves.toBe(false);
     expect(await gen.next()).toEqual({ done: true, value: "stopped" });
     await expect(first).resolves.toBe(true);
+  });
+
+  test("a consumer that resumes an unwinding pass completes it normally, as `yield*` does", async () => {
+    const pass = async function* () {
+      try {
+        yield "a";
+        return "done";
+      } finally {
+        yield "cleanup";
+      }
+    };
+    // The consumer stops at "a", then pulls the value yielded while unwinding.
+    const drive = async (gen: AsyncGenerator<string, unknown, undefined>) => [
+      await gen.next(),
+      await gen.return(undefined as never),
+      await gen.next(),
+    ];
+    const log: string[] = [];
+    const native = async function* () {
+      const value = yield* pass();
+      log.push(`native after: ${String(value)}`);
+      return value;
+    };
+    const bridge = createGeneratorBridge<string>();
+    let forwarded: unknown;
+    const run = (async () => {
+      forwarded = await bridge.forward(pass());
+      return "settled";
+    })();
+    const bridged = async function* () {
+      const value = yield* bridge.stream(run);
+      log.push(`bridged after: ${String(value)}`);
+      return value;
+    };
+    expect(await drive(native())).toEqual([
+      { done: false, value: "a" },
+      { done: false, value: "cleanup" },
+      { done: true, value: undefined },
+    ]);
+    expect(await drive(bridged())).toEqual([
+      { done: false, value: "a" },
+      { done: false, value: "cleanup" },
+      { done: true, value: "settled" },
+    ]);
+    // Both run the code after `yield*`, and the pass did not end closed.
+    expect(log).toEqual(["native after: undefined", "bridged after: settled"]);
+    expect(forwarded).toEqual({ closed: false, value: undefined });
+  });
+
+  test("a resumed consumer gets a failed run back instead of a throw", async () => {
+    const bridge = createGeneratorBridge<string>();
+    const failure = { status: "error" as const, error: new Error("late") };
+    const run = (async () => {
+      await bridge.forward(
+        (async function* () {
+          try {
+            yield "a";
+          } finally {
+            yield "cleanup";
+          }
+        })(),
+      );
+      return failure;
+    })();
+    const gen = bridge.stream(run);
+    await gen.next();
+    await gen.return(undefined as never);
+    // Resumed: the code after `yield*` runs and checks the result itself.
+    expect(await gen.next()).toEqual({ done: true, value: failure });
+  });
+
+  test("a consumer that stops again after resuming closes the pass, as `yield*` does", async () => {
+    const pass = async function* () {
+      try {
+        yield "a";
+        return "done";
+      } finally {
+        yield "cleanup1";
+        yield "cleanup2";
+        yield "cleanup3";
+      }
+    };
+    const drive = async (gen: AsyncGenerator<string, unknown, undefined>) => [
+      await gen.next(),
+      await gen.return(undefined as never),
+      await gen.next(),
+      await gen.return(undefined as never),
+    ];
+    const log: string[] = [];
+    const native = async function* () {
+      yield* pass();
+      log.push("native after");
+    };
+    const bridge = createGeneratorBridge<string>();
+    let forwarded: unknown;
+    const run = (async () => {
+      forwarded = await bridge.forward(pass());
+      return "settled";
+    })();
+    const bridged = async function* () {
+      yield* bridge.stream(run);
+      log.push("bridged after");
+    };
+    const nativeMoves = await drive(native());
+    const bridgedMoves = await drive(bridged());
+    expect(nativeMoves.slice(0, 3)).toEqual(bridgedMoves.slice(0, 3));
+    // The second stop returns the pass again: "cleanup3" is skipped.
+    expect(nativeMoves[3]).toMatchObject({ done: true });
+    expect(bridgedMoves[3]).toMatchObject({ done: true });
+    // Stopped last: neither runs the code after `yield*`, and the pass ends closed.
+    expect(log).toEqual([]);
+    await run;
+    expect(forwarded).toMatchObject({ closed: true });
   });
 });

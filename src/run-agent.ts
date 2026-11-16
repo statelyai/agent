@@ -2441,7 +2441,8 @@ export interface AgentRuntime<TMachine extends AnyStateMachine> {
   nextEvent(): Promise<EventFromLogic<TMachine> | undefined>;
   /**
    * Delivers a host event (a cancel, a user message, a host-owned timer) into
-   * the run's mailbox, behind whatever already arrived. Asynchronous: `send`
+   * the run, behind earlier host sends and ahead of completions not yet handed
+   * out. Asynchronous: `send`
    * only enqueues; the machine moves when the host loop's next `nextEvent()`
    * hands the event out (a parked `nextEvent()` resolves with it) and the loop
    * calls `transition`. A host that needs the event applied before it returns
@@ -2455,8 +2456,9 @@ export interface AgentRuntime<TMachine extends AnyStateMachine> {
    *
    * - Before `start`: queued; the first `nextEvent()` hands it out (after the
    *   init event a host delivers itself). Returns `true`.
-   * - While an effect, child or timer is in flight: queued in arrival order
-   *   with their completions. Returns `true`.
+   * - While an effect, child or timer is in flight: queued behind earlier
+   *   host sends, and handed out before any completion the run holds, so
+   *   actors that settle in microtasks cannot keep it waiting. Returns `true`.
    * - After the run stopped (cancelled, aborted, journal failure) or the
    *   machine left `active` (done, error): dropped. Returns `false`.
    * - After `finish`: throws {@link AgentError} `runtime-finished`.
@@ -3493,6 +3495,11 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
   // failures, child messages, root timers, the reserved usage event. Filled as
   // things happen (never batched), drained one event per transition.
   const mailbox: EventObject[] = [];
+  // The host's own sends (`send`, an inbox), handed out ahead of completions
+  // the execution already holds: actors that settle in microtasks complete
+  // inside the batch that starts them, and would otherwise keep a send
+  // waiting until the machine stops.
+  const hostQueue: EventObject[] = [];
   let wake: ((event: EventObject | typeof QUIESCENT) => void) | undefined;
   // Events the loop handed out, as opposed to events the host brought in
   // itself: only the host's own event can be reported as `ignored`.
@@ -3513,6 +3520,8 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
     if (waiting) {
       wake = undefined;
       waiting(event);
+    } else if (fromHost) {
+      hostQueue.push(event);
     } else {
       mailbox.push(event);
     }
@@ -3761,7 +3770,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       runtime: unknown,
     ) => action.exec(runtime),
     waitForEvent: () => {
-      const queued = mailbox.shift();
+      const queued = hostQueue.shift() ?? mailbox.shift();
       if (queued !== undefined) {
         return queued;
       }
@@ -4315,7 +4324,9 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
         if (finished || stopReason !== undefined || current?.status !== "active") {
           return undefined;
         }
-        const event = (await execution.waitForEvent()) as EventObject | typeof QUIESCENT;
+        const event = (hostQueue.shift() ?? (await execution.waitForEvent())) as
+          | EventObject
+          | typeof QUIESCENT;
         if ((event as unknown) === QUIESCENT || stopReason !== undefined) {
           return undefined;
         }
