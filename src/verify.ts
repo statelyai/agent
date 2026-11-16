@@ -1471,10 +1471,11 @@ const FINITE_PAYLOAD_CAP = 64;
 // Default cap on branch points expanded per exploration.
 const DEFAULT_MAX_NODES = 100_000;
 
-// A lossless key for plain data: JSON values plus `undefined`. Anything else
-// (a Map, a class instance, a function, a cycle) throws, since JSON would
-// collapse it and merge states that differ.
-function strictKey(value: unknown, seen = new Set<object>()): string {
+// A lossless key for plain data: JSON values plus `undefined`, `-0`, null
+// prototypes, key order, and shared references. Anything else (a Map, a
+// class instance, a function, a symbol or hidden property) throws, since JSON
+// would collapse it and merge states that differ.
+function strictKey(value: unknown, refs = new Map<object, number>()): string {
   if (value === undefined) return "u";
   if (value === null || typeof value === "boolean" || typeof value === "string") {
     return JSON.stringify(value);
@@ -1485,30 +1486,29 @@ function strictKey(value: unknown, seen = new Set<object>()): string {
   if (typeof value !== "object") {
     throw new TypeError(`unkeyable ${typeof value}`);
   }
-  if (seen.has(value)) throw new TypeError("unkeyable cycle");
-  seen.add(value);
-  let key: string;
+  // A second reference (or a cycle) points back at the first, so sharing is kept.
+  const ref = refs.get(value);
+  if (ref !== undefined) return `@${ref}`;
+  refs.set(value, refs.size);
+  const proto = Object.getPrototypeOf(value);
   // A symbol or non-enumerable property would vanish from the key.
   const own = Reflect.ownKeys(value).length;
   if (Array.isArray(value)) {
-    // Every index present, and nothing besides them and `length`.
+    if (proto !== Array.prototype) throw new TypeError("unkeyable array");
+    // Every index its own, and nothing besides them and `length`.
     for (let index = 0; index < value.length; index++) {
-      if (!(index in value)) throw new TypeError("unkeyable sparse array");
+      if (!Object.hasOwn(value, index)) throw new TypeError("unkeyable sparse array");
     }
     if (own !== value.length + 1) throw new TypeError("unkeyable array");
-    key = `[${value.map((item) => strictKey(item, seen)).join(",")}]`;
-  } else {
-    const proto = Object.getPrototypeOf(value);
-    if (proto !== Object.prototype && proto !== null) throw new TypeError("unkeyable object");
-    const keys = Object.keys(value);
-    if (own !== keys.length) throw new TypeError("unkeyable object");
-    // In enumeration order, which a guard can read.
-    key = `{${keys
-      .map((k) => `${JSON.stringify(k)}:${strictKey((value as Record<string, unknown>)[k], seen)}`)
-      .join(",")}}`;
+    return `[${value.map((item) => strictKey(item, refs)).join(",")}]`;
   }
-  seen.delete(value);
-  return key;
+  if (proto !== Object.prototype && proto !== null) throw new TypeError("unkeyable object");
+  const keys = Object.keys(value);
+  if (own !== keys.length) throw new TypeError("unkeyable object");
+  // In enumeration order, which a guard can read.
+  return `${proto === null ? "N" : ""}{${keys
+    .map((k) => `${JSON.stringify(k)}:${strictKey((value as Record<string, unknown>)[k], refs)}`)
+    .join(",")}}`;
 }
 
 function tryKey(key: () => string): string | undefined {

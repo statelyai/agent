@@ -257,6 +257,43 @@ describe("canReach — default key", () => {
     expect(await canReach(machine, "goal", { maxDepth: 3 })).toMatchObject({ reachable: true });
   });
 
+  test("a shared reference is not merged with two equal objects", async () => {
+    const shared = {};
+    const machine = createMachine({
+      context: { pair: { left: {}, right: {} } as { left: object; right: object } },
+      initial: "waiting",
+      states: {
+        waiting: {
+          on: {
+            SHARE: { context: { pair: { left: shared, right: shared } } },
+            GO: ({ context }) =>
+              context.pair.left === context.pair.right ? { target: "goal" } : undefined,
+          },
+        },
+        goal: { type: "final" },
+      },
+    });
+    expect(await canReach(machine, "goal", { maxDepth: 3 })).toMatchObject({ reachable: true });
+  });
+
+  test("a null prototype is part of the key", async () => {
+    const machine = createMachine({
+      context: { item: {} as object },
+      initial: "waiting",
+      states: {
+        waiting: {
+          on: {
+            BARE: { context: { item: Object.create(null) as object } },
+            GO: ({ context }) =>
+              Object.getPrototypeOf(context.item) === null ? { target: "goal" } : undefined,
+          },
+        },
+        goal: { type: "final" },
+      },
+    });
+    expect(await canReach(machine, "goal", { maxDepth: 3 })).toMatchObject({ reachable: true });
+  });
+
   test("negative zero is not merged with zero", async () => {
     const machine = createMachine({
       context: { n: 0 },
