@@ -25,7 +25,6 @@ Stately Agent is XState plus typed model requests, decisions, and host executors
 | `createAgentRuntime`                        | Advanced, own the loop: bind executors, expose one durable transition loop |
 | `runToQuiescence`                           | Advanced, own the loop: drive a runtime to done, idle, or error            |
 | `getInteraction` / `eventFromInteraction`   | Render and validate human interactions                                     |
-| `decideNext`                                | Ask a model for one event a plain XState machine accepts                   |
 | `describeMachine`                           | Render a machine as plain text for a model                                 |
 | `wrapWorkflow`                              | Wrap an existing async workflow, unchanged, as a machine                   |
 | `isAgentIdle`                               | Distinguish a human wait from a stuck settled machine                      |
@@ -44,6 +43,7 @@ Stately Agent is XState plus typed model requests, decisions, and host executors
 | `@statelyai/agent/tanstack-ai` | `createTanStackAiExecutors`, the TanStack AI adapter                                       |
 | `@statelyai/agent/machines`    | `createApprovalBatchMachine`, a preset that gates a turn's tool calls on approval          |
 | `@statelyai/agent/otel`        | OpenTelemetry trace handler                                                                |
+| `@statelyai/agent/policy`      | `decideNext` for any XState snapshot, and `createPolicyDecider` for a policy machine       |
 | `@statelyai/agent/validate`    | JSON workflow config validation and `verifyAgentConfig` pre-run gates                      |
 
 Core has no runtime dependency on the AI SDK.

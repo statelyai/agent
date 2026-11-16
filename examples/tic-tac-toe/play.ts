@@ -16,7 +16,6 @@
 import {
   AgentDecisionExhaustedError,
   createAgentRuntime,
-  decideNext,
   runToQuiescence,
   type AgentDecisionExecutor,
   type AgentEventLogStore,
@@ -24,6 +23,7 @@ import {
   type ChosenEvent,
   type DecisionAttempt,
 } from "@statelyai/agent";
+import { decideNext } from "@statelyai/agent/policy";
 import { createInMemoryEventLogStore, getDecisionAttempts } from "@statelyai/agent/log";
 import { boardFeatures } from "./features.js";
 import { emptyCells, formatBoard, ticTacToeMachine, type GameSnapshot, type Mark } from "./game.js";

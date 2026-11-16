@@ -18,6 +18,7 @@ export default {
       { find: "@statelyai/agent/machines", replacement: src("machines/index.ts") },
       { find: "@statelyai/agent/openai", replacement: src("openai/index.ts") },
       { find: "@statelyai/agent/otel", replacement: src("otel/index.ts") },
+      { find: "@statelyai/agent/policy", replacement: src("policy/index.ts") },
       {
         find: "@statelyai/agent/tanstack-ai",
         replacement: src("tanstack-ai/index.ts"),
