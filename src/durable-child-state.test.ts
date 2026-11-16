@@ -6,11 +6,11 @@ import {
   createAgentSchemas,
   createDecisionLogic,
   createTextLogic,
-  runToQuiescence,
   setupAgent,
   type AgentDecisionExecutor,
   type AgentRunInit,
 } from "./index.js";
+import { runToQuiescence } from "./run-agent.js";
 import { createInMemoryEventLogStore } from "./event-log-store.js";
 import { createReplayEntry, replay } from "./event-log.js";
 

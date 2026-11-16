@@ -3,7 +3,8 @@ import { z } from "zod";
 import { APICallError, generateText, stepCountIs, streamText, tool, type LanguageModel } from "ai";
 import { MockLanguageModelV3, simulateReadableStream } from "ai/test";
 import OpenAI from "openai";
-import { createAgentRuntime, runToQuiescence, setupAgent } from "./index.js";
+import { createAgentRuntime, setupAgent } from "./index.js";
+import { runToQuiescence } from "./run-agent.js";
 import { createAiSdkExecutors } from "./ai-sdk/index.js";
 import { createOpenAiExecutors } from "./openai/index.js";
 import {

@@ -76,13 +76,7 @@ import { createAsyncLogic } from "xstate";
 import { experimental_decide, type Experimental_DecisionModel } from "ai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import {
-  getStatePath,
-  createAgentRuntime,
-  runToQuiescence,
-  setupAgent,
-  type AgentRequestExecutors,
-} from "@statelyai/agent";
+import { getStatePath, setupAgent, type AgentRequestExecutors, runAgent } from "@statelyai/agent";
 
 const models = {
   reasoner: openai("gpt-6-luna"),
@@ -469,22 +463,18 @@ export async function runSelfDiscoverExample(
   } = options;
 
   const progress: string[] = [];
-  const result = await runToQuiescence(
-    createAgentRuntime(selfDiscoverMachine, {
-      ...(generateText
-        ? { executors: { generateText } }
-        : { executors: createAiSdkExecutors(selfDiscoverMachine) }),
-      ...(judge ? { actors: { selectModules: createSelectModules(judge) } } : {}),
-      onTransition: (snapshot) => {
-        const state = getStatePath(snapshot);
-        progress.push(state);
-        onProgress?.(state);
-      },
-    }),
-    {
-      input: { task },
+  const result = await runAgent(selfDiscoverMachine, {
+    ...(generateText
+      ? { executors: { generateText } }
+      : { executors: createAiSdkExecutors(selfDiscoverMachine) }),
+    ...(judge ? { actors: { selectModules: createSelectModules(judge) } } : {}),
+    onTransition: (snapshot) => {
+      const state = getStatePath(snapshot);
+      progress.push(state);
+      onProgress?.(state);
     },
-  );
+    input: { task },
+  });
 
   if (result.status !== "done") {
     throw new Error(`Self-Discover example did not complete: ${result.status}`);

@@ -28,7 +28,6 @@ import {
   messagesSchema,
   parseAgentEvent,
   createAgentRuntime,
-  runToQuiescence,
   getAgentSchemas,
   setupAgent,
   toolMessage,
@@ -40,6 +39,7 @@ import {
   type SchemaCompiler,
   type StandardSchemaV1,
 } from "./index.js";
+import { runToQuiescence } from "./run-agent.js";
 import { resolveDecision, type AgentRequest } from "./index.js";
 import { executeAgentRequest } from "./steps.js";
 import { getAgentOutputMode, parseOutput } from "./index.js";

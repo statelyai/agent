@@ -6,12 +6,12 @@ import type { AgentDecisionExecutor } from "./decision.js";
 import {
   createAgentRuntime,
   createAgentSchemas,
-  runToQuiescence,
   serializeTraceEvent,
   setupAgent,
   traceTransitions,
   type AgentTraceEvent,
 } from "./index.js";
+import { runToQuiescence } from "./run-agent.js";
 import { foldTraces } from "./testing/index.js";
 
 const schemas = createAgentSchemas({

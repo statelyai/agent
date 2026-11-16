@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { createAgentRuntime, runToQuiescence } from "../index.js";
+import { createAgentRuntime } from "../index.js";
+import { runToQuiescence } from "../run-agent.js";
 import { lintAgentMachine } from "../testing/index.js";
 import type { AgentRequestExecutors, AgentTextRequest } from "../text-logic.js";
 import type { AgentDecisionExecutor, AgentDecisionRequest } from "../decision.js";

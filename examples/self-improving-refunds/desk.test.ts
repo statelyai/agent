@@ -1,12 +1,12 @@
 import { describe, expect, test } from "vitest";
 import { createMachine, type AnyMachineSnapshot } from "xstate";
 import {
-  createAgentRuntime,
+  type AgentRunInit,
   eventFromInteraction,
   getInteraction,
-  runToQuiescence,
   type AgentDecisionExecutor,
   type ChosenEvent,
+  runAgent,
 } from "@statelyai/agent";
 import { createInMemoryEventLogStore, getDecisionAttempts } from "@statelyai/agent/log";
 import { canReach, lintAgentMachine, type ExplorePathsOptions } from "@statelyai/agent/testing";
@@ -458,12 +458,12 @@ describe("a person at the desk", () => {
   test("deciding offers only the accepted proposals as choices, and the chosen one drives the desk", async () => {
     const s = scenario("large-approved");
     const world = createWorld(s);
-    const runtime = () =>
-      createAgentRuntime(refundDeskMachine, { actors: createWorldActors(world) });
+    const run = (init: AgentRunInit<typeof refundDeskMachine>) =>
+      runAgent(refundDeskMachine, { actors: createWorldActors(world), ...init });
     const labels = (snapshot: AnyMachineSnapshot) =>
       getInteraction(snapshot)?.choices?.map((choice) => choice.label) ?? [];
 
-    let result = await runToQuiescence(runtime(), { input: inputOf(s) });
+    let result = await run({ input: inputOf(s) });
     // Nothing loaded or verified yet: no payout, no approval request.
     expect(labels(result.snapshot)).toEqual(
       expect.arrayContaining(["Verify identity", "Look up ORD-1002", "Ask for the order number"]),
@@ -475,12 +475,12 @@ describe("a person at the desk", () => {
     // A person presses buttons; the customer and approver answer from the world's script.
     const press = async (label: string) => {
       expect(labels(result.snapshot)).toContain(label);
-      result = await runToQuiescence(runtime(), {
+      result = await run({
         snapshot: result.persist(),
         event: eventFromInteraction(result.snapshot, { choice: label }),
       });
       while (result.status === "idle" && !result.snapshot.matches("deciding")) {
-        result = await runToQuiescence(runtime(), {
+        result = await run({
           snapshot: result.persist(),
           event: answerFromWorld(result.snapshot, world),
         });

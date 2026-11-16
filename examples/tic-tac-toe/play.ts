@@ -2,9 +2,8 @@
  * The HOST: plays games on the plain game machine, with O's decider at the
  * boundary and an X opponent function.
  *
- * Each game runs `ticTacToeMachine` through `createAgentRuntime` with an
- * event-log store, one thread per game, and `runToQuiescence` until it is
- * done. Whenever the game idles:
+ * Each game runs `ticTacToeMachine` through `runAgent` with an event-log
+ * store, one thread per game, until it is done. Whenever the game idles:
  *   - in `xTurn`, the opponent picks a cell and the host sends `X.play`;
  *   - in `oTurn`, the host calls `decideNext` with `allowedEvents: ["O.play"]`
  *     and one payload per empty cell (a closed choice), and sends the chosen
@@ -14,15 +13,15 @@
  * or a JSON policy (policy.ts). It never sees an occupied cell as an option.
  */
 import {
+  type AgentRunInit,
   AgentDecisionExhaustedError,
-  createAgentRuntime,
   decideNext,
-  runToQuiescence,
   type AgentDecisionExecutor,
   type AgentEventLogStore,
   type AgentLogEntry,
   type ChosenEvent,
   type DecisionAttempt,
+  runAgent,
 } from "@statelyai/agent";
 import { createInMemoryEventLogStore, getDecisionAttempts } from "@statelyai/agent/log";
 import { boardFeatures } from "./features.js";
@@ -100,8 +99,8 @@ export type PlayGameOptions = {
 export async function playGame(options: PlayGameOptions): Promise<GameResult> {
   const { store, threadId } = options;
   const opponent = OPPONENTS[options.opponent];
-  const run = (init: Parameters<typeof runToQuiescence<typeof ticTacToeMachine>>[1]) =>
-    runToQuiescence(createAgentRuntime(ticTacToeMachine, { store, threadId }), init);
+  const run = (init: AgentRunInit<typeof ticTacToeMachine>) =>
+    runAgent(ticTacToeMachine, { store, threadId, ...init });
 
   let result = await run({ input: {} });
   let forfeit = false;

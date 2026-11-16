@@ -28,7 +28,7 @@ Trust is a machine rule, not a prompt instruction. The patch text is in all thre
 
 Each reviewer is a named parallel region invoking the same Jev judgment actor, `review`, with its own reviewer brief. No host `Promise.all` hides the topology. All regions reach a final state even when their call fails; the parent then counts votes. Human review persists both successful votes and abstentions.
 
-The tests execute the same artifact through both `runToQuiescence` and `createActor(provideExecutors(...))`. This establishes those host modes' behavior for this example; it is not certification of every model SDK.
+The tests execute the same artifact through both `runAgent` and `createActor(provideExecutors(...))`. This establishes those host modes' behavior for this example; it is not certification of every model SDK.
 
 ## Booking compensation
 

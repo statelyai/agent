@@ -38,9 +38,8 @@ import {
   createAgentSchemas,
   createTextLogic,
   getStatePath,
-  createAgentRuntime,
-  runToQuiescence,
   setupAgent,
+  runAgent,
 } from "@statelyai/agent";
 
 const DEFAULT_TOPIC = "state machines";
@@ -346,20 +345,16 @@ async function promptTopic(): Promise<string> {
 export async function main() {
   const topic = process.stdin.isTTY ? await promptTopic() : DEFAULT_TOPIC;
 
-  const result = await runToQuiescence(
-    createAgentRuntime(jokeMachine, {
-      executors: createAiSdkExecutors(jokeMachine),
-      onChunk: (chunk) => process.stdout.write(chunk),
-      onTransition: (snapshot) => {
-        const path = getStatePath(snapshot);
-        if (path === "telling") console.log(`\n${pick(funnyPhrases)}`);
-        if (path === "rating") console.log(`\n${pick(ratingPhrases)}`);
-      },
-    }),
-    {
-      input: { topic },
+  const result = await runAgent(jokeMachine, {
+    executors: createAiSdkExecutors(jokeMachine),
+    onChunk: (chunk) => process.stdout.write(chunk),
+    onTransition: (snapshot) => {
+      const path = getStatePath(snapshot);
+      if (path === "telling") console.log(`\n${pick(funnyPhrases)}`);
+      if (path === "rating") console.log(`\n${pick(ratingPhrases)}`);
     },
-  );
+    input: { topic },
+  });
 
   if (result.status !== "done") {
     throw new Error(`Joke agent did not complete: ${result.status}`);

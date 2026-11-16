@@ -42,13 +42,7 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import {
-  getStatePath,
-  createAgentRuntime,
-  runToQuiescence,
-  setupAgent,
-  type AgentRequestExecutors,
-} from "@statelyai/agent";
+import { getStatePath, setupAgent, type AgentRequestExecutors, runAgent } from "@statelyai/agent";
 
 const models = { writer: openai("gpt-6-luna") };
 
@@ -231,21 +225,17 @@ export interface RunPromptChainingOptions {
 export async function runPromptChainingExample(options: RunPromptChainingOptions = {}) {
   const { topic = "cats", generateText, onProgress } = options;
   const progress: string[] = [];
-  const result = await runToQuiescence(
-    createAgentRuntime(promptChainingMachine, {
-      ...(generateText
-        ? { executors: { generateText } }
-        : { executors: createAiSdkExecutors(promptChainingMachine) }),
-      onTransition: (snapshot) => {
-        const state = getStatePath(snapshot);
-        progress.push(state);
-        onProgress?.(state);
-      },
-    }),
-    {
-      input: { topic },
+  const result = await runAgent(promptChainingMachine, {
+    ...(generateText
+      ? { executors: { generateText } }
+      : { executors: createAiSdkExecutors(promptChainingMachine) }),
+    onTransition: (snapshot) => {
+      const state = getStatePath(snapshot);
+      progress.push(state);
+      onProgress?.(state);
     },
-  );
+    input: { topic },
+  });
 
   if (result.status !== "done") {
     throw new Error(`Prompt-chaining example did not complete: ${result.status}`);

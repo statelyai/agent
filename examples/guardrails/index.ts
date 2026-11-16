@@ -45,13 +45,7 @@ import { experimental_decide, type Experimental_DecisionModel } from "ai";
 import { openai } from "@ai-sdk/openai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import {
-  createAgentSchemas,
-  getStatePath,
-  createAgentRuntime,
-  runToQuiescence,
-  setupAgent,
-} from "@statelyai/agent";
+import { createAgentSchemas, getStatePath, setupAgent, runAgent } from "@statelyai/agent";
 
 const models = {
   quick: openai("gpt-6-luna"),
@@ -399,17 +393,13 @@ export const guardrailsMachine = agentSetup.createMachine({
 const executors = createAiSdkExecutors(guardrailsMachine);
 
 export async function main() {
-  const result = await runToQuiescence(
-    createAgentRuntime(guardrailsMachine, {
-      executors,
-      onTransition: (snapshot) => console.log("[state]", getStatePath(snapshot)),
-    }),
-    {
-      input: {
-        question: "What is the capital of France?",
-      },
+  const result = await runAgent(guardrailsMachine, {
+    executors,
+    onTransition: (snapshot) => console.log("[state]", getStatePath(snapshot)),
+    input: {
+      question: "What is the capital of France?",
     },
-  );
+  });
 
   if (result.status !== "done") {
     throw new Error(`Guardrails did not complete: ${result.status}`);
