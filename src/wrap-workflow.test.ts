@@ -730,3 +730,51 @@ describe("wrapWorkflow: effects objects and safety", () => {
     expect((context as { slots: unknown[] }).slots.length).toBe(3);
   });
 });
+
+describe("wrapWorkflow live", () => {
+  class Counter {
+    constructor(readonly name: string) {}
+    count = 0;
+    async run(step: number, effects: { log: (line: string) => Promise<void> }) {
+      this.count += step;
+      await effects.log(`${this.name}:${this.count}`);
+      return this.count;
+    }
+  }
+
+  test("one wrapped workflow serves each instance passed as `live`", async () => {
+    const lines: string[] = [];
+    const counted = wrapWorkflow({
+      id: "counter",
+      effects: { log: async (line: string) => void lines.push(line) },
+      run: (step: number, effects, { live }: { live: Counter }) => live.run(step, effects),
+    });
+    const a = new Counter("a");
+    const b = new Counter("b");
+    const [first, second] = await Promise.all([
+      counted.run(2, { live: a }),
+      counted.run(3, { live: b }),
+    ]);
+    expect([first, second, a.count, b.count]).toEqual([2, 3, 2, 3]);
+    expect(lines.sort()).toEqual(["a:2", "b:3"]);
+  });
+
+  test("`live` is required when the workflow needs it, optional otherwise", () => {
+    const needsLive = wrapWorkflow({
+      id: "needs-live",
+      effects: {},
+      run: async (_input: null, _effects, { live }: { live: Counter }) => live.count,
+    });
+    const noLive = wrapWorkflow({ id: "no-live", effects: {}, run: async () => 1 });
+    // Type-only: these calls never run.
+    const _typeTests = () => {
+      // @ts-expect-error `live` is required
+      void needsLive.run(null);
+      // @ts-expect-error `live` must be a Counter
+      void needsLive.run(null, { live: "nope" });
+      void needsLive.run(null, { live: new Counter("c") });
+      void noLive.run(undefined);
+    };
+    expectTypeOf(_typeTests).toBeFunction();
+  });
+});

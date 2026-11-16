@@ -36,6 +36,7 @@ export async function runTicket(ticket: Ticket, effects: SupportEffects): Promis
 When the loop is a class method that calls its own private methods for the model and the tools, there is no `(input, effects)` function to pass. Wrap it with no edit to the class (a phase in the middle of a method is extracted at step 0, see [A phase in the middle of a method](#a-phase-in-the-middle-of-a-method)):
 
 - `run: (input, effects) => { const executor = createExecutor(input); executor.callModel = (...args) => effects.callModel(...args); return executor.run(); }`, with each effect calling the original method.
+- One wrapped workflow serves every instance: the instance goes in as `live`, and the workflow reads it from its context. `run: (input, effects, { live }: { live: Agent }) => live.run(input)`, then `step0.run(input, { live: agent, effects })`. With `live` typed, every `run` call must pass it.
 - Route the old test suite through the wrap with a factory or a static `create` stand-in, not a subclass, when the constructor is private.
 - Install each replacement with `Object.defineProperty` (non-enumerable). A plain assignment adds an own enumerable field, which the repo's state snapshots then serialize.
 - The seam is on both sides of `checkParity`: `before` runs the class with the seam installed, so a serialization bug in the seam shows up on both sides and parity reports equivalent. Also compare the untouched class against the port by output, with no seam on the original, and add scenarios for edge results: empty, `null`, non-JSON values, `BigInt`.
