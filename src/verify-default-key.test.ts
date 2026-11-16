@@ -221,6 +221,42 @@ describe("canReach — default key", () => {
     expect(await canReach(machine, "goal", { maxDepth: 3 })).toMatchObject({ reachable: true });
   });
 
+  test("a symbol-keyed property is not dropped from the key", async () => {
+    const token = Symbol("flag");
+    const machine = createMachine({
+      context: { flag: { [token]: false } as Record<symbol, boolean> },
+      initial: "waiting",
+      states: {
+        waiting: {
+          on: {
+            FLIP: { context: { flag: { [token]: true } } },
+            GO: ({ context }) => (context.flag[token] ? { target: "goal" } : undefined),
+          },
+        },
+        goal: { type: "final" },
+      },
+    });
+    expect(await canReach(machine, "goal", { maxDepth: 3 })).toMatchObject({ reachable: true });
+  });
+
+  test("key order is part of the key", async () => {
+    const machine = createMachine({
+      context: { queue: { a: 0, b: 0 } as Record<string, number> },
+      initial: "waiting",
+      states: {
+        waiting: {
+          on: {
+            REORDER: { context: { queue: { b: 0, a: 0 } } },
+            GO: ({ context }) =>
+              Object.keys(context.queue)[0] === "b" ? { target: "goal" } : undefined,
+          },
+        },
+        goal: { type: "final" },
+      },
+    });
+    expect(await canReach(machine, "goal", { maxDepth: 3 })).toMatchObject({ reachable: true });
+  });
+
   test("negative zero is not merged with zero", async () => {
     const machine = createMachine({
       context: { n: 0 },

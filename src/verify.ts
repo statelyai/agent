@@ -1488,18 +1488,22 @@ function strictKey(value: unknown, seen = new Set<object>()): string {
   if (seen.has(value)) throw new TypeError("unkeyable cycle");
   seen.add(value);
   let key: string;
+  // A symbol or non-enumerable property would vanish from the key.
+  const own = Reflect.ownKeys(value).length;
   if (Array.isArray(value)) {
-    // A hole or an extra own property would vanish from the key.
-    if (Object.keys(value).length !== value.length) throw new TypeError("unkeyable array");
+    // Every index present, and nothing besides them and `length`.
     for (let index = 0; index < value.length; index++) {
       if (!(index in value)) throw new TypeError("unkeyable sparse array");
     }
+    if (own !== value.length + 1) throw new TypeError("unkeyable array");
     key = `[${value.map((item) => strictKey(item, seen)).join(",")}]`;
   } else {
     const proto = Object.getPrototypeOf(value);
     if (proto !== Object.prototype && proto !== null) throw new TypeError("unkeyable object");
-    key = `{${Object.keys(value)
-      .sort()
+    const keys = Object.keys(value);
+    if (own !== keys.length) throw new TypeError("unkeyable object");
+    // In enumeration order, which a guard can read.
+    key = `{${keys
       .map((k) => `${JSON.stringify(k)}:${strictKey((value as Record<string, unknown>)[k], seen)}`)
       .join(",")}}`;
   }
