@@ -152,7 +152,9 @@ const methods = ["messages.create"];
 
 // Record: the hand-rolled loop gets the wrapped client.
 const recorder = createRecorder();
-recorder.output(await runLoop(recorder.client("anthropic", new Anthropic(), { methods }), scenario));
+recorder.output(
+  await runLoop(recorder.client("anthropic", new Anthropic(), { methods }), scenario),
+);
 
 // Replay: the same wrapper inside the machine's executor; the client is never called.
 const replay = createRecorder({ replay: recorder.recording });
@@ -161,7 +163,9 @@ const run = await runAgent(machine, {
   input: scenario,
   executors: {
     // askModel: the old loop's call, moved unchanged.
-    generateText: async (request) => ({ result: await askModel(client, request.messages as Anthropic.MessageParam[]) }),
+    generateText: async (request) => ({
+      result: await askModel(client, request.messages as Anthropic.MessageParam[]),
+    }),
   },
 });
 if (run.status === "done") replay.output(run.output);
@@ -185,7 +189,12 @@ function toParityRun(run: { outcome: string; world: World }): ParityRun {
   return {
     outcome: run.outcome,
     // Every write the world records; model-written text as a count.
-    effects: { refunds: run.world.refunds, approvals: run.world.approvals, verified: [...run.world.verified], escalations: run.world.escalations.length },
+    effects: {
+      refunds: run.world.refunds,
+      approvals: run.world.approvals,
+      verified: [...run.world.verified],
+      escalations: run.world.escalations.length,
+    },
     violations: run.world.violations, // rules broken, from ground truth
   };
 }
@@ -201,7 +210,11 @@ const MODELS: Array<[string, (s: Scenario) => Model]> = [
 ];
 
 test.each(MODELS)("harness: the loop matches itself (%s)", async (_, model) => {
-  const report = await compareRuns({ scenarios: SCENARIOS, baseline: runWith(runLoop, model), candidate: runWith(runLoop, model) });
+  const report = await compareRuns({
+    scenarios: SCENARIOS,
+    baseline: runWith(runLoop, model),
+    candidate: runWith(runLoop, model),
+  });
   for (const row of report.scenarios) expect(row.candidate, row.id).toEqual(row.baseline);
 });
 ```
@@ -210,8 +223,14 @@ The parity test switches the candidate to `runMachine`:
 
 ```ts
 test.each(MODELS)("parity with the loop: %s", async (_, model) => {
-  const report = await compareRuns({ scenarios: SCENARIOS, baseline: runWith(runLoop, model), candidate: runWith(runMachine, model) });
-  const unreviewed = report.scenarios.filter((row) => row.label === "regression" && !REVIEWED[row.id]);
+  const report = await compareRuns({
+    scenarios: SCENARIOS,
+    baseline: runWith(runLoop, model),
+    candidate: runWith(runMachine, model),
+  });
+  const unreviewed = report.scenarios.filter(
+    (row) => row.label === "regression" && !REVIEWED[row.id],
+  );
   expect(unreviewed).toEqual([]);
   // A reviewed difference still has to be exactly the difference a person accepted.
   for (const row of report.scenarios.filter((row) => REVIEWED[row.id])) REVIEWED[row.id]!(row);
@@ -243,7 +262,12 @@ const report = await compareRuns({
 Replay answers each model and tool call from the recording, so the machine needs no key and causes no side effects:
 
 ```ts
-import { compareRecordings, createRecorder, type EffectDivergence, type Recording } from "@statelyai/agent/testing";
+import {
+  compareRecordings,
+  createRecorder,
+  type EffectDivergence,
+  type Recording,
+} from "@statelyai/agent/testing";
 
 test.each(SCENARIOS)("equivalent to the recorded loop: $id", async (scenario) => {
   const recording: Recording = JSON.parse(readFileSync(`fixtures/${scenario.id}.json`, "utf8"));
@@ -251,7 +275,9 @@ test.each(SCENARIOS)("equivalent to the recorded loop: $id", async (scenario) =>
   const model = replay.model(openai("gpt-5")); // never called in replay
   replay.output(await runMachine({ ...scenario, model, tools: replay.tools(appTools) }));
   const report = compareRecordings(recording, replay.recording);
-  expect(report.divergences.map(({ reason, message }) => ({ reason, message }))).toEqual(INTENDED[scenario.id] ?? []);
+  expect(report.divergences.map(({ reason, message }) => ({ reason, message }))).toEqual(
+    INTENDED[scenario.id] ?? [],
+  );
 });
 
 // Differences a person accepted: who, and the exact divergences.

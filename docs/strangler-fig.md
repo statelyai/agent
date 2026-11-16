@@ -237,7 +237,9 @@ import { readFileSync } from "node:fs";
 
 const lines = readFileSync(require.resolve("vendor-lib/dist/runtime.js"), "utf8").split("\n");
 const hash = (from: number, to: number) =>
-  createHash("sha256").update(lines.slice(from - 1, to).join("\n")).digest("hex");
+  createHash("sha256")
+    .update(lines.slice(from - 1, to).join("\n"))
+    .digest("hex");
 
 test("copied ranges match the original", () => {
   expect(hash(412, 470)).toBe("<sha256 recorded when you copied>");
