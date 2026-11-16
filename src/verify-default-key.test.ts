@@ -202,4 +202,21 @@ describe("canReach — default key", () => {
     });
     expect(await canReach(machine, "goal", { maxDepth: 3 })).toMatchObject({ reachable: true });
   });
+
+  test("negative zero is not merged with zero", async () => {
+    const machine = createMachine({
+      context: { n: 0 },
+      initial: "waiting",
+      states: {
+        waiting: {
+          on: {
+            FLIP: { context: { n: -0 } },
+            GO: ({ context }) => (Object.is(context.n, -0) ? { target: "goal" } : undefined),
+          },
+        },
+        goal: { type: "final" },
+      },
+    });
+    expect(await canReach(machine, "goal", { maxDepth: 3 })).toMatchObject({ reachable: true });
+  });
 });

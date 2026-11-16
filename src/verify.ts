@@ -1480,7 +1480,7 @@ function strictKey(value: unknown, seen = new Set<object>()): string {
     return JSON.stringify(value);
   }
   if (typeof value === "number") {
-    return `n${String(value)}`;
+    return Object.is(value, -0) ? "n-0" : `n${String(value)}`;
   }
   if (typeof value !== "object") {
     throw new TypeError(`unkeyable ${typeof value}`);
