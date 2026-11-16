@@ -627,8 +627,14 @@ export interface AgentRuntimeOptions<TMachine extends AnyStateMachine> {
    * when the machine has no transition for `event`, when the loop never
    * applies it, when the machine settles still `active` after handling it,
    * or when `timeout` milliseconds pass while it is still working.
+   *
+   * `event` can be a function of `signal.reason`, so aborts with different
+   * reasons (a pause and a stop) send different events.
    */
-  abortWith?: { event: EventFromLogic<TMachine>; timeout?: number };
+  abortWith?: {
+    event: EventFromLogic<TMachine> | ((reason: unknown) => EventFromLogic<TMachine>);
+    timeout?: number;
+  };
   /** Where root `after` timers live. Default `"in-process"`. See {@link AgentTimerScheduler}. */
   timers?: AgentTimerScheduler;
 }
@@ -2538,11 +2544,16 @@ export interface AgentRunOptions<TMachine extends AnyStateMachine>
    * A host that cannot block for the answer (a request handler, a durable
    * object) leaves this out, stores `result.persist()`, and calls
    * {@link runAgent} again later with `{ snapshot, event }`.
+   *
+   * `"inbox"`: each idle state waits for the next `inbox.send` (a resume
+   * after a pause), with no answer of its own. Needs `inbox`.
    */
-  onIdle?: (
-    snapshot: SnapshotFrom<TMachine>,
-    options: { signal: AbortSignal | undefined },
-  ) => Promise<EventFromLogic<TMachine> | AgentTimerEvent>;
+  onIdle?:
+    | ((
+        snapshot: SnapshotFrom<TMachine>,
+        options: { signal: AbortSignal | undefined },
+      ) => Promise<EventFromLogic<TMachine> | AgentTimerEvent>)
+    | "inbox";
   /**
    * A send handle for events pushed mid-run (a cancel, a user message), from
    * {@link createAgentInbox}. Each `inbox.send` goes to the current pass's
@@ -2552,7 +2563,8 @@ export interface AgentRunOptions<TMachine extends AnyStateMachine>
    * dropped). Without `onIdle`, the run returns at the first idle state
    * (an event that lands while that pass is finishing still resumes it), and
    * a `send` after `runAgent` returns gets `false`: a pause that waits for a
-   * resume needs `onIdle` as well. One inbox serves one `runAgent` call.
+   * resume needs `onIdle` as well (`onIdle: "inbox"` when only the inbox
+   * answers). One inbox serves one `runAgent` call.
    */
   inbox?: AgentInbox<EventFromLogic<TMachine>>;
 }
@@ -2666,7 +2678,7 @@ const ABORTED = Symbol("aborted");
 // `signal` fires first.
 async function nextIdleEvent<TMachine extends AnyStateMachine>(
   snapshot: SnapshotFrom<TMachine>,
-  onIdle: AgentRunOptions<TMachine>["onIdle"],
+  onIdle: Exclude<AgentRunOptions<TMachine>["onIdle"], "inbox">,
   inbox: InboxState | undefined,
   signal: AbortSignal | undefined,
 ): Promise<{ event: EventFromLogic<TMachine>; fromInbox: boolean } | typeof ABORTED | undefined> {
@@ -2688,7 +2700,7 @@ async function nextIdleEvent<TMachine extends AnyStateMachine>(
 
 async function waitForIdleAnswer<TMachine extends AnyStateMachine>(
   snapshot: SnapshotFrom<TMachine>,
-  onIdle: NonNullable<AgentRunOptions<TMachine>["onIdle"]>,
+  onIdle: Exclude<NonNullable<AgentRunOptions<TMachine>["onIdle"]>, "inbox">,
   inbox: InboxState | undefined,
   signal: AbortSignal | undefined,
   aborted: Promise<typeof ABORTED>,
@@ -2759,7 +2771,12 @@ export async function runAgent<TMachine extends AnyStateMachine>(
   machine: TMachine,
   options: AgentRunOptions<TMachine> = {},
 ): Promise<AgentRunResult<TMachine>> {
-  const { onIdle, inbox, ...rest } = options;
+  const { onIdle: idle, inbox, ...rest } = options;
+  if (idle === "inbox" && inbox === undefined) {
+    throw new AgentError("inbox-required", 'runAgent: `onIdle: "inbox"` needs an `inbox`.');
+  }
+  // Only the inbox answers: an idle state waits for its next send.
+  const onIdle = idle === "inbox" ? () => new Promise<EventFromLogic<TMachine>>(() => {}) : idle;
   const inboxState = inbox === undefined ? undefined : inboxStates.get(inbox);
   if (inbox !== undefined) {
     if (inboxState === undefined || inboxState.claimed) {
@@ -2784,7 +2801,7 @@ export async function runAgent<TMachine extends AnyStateMachine>(
 async function runAgentPasses<TMachine extends AnyStateMachine>(
   machine: TMachine,
   rest: Omit<AgentRunOptions<TMachine>, "onIdle" | "inbox">,
-  onIdle: AgentRunOptions<TMachine>["onIdle"],
+  onIdle: Exclude<AgentRunOptions<TMachine>["onIdle"], "inbox">,
   inbox: InboxState | undefined,
 ): Promise<AgentRunResult<TMachine>> {
   if (!onIdle && !inbox) {
@@ -3657,11 +3674,20 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
   let abortTimer: ReturnType<typeof setTimeout> | undefined;
   const onAbort = () => {
     const abortWith = options.abortWith;
-    if (abortWith === undefined || runtime.send(abortWith.event) === false) {
+    if (abortWith === undefined) {
       abortNow();
       return;
     }
-    pendingAbort = abortWith.event as EventObject;
+    const event = (
+      typeof abortWith.event === "function"
+        ? (abortWith.event as (reason: unknown) => EventObject)(options.signal?.reason)
+        : abortWith.event
+    ) as EventObject;
+    if (runtime.send(event as EventFromLogic<TMachine>) === false) {
+      abortNow();
+      return;
+    }
+    pendingAbort = event;
     if (abortWith.timeout !== undefined) {
       abortTimer = setTimeout(() => {
         if (current?.status === "active") abortNow();

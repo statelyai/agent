@@ -380,6 +380,7 @@ const result = await runAgent(machine, {
   - the loop never applies it;
   - the machine handled it but settles still `active` (an idle wait nothing will answer), immediately and without waiting for `timeout`;
   - `timeout` ms pass while the machine is still active and working.
+- **Per reason.** `event` can be a function of `signal.reason`, so a pause and a stop send different events: `abortWith: { event: (reason) => ({ type: reason === "pause" ? ("PAUSE" as const) : ("STOP" as const) }) }`. As with `onIdle`, an event built in a function needs `as const` for its `type`.
 - **Journal.** The abort event is a log entry; replay reaches the same final state.
 
 ### runAgent inbox
@@ -395,7 +396,7 @@ const result = await run;
 
 - **Same as `runtime.send`.** Each `inbox.send` goes to the run's mailbox and returns the same boolean. See [Host events mid-run](#host-events-mid-run).
 - **Before start.** Queued; delivered after the init event and after `runAgent`'s own `event`. Returns `true`.
-- **While idle.** An inbox event resumes the run, ahead of a pending `onIdle` answer; that answer is dropped. Without `onIdle`, `runAgent` returns at the first idle.
+- **While idle.** An inbox event resumes the run, ahead of a pending `onIdle` answer; that answer is dropped. Without `onIdle`, `runAgent` returns at the first idle. With `onIdle: "inbox"`, an idle state waits for the next `inbox.send` (a resume after a pause) and has no answer of its own.
 - **Ignored.** An inbox event the state does not handle is reported as `result.ignored`. Unlike an ignored `onIdle` answer, it does not end the `onIdle` loop.
 - **After `runAgent` returns.** Returns `false`.
 - **One call.** An inbox serves one `runAgent` call; reusing it throws `AgentError` `inbox-in-use`.
