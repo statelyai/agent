@@ -85,6 +85,7 @@ import {
   getRegisteredAgentExecutionOptions,
   isUnboundPlaceholder,
 } from "./internal/registry.js";
+import { resolveMachineInput } from "./internal/machine-input.js";
 import { AGENT_USAGE_EVENT_TYPE, type AgentUsageEvent } from "./usage.js";
 import {
   AgentMachineVersionMismatchError,
@@ -2153,32 +2154,6 @@ export type AgentInputFrom<TMachine extends AnyStateMachine> =
     : InputFrom<TMachine>;
 
 /**
- * Validates `input` against the machine's registered input schema, returning
- * the schema's output — so defaults are filled and transforms applied before
- * the value reaches `createActor` or the replayable event log.
- *
- * Standard Schema only (no validation library is referenced), so this works for
- * whatever the machine was declared with. Omitted input stays omitted rather
- * than being validated as `{}`: "started with no input" keeps meaning what it
- * has always meant, instead of newly failing schemas with required fields.
- */
-function resolveMachineInput(machine: AnyStateMachine, input: unknown): unknown {
-  if (input === undefined) return input;
-  const schema = getRegisteredAgentExecutionOptions(machine).schemas?.input;
-  if (!isStandardSchema(schema)) return input;
-  try {
-    return validateSchemaSync(schema, input);
-  } catch (error) {
-    throw new AgentError(
-      "invalid-machine-input",
-      `createAgentRuntime: machine input failed validation against the declared input ` +
-        `schema: ${error instanceof Error ? error.message : String(error)}`,
-      { cause: error },
-    );
-  }
-}
-
-/**
  * Recursively rebinds an invoked child machine's own agent sources with the
  * SAME host-backed wrappers the runtime applies to the top-level machine, so a
  * child's text/stream/decision requests inherit the runtime's executors and
@@ -3934,7 +3909,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       // Validated once, then used everywhere `input` would have been: the
       // start, the replayable init entry, and the `run.start` trace all see
       // the same post-defaults value, so a replay reproduces this run exactly.
-      const resolvedInput = resolveMachineInput(machine, init.input);
+      const resolvedInput = resolveMachineInput(machine, init.input, "createAgentRuntime");
       // A thread that has entries is resumed, which ignores `input`. Input
       // that differs from the thread's own means two runs share a thread id:
       // resuming would hand this caller another run's result. A thread that

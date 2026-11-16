@@ -173,6 +173,7 @@ settled?.resolvedRequest; // { kind: 'text', src: 'parse', id: 'parse', outcome:
 
 `explorePaths(machine, { input, maxDepth?, maxPaths?, maxNodes?, budget?, outputs?, errors?, payloads?, dedupeBy?, interleave?, children?, timers?, usage?, steps? })` enumerates decision and external-event branches without a model, and reports coverage.
 
+- `input` is validated against the machine's input schema, as `runAgent` does. Input the schema rejects throws `AgentError` with code `invalid-machine-input`, so a misspelled field fails loudly instead of proving a rule over a start state no run can reach. The parsed value, with defaults filled, seeds the search. `canReach` and `simulateAgent` validate `input` the same way.
 - At each decision, it forks one branch per candidate event. Guard-rejected candidates count in `prunedByGuard` and are not explored.
 - A decision with no candidate the snapshot takes, because its guards refuse every one or the closed choice offers nothing, exhausts as it does in a live run. That branch records `{ type: 'xstate.error.actor', actorId }` and takes the invoke's `onError`. With no `onError`, it ends in an `error` terminal.
 - At an idle wait, it forks one branch per externally accepted event and per armed timer. See [Timers](#timers).
