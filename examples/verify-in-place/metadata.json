@@ -1,0 +1,14 @@
+{
+  "name": "verify-in-place",
+  "title": "Verify existing code against a model",
+  "kind": "evaluation",
+  "manual": true,
+  "origin": {
+    "type": "pattern",
+    "source": "A hand-rolled refund loop, left unchanged, checked against a model of its control flow"
+  },
+  "comparison": {
+    "targets": ["hand-rolled loop"],
+    "purpose": "before.ts is a refund agent with three rules in if statements: approval over a threshold, no refund over the order total, and a cap on decisions. model.ts states the same control flow as a machine with placeholder actors. index.test.ts proves the rules on the model with canReach, records runs of the unchanged code with createRecorder, and checks each run against the model with checkConformance. All runs conform and traceCoverage reaches every state. regression.ts adds a plausible shortcut that skips approval for repeat customers, and the check catches it where the model waits for approval."
+  }
+}

@@ -515,7 +515,7 @@ const turnAfterStop = await canReach(
 
 ## Recorded runs against a model
 
-`checkConformance` from `@statelyai/agent/testing` checks a recorded run of existing code against a model of that code. The code is not changed and does not run. Use it to verify a workflow in place before, or instead of, migrating it to a machine:
+`checkConformance` from `@statelyai/agent/testing` checks a recorded run of existing code against a model of that code. [Verify in place](verify-in-place.md) walks through the whole track with a worked example. The code is not changed and does not run. Use it to verify a workflow in place before, or instead of, migrating it to a machine:
 
 1. Write the model: a machine whose actors stand for the code's work, with placeholder implementations.
 2. Prove the model's rules with `canReach` and `explorePaths`, as ordinary tests.
