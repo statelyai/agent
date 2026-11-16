@@ -1119,4 +1119,38 @@ describe("coupled child usage", () => {
       ["done", "done"],
     ]);
   });
+
+  test("'coupled' applies a chained child's entry sends before checking a step", async () => {
+    const opener = createMachine({
+      initial: "finished",
+      states: { finished: { type: "final", entry: tell("OPEN") } },
+    } as never) as AnyStateMachine;
+    const ready = createMachine({
+      initial: "finished",
+      states: { finished: { type: "final", entry: tell("READY") } },
+    } as never) as AnyStateMachine;
+    const parent = setupAgent({
+      context: z.object({ ready: z.boolean() }),
+      events: { START: z.object({}), OPEN: z.object({}), READY: z.object({}) },
+    }).createMachine({
+      context: { ready: false },
+      initial: "idle",
+      states: {
+        idle: { on: { START: { target: "opening" } } },
+        // OPEN, from the first child's entry, starts the second child.
+        opening: { invoke: { id: "opener", src: opener }, on: { OPEN: { target: "waiting" } } },
+        waiting: {
+          invoke: { id: "ready", src: ready, onDone: { target: "done" } },
+          on: { READY: ({ context }) => ({ context: { ...context, ready: true } }) },
+        },
+        done: { type: "final" },
+      },
+    });
+    const stale = await canReach(
+      parent,
+      (snapshot) => snapshot.matches("waiting") && !snapshot.context.ready,
+      { children: "coupled", hostEvents: ["START"] },
+    );
+    expect(stale).toMatchObject({ reachable: false, complete: true });
+  });
 });

@@ -3187,16 +3187,22 @@ function explore(
           `coupled: a child sent '${route.event.type}' to an actor the search does not model, at path [${pathTypes(link)}]`,
       );
     };
+    // What a newly registered child queued as it started (its entry sends, a
+    // finished child's completion): it applies at once, so no step is
+    // checked while any of it is still queued.
+    const starting = new WeakSet<Delivery>();
     const flush = (at: AgentStep): void => {
       if (pumped.has(at)) {
         return;
       }
       pumped.add(at);
+      const queued = queue.length;
       if (!register(at, kids, queue)) {
         overflow = true;
         endPath(link, at, { status: "max-depth", state: at.snapshot.value });
         return;
       }
+      for (const item of queue.slice(queued)) starting.add(item);
       for (const effect of Array.isArray(at.actions) ? at.actions : []) {
         if (
           !isRecord(effect) ||
@@ -3275,7 +3281,7 @@ function explore(
       recordState(step);
       outbound.push(...outboundOf(step.actions, outParent, step.snapshot.children));
       flush(step);
-      if (!overflow && stops(step, kids)) {
+      if (!overflow && !queue.some((queuedItem) => starting.has(queuedItem)) && stops(step, kids)) {
         witness = pathOf(link);
         break;
       }
