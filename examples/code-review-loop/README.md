@@ -80,7 +80,7 @@ It runs train and held-out with v0, asks Claude Code for a better policy from th
 Make the skill available to Claude Code, then ask for one round:
 
 ```bash
-mkdir -p .claude/skills && cp -R skills/improve-machine .claude/skills/
+npx skills add statelyai/skills --skill improve-machine -a claude-code
 pnpm exec tsx examples/code-review-loop/run.ts --policy v0 --no-human
 claude -p "Use the improve-machine skill on examples/code-review-loop. The environment is codeReviewLoopMachine in examples/code-review-loop/environment.ts: never edit it. The current policy is examples/code-review-loop/policies/v0.json, and its vocabulary is in policy.ts (the classifyIssue actor, agent.decide with model 'policy', events RETRY and ESCALATE). The traces are the JSONL threads in the newest directory under examples/code-review-loop/.traces/, named <split>/<policyVersion>/<taskId>; diagnose from train threads only. The objective is scoreEpisode in bench.ts, as OBJECTIVE_TEXT in improve.ts states it; I confirm it. Write one candidate to examples/code-review-loop/policies/v2.json with a new id, check it with pnpm vitest run examples/code-review-loop, replay it with pnpm exec tsx examples/code-review-loop/run.ts --policy v2 --no-human, and copy it to policies/current.json only if the held-out objective rises with zero violations. Report the before and after scorecards." \
   --allowedTools "Read,Write,Edit,Bash(pnpm exec tsx examples/code-review-loop/run.ts:*),Bash(pnpm vitest run examples/code-review-loop:*)"

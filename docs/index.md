@@ -11,7 +11,7 @@ Stately Agent is XState plus typed model requests, decisions, and host executors
 ## Start here
 
 - Greenfield, a new agent: [Quickstart](quickstart.md), then [Thinking in state machines](thinking-in-state-machines.md) or a copied [agent pattern](patterns.md).
-- Brownfield, an existing agent loop: [Migrating from a loop](from-a-loop.md), or the shipped `loop-to-machine` skill in `node_modules/@statelyai/agent/skills/`.
+- Brownfield, an existing agent loop: [Migrating from a loop](from-a-loop.md), or the [`loop-to-machine`](https://github.com/statelyai/skills/blob/main/plugins/stately-agent/skills/loop-to-machine/SKILL.md) skill from [statelyai/skills](https://github.com/statelyai/skills).
 - Brownfield, an existing async workflow: [Strangler-fig retrofit](strangler-fig.md). Wrap it unchanged with `wrapWorkflow`, then move one phase at a time into states, checked with `checkParity`.
 - [Choosing a run mode](choosing-a-run-mode.md)
 - [Advanced: bare XState actors and hand-written executors](advanced.md)

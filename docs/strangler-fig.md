@@ -385,4 +385,4 @@ Step 0 cannot give this proof: its one `running` state holds the whole function.
 - [Migrating from a hand-rolled loop](from-a-loop.md): port a whole loop at once.
 - [Evals](evals.md#parity-with-the-code-you-replace): which of `checkParity`, `createRecorder` with `compareRecordings`, and `compareRuns` fits the code you replace.
 - [Verify](verify.md): `canReach` and `explorePaths`.
-- [`skills/loop-to-machine`](https://github.com/statelyai/agent/blob/next/skills/loop-to-machine/SKILL.md): the retrofit, run by a coding agent.
+- [`loop-to-machine`](https://github.com/statelyai/skills/blob/main/plugins/stately-agent/skills/loop-to-machine/SKILL.md): the retrofit, run by a coding agent.

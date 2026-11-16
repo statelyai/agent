@@ -21,7 +21,6 @@
   "files": [
     "dist",
     "schemas",
-    "skills",
     "docs",
     "!docs/snippet-globals.ts",
     "llms.txt",
