@@ -1172,10 +1172,13 @@ describe("coupled child usage", () => {
         },
       } as never) as AnyStateMachine;
     const options = { children: "coupled" as const, hostEvents: [] };
-    // READY applies as the child starts: `waiting` is never a settled state.
+    // READY applies as the child starts: `waiting` is passed through, never settled.
+    expect(
+      await canReach(parentWith(announcer), (snapshot) => snapshot.matches("waiting"), options),
+    ).toMatchObject({ reachable: false, complete: true });
     expect(await canReach(parentWith(announcer), "waiting", options)).toMatchObject({
-      reachable: false,
-      complete: true,
+      reachable: true,
+      witness: [],
     });
     expect(await canReach(parentWith(announcer), "ready", options)).toMatchObject({
       reachable: true,
@@ -1186,5 +1189,31 @@ describe("coupled child usage", () => {
       reachable: true,
       witness: [],
     });
+  });
+
+  test("'coupled' state targets match a state a finished child's entry send passes through", async () => {
+    const ready = createMachine({
+      initial: "finished",
+      states: { finished: { type: "final", entry: tell("READY") } },
+    } as never) as AnyStateMachine;
+    const parent = createMachine({
+      initial: "running",
+      states: {
+        running: {
+          invoke: { id: "ready", src: ready, onDone: { target: "done" } },
+          initial: "waiting",
+          states: { waiting: { on: { READY: { target: "ready" } } }, ready: {} },
+        },
+        done: { type: "final" },
+      },
+    } as never) as AnyStateMachine;
+    const options = { children: "coupled" as const, hostEvents: [] };
+    const report = await explorePaths(parent, options);
+    expect(report.reachedStates).toContainEqual({ running: "ready" });
+    expect(await canReach(parent, "running.ready", options)).toMatchObject({ reachable: true });
+    // A predicate sees settled snapshots only: the completion follows at once.
+    expect(
+      await canReach(parent, (snapshot) => snapshot.matches({ running: "ready" }), options),
+    ).toMatchObject({ reachable: false, complete: true });
   });
 });

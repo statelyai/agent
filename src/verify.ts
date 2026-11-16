@@ -2023,6 +2023,9 @@ function explore(
   stepping = false,
   // canReach's ordering target: checked on the step log, not a snapshot.
   ordering?: CanReachOrdering,
+  // canReach's state target matches states passed through, so it is checked
+  // while coupled children are still starting; a predicate sees settled steps.
+  stateTarget = false,
 ): {
   report: AgentPathReport;
   witness?: ChosenEvent[];
@@ -2722,7 +2725,7 @@ function explore(
     for (let i = 0; i < MAX_ADVANCE_STEPS; i++) {
       // A step whose sends to coupled children are not delivered yet is not a
       // state the machines are in: they apply at once.
-      if (!awaitsKids(current, kids) && stops(current, kids)) {
+      if ((stateTarget || !awaitsKids(current, kids)) && stops(current, kids)) {
         return { step: current, hit: true };
       }
       if (current.done) {
@@ -3278,7 +3281,11 @@ function explore(
       recordState(step);
       outbound.push(...outboundOf(step.actions, outParent, step.snapshot.children));
       flush(step);
-      if (!overflow && !queue.some((queuedItem) => starting.has(queuedItem)) && stops(step, kids)) {
+      if (
+        !overflow &&
+        (stateTarget || !queue.some((queuedItem) => starting.has(queuedItem))) &&
+        stops(step, kids)
+      ) {
         witness = pathOf(link);
         break;
       }
@@ -3909,7 +3916,7 @@ function explore(
 
   // Coupled children still starting apply their entry sends first; the pump
   // checks the initial step once they have.
-  if (initial && !awaitsKids(initial, undefined) && stops(initial)) {
+  if (initial && (stateTarget || !awaitsKids(initial, undefined)) && stops(initial)) {
     witness = [];
   }
   const root: ExploreNode = { step: initial!, path: undefined, depth: 0 };
@@ -4125,6 +4132,7 @@ export async function canReach(
     undefined,
     false,
     ordering,
+    resolvedTarget !== undefined,
   );
   if (witness !== undefined) {
     return {
