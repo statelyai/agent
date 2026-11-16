@@ -1087,8 +1087,38 @@ function scriptDryError(
  */
 export type ExploreSnapshot = AnyMachineSnapshot;
 
-/** What {@link canReach} looks for: a state id or path, or a snapshot predicate. */
-export type CanReachTarget = string | ((snapshot: ExploreSnapshot) => boolean);
+/**
+ * One macrostep on an explored path, recorded with `steps: true` or for an
+ * ordering target: every event the machine processed, not only branch points.
+ */
+export interface ExploreStep {
+  /**
+   * The event this macrostep processed: a host event, a fork, a canned
+   * output settling (`xstate.done.actor`), or `xstate.init` for the start.
+   */
+  event: EventObject;
+  /** The state value after the step. */
+  state: unknown;
+  /** Srcs of the invokes and spawned actors that started in this step. */
+  started: string[];
+  /** Srcs of the actors that settled (done or error) in this step. */
+  settled: string[];
+}
+
+/**
+ * An ordering target for {@link canReach}: a step matching `reach` after a
+ * step matching `after`. `reachable: false` with `complete: true` proves
+ * `reach` never happens after `after`.
+ */
+export interface CanReachOrdering {
+  /** The trigger: an event type, or a step predicate. */
+  after: string | ((step: ExploreStep) => boolean);
+  /** Checked on every step after the first `after` step, not on that step itself. */
+  reach: (step: ExploreStep) => boolean;
+}
+
+/** What {@link canReach} looks for: a state id or path, a snapshot predicate, or an ordering. */
+export type CanReachTarget = string | ((snapshot: ExploreSnapshot) => boolean) | CanReachOrdering;
 
 export interface ExplorePathsOptions {
   input?: unknown;
@@ -1302,6 +1332,13 @@ export interface ExplorePathsOptions {
    * no usage.
    */
   usage?: Record<string, AgentCallUsage[]>;
+  /**
+   * Record every macrostep of each path in its terminal's `steps`, with the
+   * srcs each step started and settled. `path` lists only branch points, so
+   * an invoke with one canned output never appears there. Off by default:
+   * it costs memory per step of every path.
+   */
+  steps?: boolean;
 }
 
 /** A single explored path's terminal outcome. */
@@ -1321,6 +1358,8 @@ export interface AgentPathTerminal {
   error?: unknown;
   /** For `done`: the machine's output (absent when it has none). */
   output?: unknown;
+  /** With `steps: true`: every macrostep on this path, from the start. */
+  steps?: ExploreStep[];
 }
 
 /** The report returned by {@link explorePaths}. */
@@ -1872,6 +1911,58 @@ function hasParallelStates(node: unknown): boolean {
   );
 }
 
+// A step's live children: id, actor session, and src.
+function childSrcs(step: AgentStep): Array<{ id: string; session: string; src: string }> {
+  const children = (step.snapshot.children ?? {}) as Record<string, ChildRef | undefined>;
+  const invoked = new Map(pendingInvokes(step).map((invoke) => [invoke.id, invoke.src]));
+  return Object.entries(children).flatMap(([id, ref]) => {
+    if (!ref) return [];
+    const own = (ref as { src?: unknown }).src;
+    const src = invoked.get(id) ?? (typeof own === "string" ? own : id);
+    return [{ id, session: childSession(id, ref), src }];
+  });
+}
+
+function exploreStep(
+  prev: AgentStep | undefined,
+  next: AgentStep,
+  event: EventObject,
+): ExploreStep {
+  const before = prev ? childSrcs(prev) : [];
+  const sessions = new Set(before.map((child) => child.session));
+  const actorId = (event as { actorId?: unknown }).actorId;
+  const settles =
+    (event.type === "xstate.done.actor" || event.type === "xstate.error.actor") &&
+    typeof actorId === "string";
+  return {
+    event,
+    state: next.snapshot.value,
+    started: childSrcs(next)
+      .filter((child) => !sessions.has(child.session))
+      .map((child) => child.src),
+    settled: settles
+      ? before.filter((child) => child.id === actorId).map((child) => child.src)
+      : [],
+  };
+}
+
+// The steps that led to an explored step, linked like `PathLink`. `after`:
+// an ordering target's trigger matched on this path; `violated`: its `reach`
+// matched after that.
+interface StepLog {
+  step: ExploreStep;
+  prev: StepLog | undefined;
+  length: number;
+  after: boolean;
+  violated: boolean;
+}
+
+function stepsOf(log: StepLog | undefined): ExploreStep[] {
+  const steps = Array.from<ExploreStep>({ length: log?.length ?? 0 });
+  for (let at = log; at; at = at.prev) steps[at.length - 1] = at.step;
+  return steps;
+}
+
 // Shared engine for explorePaths/canReach. Without `stopWhen` it walks depth
 // first (explorePaths' terminal order). With `stopWhen` (canReach) it walks
 // breadth first by path length and halts on the first snapshot the predicate
@@ -1895,6 +1986,8 @@ function explore(
   budget: SearchBudget = startBudget(options.budget),
   // `children: "coupled"`: build a child's stepper instead of searching.
   stepping = false,
+  // canReach's ordering target: checked on the step log, not a snapshot.
+  ordering?: CanReachOrdering,
 ): {
   report: AgentPathReport;
   witness?: ChosenEvent[];
@@ -1966,17 +2059,56 @@ function explore(
     }
     return next;
   };
-  const resolveStep = (prev: AgentStep, id: string | { id: string }, output: unknown) =>
-    withTransits(resolveAgentStep(machine, prev, id, output), () =>
-      getMicrosteps(machine, prev.snapshot, doneEvent(prev.snapshot, id, output) as never),
+  // Each step's log, for `steps` and an ordering target, at the root only
+  // (child searches report no terminals). Every root step comes from one of
+  // the three transitions below or the initial step.
+  const logging = nesting === 0 && !stepping && (options.steps === true || ordering !== undefined);
+  const logs = new WeakMap<AgentStep, StepLog>();
+  const logged = (prev: AgentStep | undefined, next: AgentStep, event: EventObject): AgentStep => {
+    if (!logging) return next;
+    const before = prev && logs.get(prev);
+    const step = exploreStep(prev, next, event);
+    const after = before?.after ?? false;
+    const trigger = ordering?.after;
+    logs.set(next, {
+      step,
+      prev: before,
+      length: (before?.length ?? 0) + 1,
+      after:
+        after ||
+        (trigger !== undefined &&
+          (typeof trigger === "string" ? step.event.type === trigger : trigger(step))),
+      violated: (before?.violated ?? false) || (after && ordering!.reach(step)),
+    });
+    return next;
+  };
+  const resolveStep = (prev: AgentStep, id: string | { id: string }, output: unknown) => {
+    const event = doneEvent(prev.snapshot, id, output);
+    return logged(
+      prev,
+      withTransits(resolveAgentStep(machine, prev, id, output), () =>
+        getMicrosteps(machine, prev.snapshot, event as never),
+      ),
+      event,
     );
-  const rejectStep = (prev: AgentStep, id: string | { id: string }, error: unknown) =>
-    withTransits(rejectAgentStep(machine, prev, id, error), () =>
-      getMicrosteps(machine, prev.snapshot, errorEvent(prev.snapshot, id, error) as never),
+  };
+  const rejectStep = (prev: AgentStep, id: string | { id: string }, error: unknown) => {
+    const event = errorEvent(prev.snapshot, id, error);
+    return logged(
+      prev,
+      withTransits(rejectAgentStep(machine, prev, id, error), () =>
+        getMicrosteps(machine, prev.snapshot, event as never),
+      ),
+      event,
     );
+  };
   const transitionStep = (prev: AgentStep, event: EventObject) =>
-    withTransits(transitionAgentStep(machine, prev, event as never), () =>
-      getMicrosteps(machine, prev.snapshot, event as never),
+    logged(
+      prev,
+      withTransits(transitionAgentStep(machine, prev, event as never), () =>
+        getMicrosteps(machine, prev.snapshot, event as never),
+      ),
+      event,
     );
   // An invoke's completion, preceded by its request's `usage` event when it
   // has one. A usage transition that leaves the invoking state cancels the
@@ -2057,11 +2189,13 @@ function explore(
   // `stopWhen` on the settled snapshot or any state passed through to reach it.
   // With `children: "coupled"`, each snapshot shows the coupled children's
   // explored state (`kids`).
+  // An ordering target: a violation anywhere on the step's log.
   const stops = (step: AgentStep, kids?: KidsMap): boolean =>
-    stopWhen !== undefined &&
-    (stopWhen(withKidSnapshots(step.snapshot as AnyMachineSnapshot, kids)) ||
-      (transits.get(step)?.some((snapshot) => stopWhen(withKidSnapshots(snapshot, kids))) ??
-        false));
+    (ordering !== undefined && logs.get(step)?.violated === true) ||
+    (stopWhen !== undefined &&
+      (stopWhen(withKidSnapshots(step.snapshot as AnyMachineSnapshot, kids)) ||
+        (transits.get(step)?.some((snapshot) => stopWhen(withKidSnapshots(snapshot, kids))) ??
+          false)));
 
   // Schema-derived payloads per event type, computed once per type. A type
   // with no schema is applied bare. That covers it only when no transition
@@ -2390,7 +2524,11 @@ function explore(
   };
   // A coupled child's moves() collects its terminals here instead.
   let captured: Array<{ status: AgentPathTerminal["status"]; missingSrc?: string }> | undefined;
-  const endPath = (path: PathLink | undefined, terminal: Omit<AgentPathTerminal, "path">): void => {
+  const endPath = (
+    path: PathLink | undefined,
+    step: AgentStep,
+    terminal: Omit<AgentPathTerminal, "path">,
+  ): void => {
     if (captured) {
       captured.push({
         status: terminal.status,
@@ -2405,7 +2543,11 @@ function explore(
       unfinished = true;
     }
     if (nesting === 0) {
-      terminals.push({ ...terminal, path: pathOf(path) });
+      terminals.push({
+        ...terminal,
+        path: pathOf(path),
+        ...(options.steps ? { steps: stepsOf(logs.get(step)) } : {}),
+      });
     }
   };
   let prunedByGuard = 0;
@@ -2454,8 +2596,12 @@ function explore(
   // A coupled child's stepper starts from each child's own state, not here.
   const initial = stepping
     ? undefined
-    : withTransits(childStartStep(machine, options.input, childRef), () =>
-        getInitialMicrosteps(machine, options.input as never),
+    : logged(
+        undefined,
+        withTransits(childStartStep(machine, options.input, childRef), () =>
+          getInitialMicrosteps(machine, options.input as never),
+        ),
+        { type: "xstate.init" },
       );
   if (initial) {
     recordState(initial, childRef?._initialEffects ?? initial.actions);
@@ -2778,7 +2924,7 @@ function explore(
   }
 
   const maxDepthTerminal = (settled: AgentStep, path: PathLink | undefined): void => {
-    endPath(path, { status: "max-depth", state: settled.snapshot.value });
+    endPath(path, settled, { status: "max-depth", state: settled.snapshot.value });
     note(() => `max-depth: stopped at path [${pathTypes(path)}]`);
   };
 
@@ -2943,7 +3089,7 @@ function explore(
       const delivered = kid.engine.deliver(kid, event);
       if (delivered.overflow) {
         overflow = true;
-        endPath(link, { status: "max-depth", state: at.snapshot.value });
+        endPath(link, at, { status: "max-depth", state: at.snapshot.value });
         return true;
       }
       kids.set(session!, { ...kid, step: delivered.step, kids: delivered.kids });
@@ -2973,7 +3119,7 @@ function explore(
       pumped.add(at);
       if (!register(at, kids, queue)) {
         overflow = true;
-        endPath(link, { status: "max-depth", state: at.snapshot.value });
+        endPath(link, at, { status: "max-depth", state: at.snapshot.value });
         return;
       }
       for (const effect of Array.isArray(at.actions) ? at.actions : []) {
@@ -2998,7 +3144,7 @@ function explore(
       if (i >= MAX_PUMP) {
         // A parent and children that keep sending each other: the branch is
         // cut short, so the search is not complete.
-        endPath(link, { status: "max-depth", state: step.snapshot.value });
+        endPath(link, step, { status: "max-depth", state: step.snapshot.value });
         note(() => `coupled: more than ${MAX_PUMP} deliveries at path [${pathTypes(link)}]`);
         overflow = true;
         break;
@@ -3168,7 +3314,9 @@ function explore(
       const key =
         options.dedupeBy(withKidSnapshots(settled.snapshot as AnyMachineSnapshot, nodeKids)) +
         (delivered?.size ? `\u0001${[...delivered].sort().join("\u0001")}` : "") +
-        kidsKey(nodeKids);
+        kidsKey(nodeKids) +
+        // An ordering target's trigger is history the snapshot does not hold.
+        (logs.get(settled)?.after ? "\u0002after" : "");
       const seenAt = visited.get(key);
       if (seenAt !== undefined && seenAt <= depth) {
         return;
@@ -3232,7 +3380,7 @@ function explore(
           ) {
             continue;
           }
-          endPath(path, {
+          endPath(path, settled, {
             status: terminal.status,
             state: settled.snapshot.value,
             ...(terminal.status === "needs-output"
@@ -3299,7 +3447,7 @@ function explore(
         if (witness !== undefined || capped()) {
           return;
         }
-        endPath(path, {
+        endPath(path, settled, {
           status: "needs-output",
           state: settled.snapshot.value,
           missingSrc: kid.src,
@@ -3324,7 +3472,11 @@ function explore(
         if (witness !== undefined || capped()) {
           return;
         }
-        endPath(path, { status: "needs-output", state: settled.snapshot.value, missingSrc: src });
+        endPath(path, settled, {
+          status: "needs-output",
+          state: settled.snapshot.value,
+          missingSrc: src,
+        });
         note(
           () => `needs-output: no \`outputs\` entry for src '${src}' at path [${pathTypes(path)}]`,
         );
@@ -3400,7 +3552,7 @@ function explore(
         }
         // An explored child that can stall leaves the parent waiting here.
         if (fork.stalls && witness === undefined && !capped()) {
-          endPath(path, { status: "idle", state: settled.snapshot.value });
+          endPath(path, settled, { status: "idle", state: settled.snapshot.value });
         }
         for (const src of blockedSiblings ?? []) {
           note(
@@ -3417,7 +3569,7 @@ function explore(
           if (witness !== undefined || capped()) {
             break;
           }
-          endPath(path, {
+          endPath(path, settled, {
             status: "needs-output",
             state: settled.snapshot.value,
             missingSrc: incompleteSrc,
@@ -3439,7 +3591,7 @@ function explore(
     }
 
     if (blockedSrc) {
-      endPath(path, {
+      endPath(path, settled, {
         status: "needs-output",
         state: settled.snapshot.value,
         missingSrc: blockedSrc,
@@ -3456,7 +3608,7 @@ function explore(
 
     if (settled.done) {
       const output: unknown = (settled.snapshot as AnyMachineSnapshot).output;
-      endPath(path, {
+      endPath(path, settled, {
         status: "done",
         state: settled.snapshot.value,
         ...(output === undefined ? {} : { output }),
@@ -3469,7 +3621,7 @@ function explore(
     // does in a live run. That is a terminal of its own, not an idle wait.
     if ((settled.snapshot as AnyMachineSnapshot).status === "error") {
       const error = (settled.snapshot as AnyMachineSnapshot & { error?: unknown }).error;
-      endPath(path, { status: "error", state: settled.snapshot.value, error });
+      endPath(path, settled, { status: "error", state: settled.snapshot.value, error });
       pushDistinct(failures, seenFailures, error);
       return;
     }
@@ -3498,12 +3650,12 @@ function explore(
       // An idle wait with nothing to accept ends the branch. A decision with
       // nothing to choose does not: it exhausts, below.
       if (branchEvents.length === 0 && request?.kind !== "decision") {
-        endPath(path, { status: "idle", state: settled.snapshot.value });
+        endPath(path, settled, { status: "idle", state: settled.snapshot.value });
         return;
       }
 
       if (depth >= maxDepth) {
-        endPath(path, { status: "max-depth", state: settled.snapshot.value });
+        endPath(path, settled, { status: "max-depth", state: settled.snapshot.value });
         note(() => `max-depth: stopped at path [${pathTypes(path)}]`);
         return;
       }
@@ -3529,7 +3681,7 @@ function explore(
       // machine accepts. Record the wait and list the types as unexpanded, so
       // the search is not a proof until the table covers an accepted payload.
       if (request?.kind !== "decision" && taken === 0 && witness === undefined && !capped()) {
-        endPath(path, { status: "idle", state: settled.snapshot.value });
+        endPath(path, settled, { status: "idle", state: settled.snapshot.value });
         const refused = [...new Set(branchEvents.map((event) => event.type))];
         for (const type of refused) unexpanded.add(type);
         note(
@@ -3869,11 +4021,15 @@ export async function canReach(
 ): Promise<CanReachResult> {
   const resolvedTarget =
     typeof target === "string" ? resolveStateTarget(machine, target) : undefined;
+  const ordering = typeof target === "object" ? target : undefined;
+  // An ordering target matches on the step log; its snapshot predicate never holds.
   const stopWhen =
     typeof target === "function"
       ? target
-      : (snapshot: AnyMachineSnapshot): boolean =>
-          snapshot.nodes.some((node) => node.id === resolvedTarget);
+      : ordering
+        ? (): boolean => false
+        : (snapshot: AnyMachineSnapshot): boolean =>
+            snapshot.nodes.some((node) => node.id === resolvedTarget);
   // Only a state target can be passed through; a predicate sees settled snapshots.
   const { witness, report } = explore(
     machine,
@@ -3883,6 +4039,9 @@ export async function canReach(
     undefined,
     undefined,
     resolvedTarget !== undefined && hasTransientStates(machine.getStateNodeById(resolvedTarget)),
+    undefined,
+    false,
+    ordering,
   );
   if (witness !== undefined) {
     return {

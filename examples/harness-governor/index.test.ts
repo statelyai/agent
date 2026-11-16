@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import { createActor } from "xstate";
 import { replay } from "@statelyai/agent/log";
-import { canReach } from "@statelyai/agent/testing";
+import { canReach, type ExploreSnapshot } from "@statelyai/agent/testing";
 import {
   createGovernor,
   governorMachine,
@@ -12,7 +12,7 @@ import {
   type Tool,
 } from "./index.js";
 
-type Snapshot = Parameters<Exclude<Parameters<typeof canReach>[1], string>>[0];
+type Snapshot = ExploreSnapshot;
 type Context = { clearance: Level; level: Level; active: Tool | null };
 
 const context = (snapshot: Snapshot) => snapshot.context as Context;
