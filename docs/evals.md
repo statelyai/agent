@@ -255,6 +255,8 @@ Start with `checkParity`. Pick a lower-level tool only when the old code does no
 
 `checkParity` records `before` with `createRecorder`, replays `after` against the recording, and compares the two with `compareRecordings`, in one call per scenario.
 
+`compareRuns` labels a difference `intended` only when the candidate fixes a rule the baseline broke, or only the candidate reaches the scenario's `expected` outcome. Any other difference is a `regression`, including an effect the candidate adds on purpose with the same outcome. See [Outcome labels](#outcome-labels).
+
 ### Outcome labels
 
 `compareRuns` (from `@statelyai/agent/testing`) runs every scenario through the existing implementation and its replacement, and labels each difference. Use it when you port a loop to a machine and need to show where they behave the same and where the machine differs on purpose.
