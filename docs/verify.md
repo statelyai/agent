@@ -557,11 +557,13 @@ traceCoverage(supportModel, reports.map((r) => r.trace)); // states and handlers
 - `output` builds the actor's output from the observation. When the output carries state the recording does not show, such as a queue the code keeps internally, build it from the model's own `input` and the observation. Rebuilding it from the code's logic would make the check prove nothing.
 - `matches` returns `false` when the actor's input does not fit the observation. `error` returns a value to reject the actor, for work that failed in the recording.
 - An actor without `observes` consumes nothing. It is listed in `report.unobserved`, because the recording cannot check what it did. A run whose history or streaming was off cannot see those effects, so a bug in them goes unnoticed.
-- `events` maps observation kinds to events. When the model settles idle and the next observation has one of those kinds, it is sent and the run resumes.
+- `events` maps observation kinds to events. When the model settles idle and the next observation has one of those kinds, it is sent and the run resumes. An entry `{ event, matches }` also compares the observation with the model's `context` and `state` before sending it, such as the draft a person approved against the draft the model holds.
+- `output: { observes, matches }` checks the code's return value. Map the recording's `output` effect to an observation of kind `observes`. The model must finish there, and `matches` compares its output with that observation. Without `output`, a recorded return value is an `extra-observations` deviation.
 - The first deviation stops the run and is reported with its `reason`:
   - `unexpected-observation`: the next observation is of another kind.
-  - `missing-observation`: the recording had ended.
-  - `input-mismatch`: `matches` returned `false`.
+  - `missing-observation`: the recording had ended, or the model finished with `output` set and the code never returned.
+  - `input-mismatch`: an actor's or event's `matches` returned `false`.
+  - `output-mismatch`: the model finished, and `output.matches` returned `false`.
   - `extra-observations`: the model finished or settled idle, and the recording continues.
   - `ignored-event`: the model was idle, and it does not handle the event the next observation maps to.
   - `unmapped-actor`: the model invoked a src with no entry in `actors`.
@@ -569,7 +571,8 @@ traceCoverage(supportModel, reports.map((r) => r.trace)); // states and handlers
   `expected` is what the model did next, `observed` is the recording's next observation, and `state` is the model's state value.
 - An `actors` key the model does not declare throws `AgentError` with code `unknown-actor-source`.
 - Every actor the model invokes must be declared by name in `setupAgent({ actors })` and invoked by `src`. An invoke that names its logic inline would run that logic for real, so `checkConformance` throws `inline-actor-source` before the run starts.
-- A callback in `actors` that throws ends the check with `AgentError` code `conformance-callback-error`. It is not counted as the actor failing, so a bug in the mapping cannot pass as a conforming run.
+- Code that builds its AI SDK model inline or passes module-level tools to `generateText` is recorded with `recordAiSdk`. See [Verify in place](verify-in-place.md#ai-sdk-code).
+- A callback in `actors`, `events`, or `output` that throws ends the check with `AgentError` code `conformance-callback-error`. It is not counted as the actor failing, so a bug in the mapping cannot pass as a conforming run.
 - Concurrent actors consume observations in the order they start, so a model that runs observed actors in parallel needs observations in that order.
 
 What a conforming run shows: the code behaved as the model allows on that run, and the model's rules are proved. It does not show that the code can never break a rule; a run you did not record still can. After a migration with [`loop-to-machine`](https://github.com/statelyai/skills/blob/main/plugins/stately-agent/skills/loop-to-machine/SKILL.md) and `checkParity`, the machine enforces the rules at runtime, and the same model and proofs carry over.

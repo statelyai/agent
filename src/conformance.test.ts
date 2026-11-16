@@ -69,9 +69,9 @@ const model = setupAgent({
         onDone: ({ context }) => (context.done ? { target: "replied" } : { target: "checking" }),
       },
     },
-    replied: { type: "final" },
-    declined: { type: "final" },
-    stepLimit: { type: "final" },
+    replied: { type: "final", output: () => "replied" },
+    declined: { type: "final", output: () => "declined" },
+    stepLimit: { type: "final", output: () => "step-limit" },
   },
 });
 
@@ -93,7 +93,7 @@ async function record(replies: Reply[], approvals: boolean[], maxSteps: number, 
     approve: recorder.fn("approve", async () => approvals[a++] ?? true),
     send: recorder.fn("send", async () => {}),
   };
-  await supportLoop(fx, maxSteps, bug);
+  recorder.output(await supportLoop(fx, maxSteps, bug));
   return recorder.recording;
 }
 
@@ -411,5 +411,127 @@ describe("checkConformance", () => {
     await expect(
       checkConformance(model, { observations: [], actors: { asist: {} } }),
     ).rejects.toBeInstanceOf(AgentError);
+  });
+
+  test("output checks the code's return value against the model's output", async () => {
+    const recording = await record([{ done: true, email: true }], [false], 3);
+    const observations = recording.effects.flatMap(
+      (effect): (Observation | { kind: "returned"; value: unknown })[] =>
+        effect.kind === "output"
+          ? [{ kind: "returned", value: effect.value }]
+          : toObservation(effect),
+    );
+    const options = {
+      input: { maxSteps: 3 },
+      actors: {
+        assist: { observes: "assist", output: () => ({ done: true, email: true }) },
+        send: { observes: "send" },
+      },
+      events: {
+        approval: (o: { kind: string }) => ({
+          type: (o as unknown as { approved: boolean }).approved ? "APPROVE" : "REJECT",
+        }),
+      },
+      output: {
+        observes: "returned",
+        matches: ({ output, observation }: { output: unknown; observation: { kind: string } }) =>
+          output === (observation as unknown as { value: unknown }).value,
+      },
+    };
+
+    const report = await checkConformance(model, { ...options, observations });
+    expect(report).toMatchObject({ conforms: true, consumed: 3, status: "done" });
+
+    // The code reported a send it never made: the model ended in declined.
+    const lied = observations.map((o) => (o.kind === "returned" ? { ...o, value: "replied" } : o));
+    expect(
+      (await checkConformance(model, { ...options, observations: lied })).deviation,
+    ).toMatchObject({
+      reason: "output-mismatch",
+      index: 2,
+      expected: 'output "declined"',
+      observed: { kind: "returned", value: "replied" },
+      state: "declined",
+    });
+
+    // The code never returned (it threw), and the model finished.
+    const threw = observations.filter((o) => o.kind !== "returned");
+    expect(
+      (await checkConformance(model, { ...options, observations: threw })).deviation,
+    ).toMatchObject({
+      reason: "missing-observation",
+      index: 2,
+      expected: "output (returned)",
+    });
+
+    // Without output, a recorded return value is one more observation.
+    const { output: _, ...unchecked } = options;
+    expect((await checkConformance(model, { ...unchecked, observations })).deviation).toMatchObject(
+      {
+        reason: "extra-observations",
+        observed: { kind: "returned" },
+      },
+    );
+
+    await expect(
+      checkConformance(model, {
+        ...options,
+        observations,
+        output: {
+          observes: "returned",
+          matches: () => {
+            throw new Error("bad output");
+          },
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: "conformance-callback-error",
+      message: "checkConformance: output.matches threw: bad output",
+    });
+  });
+
+  test("an event's matches compares the observation with the model's context", async () => {
+    const observations = [
+      { kind: "assist", step: 0, done: false, email: true },
+      { kind: "approval", approved: true, shownAtStep: 1 },
+      { kind: "send" },
+      { kind: "assist", step: 1, done: true, email: false },
+    ];
+    const run = (shownAtStep: number) =>
+      checkConformance(model, {
+        input: { maxSteps: 3 },
+        observations: observations.map((o) => (o.kind === "approval" ? { ...o, shownAtStep } : o)),
+        actors: {
+          assist: {
+            observes: "assist",
+            output: ({ observation }) => {
+              const { done, email } = observation as unknown as Reply;
+              return { done, email };
+            },
+          },
+          send: { observes: "send" },
+        },
+        events: {
+          approval: {
+            event: (o) => ({
+              type: (o as unknown as { approved: boolean }).approved ? "APPROVE" : "REJECT",
+            }),
+            matches: ({ observation, context }) =>
+              (observation as unknown as { shownAtStep: number }).shownAtStep ===
+              (context as { steps: number }).steps,
+          },
+        },
+      });
+
+    expect((await run(1)).conforms).toBe(true);
+    const report = await run(0);
+    expect(report.deviation).toMatchObject({
+      reason: "input-mismatch",
+      index: 1,
+      expected: "event approval",
+      observed: { kind: "approval", shownAtStep: 0 },
+      state: "awaitingApproval",
+    });
+    expect(report.consumed).toBe(1);
   });
 });

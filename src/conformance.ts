@@ -56,6 +56,40 @@ export interface ConformanceActor<TObservation extends ConformanceObservation> {
   error?: (args: ConformanceActorArgs<TObservation>) => unknown;
 }
 
+/** What a {@link ConformanceEvent} `matches` receives. */
+export interface ConformanceEventArgs<TObservation extends ConformanceObservation> {
+  /** The observation the event comes from. */
+  observation: TObservation;
+  /** The model's context while it waited for the event. */
+  context: unknown;
+  /** The model's state value while it waited for the event. */
+  state: StateValue;
+}
+
+/**
+ * How an observation becomes an event the idle model receives. A function is
+ * the `event` alone. Add `matches` to compare the observation with what the
+ * model holds, such as the draft a person approved against the draft in context.
+ */
+export type ConformanceEvent<TObservation extends ConformanceObservation> =
+  | ((observation: TObservation) => EventObject)
+  | {
+      event: (observation: TObservation) => EventObject;
+      /** Return `false` when the observation does not fit the model's state: an `input-mismatch` deviation. */
+      matches?: (args: ConformanceEventArgs<TObservation>) => boolean;
+    };
+
+/** How the code's recorded return value is checked against the model's output. */
+export interface ConformanceOutput<TObservation extends ConformanceObservation> {
+  /**
+   * The observation kind of the code's return value. When the model finishes,
+   * the next observation must be of this kind, or the run deviates.
+   */
+  observes: string;
+  /** Return `false` when the model's output does not fit the recorded one: an `output-mismatch` deviation. */
+  matches?: (args: { output: unknown; observation: TObservation }) => boolean;
+}
+
 /** Options for {@link checkConformance}. */
 export interface CheckConformanceOptions<
   TMachine extends AnyStateMachine,
@@ -75,17 +109,26 @@ export interface CheckConformanceOptions<
    * settles idle and the next observation has one of these kinds, it is
    * consumed and sent, and the run resumes.
    */
-  events?: Record<string, (observation: TObservation) => EventObject>;
+  events?: Record<string, ConformanceEvent<TObservation>>;
+  /**
+   * Checks the code's return value. Map the recording's `output` effect to an
+   * observation of kind `observes`: the model must finish there, and `matches`
+   * compares its output with that observation. Without it, a recorded return
+   * value is an `extra-observations` deviation like any other.
+   */
+  output?: ConformanceOutput<TObservation>;
 }
 
 /** Why a run deviated from the model. */
 export type ConformanceDeviationReason =
   /** The model started an actor, and the next observation is of another kind. */
   | "unexpected-observation"
-  /** The model started an actor that observes something, and the recording had ended. */
+  /** The model started an actor that observes something, or finished with `output` set, and the recording had ended. */
   | "missing-observation"
-  /** The actor's `matches` returned `false` for the observation. */
+  /** An actor's or event's `matches` returned `false` for the observation. */
   | "input-mismatch"
+  /** The model finished, and `output.matches` returned `false` for the recorded return value. */
+  | "output-mismatch"
   /** The model finished or settled idle, and the recording continues. */
   | "extra-observations"
   /** The model was idle, and it does not handle the event an observation maps to in that state. */
@@ -98,7 +141,7 @@ export interface ConformanceDeviation<TObservation extends ConformanceObservatio
   reason: ConformanceDeviationReason;
   /** The index of the observation at the deviation; `observations.length` when the recording had ended. */
   index: number;
-  /** What the model did next: the actor src it started, `"end of run"`, or `"idle, waiting for an event"`. */
+  /** What the model did next: the actor src it started, the event, `"end of run"`, or `"idle, waiting for an event"`. */
   expected: string;
   /** What the recording shows next, or `undefined` when it had ended. */
   observed: TObservation | undefined;
@@ -221,6 +264,21 @@ export async function checkConformance<
   const trace: AgentTraceEvent[] = [];
   const controller = new AbortController();
 
+  const callbackFailure = (name: string, cause: unknown) =>
+    new AgentError(
+      "conformance-callback-error",
+      `checkConformance: ${name} threw: ${cause instanceof Error ? cause.message : String(cause)}`,
+      { cause },
+    );
+  // For callbacks outside an actor, where the check can throw directly.
+  const callback = <T>(name: string, fn: () => T): T => {
+    try {
+      return fn();
+    } catch (cause) {
+      throw callbackFailure(name, cause);
+    }
+  };
+
   const deviate = (
     reason: ConformanceDeviationReason,
     expected: string,
@@ -258,11 +316,7 @@ export async function checkConformance<
           try {
             return fn();
           } catch (cause) {
-            callbackError ??= new AgentError(
-              "conformance-callback-error",
-              `checkConformance: actors.${src}.${name} threw: ${cause instanceof Error ? cause.message : String(cause)}`,
-              { cause },
-            );
+            callbackError ??= callbackFailure(`actors.${src}.${name}`, cause);
             controller.abort();
             return NEVER;
           }
@@ -300,9 +354,29 @@ export async function checkConformance<
   } as AgentRunOptions<TMachine>);
   while (!deviation && !callbackError && result.status === "idle") {
     const next = observations[index];
-    const toEvent = next === undefined ? undefined : events[next.kind];
-    if (!toEvent || next === undefined) break;
-    const event = toEvent(next);
+    const entry = next === undefined ? undefined : events[next.kind];
+    if (!entry || next === undefined) break;
+    const { event: toEvent, matches } = typeof entry === "function" ? { event: entry } : entry;
+    const fits = callback(`events.${next.kind}.matches`, () =>
+      matches
+        ? matches({
+            observation: next,
+            context: (result.snapshot as { context?: unknown }).context,
+            state,
+          })
+        : true,
+    );
+    if (!fits) {
+      deviation = {
+        reason: "input-mismatch",
+        index,
+        expected: `event ${next.kind}`,
+        observed: next,
+        state,
+      };
+      break;
+    }
+    const event = callback(`events.${next.kind}`, () => toEvent(next));
     // Consumed before the run: actors the event starts read the next observation.
     index += 1;
     result = await runAgent(machine, {
@@ -324,6 +398,37 @@ export async function checkConformance<
   }
 
   if (callbackError) throw callbackError;
+  const outputSpec = options.output;
+  const last = observations[index];
+  if (!deviation && outputSpec && result.status === "done" && last === undefined) {
+    deviation = {
+      reason: "missing-observation",
+      index,
+      expected: `output (${outputSpec.observes})`,
+      observed: undefined,
+      state,
+    };
+  } else if (
+    !deviation &&
+    outputSpec &&
+    result.status === "done" &&
+    last?.kind === outputSpec.observes
+  ) {
+    const output = result.output;
+    const fits = callback("output.matches", () =>
+      outputSpec.matches ? outputSpec.matches({ output, observation: last }) : true,
+    );
+    if (fits) index += 1;
+    else {
+      deviation = {
+        reason: "output-mismatch",
+        index,
+        expected: `output ${JSON.stringify(output)}`,
+        observed: last,
+        state,
+      };
+    }
+  }
   if (!deviation && index < observations.length) {
     deviation = {
       reason: "extra-observations",

@@ -52,7 +52,35 @@ export async function handleRefundRequest(
 }
 ```
 
-The check does not edit this file. Code whose side effects are spread across modules needs a seam first: route them through one object, or record them at the client with `createRecorder`'s `recorder.client`, `recorder.model` for an AI SDK model, and `recorder.tools` for AI SDK tools. See [Evals](evals.md#any-model-client). With the AI SDK, a tool that has `execute` runs inside the `generateText` call, so a check the code makes after the call returns comes after the tool already ran; model the order the calls happen in.
+The check does not edit this file. Code whose side effects are spread across modules needs a seam first: route them through one object, or record them at the client with `createRecorder`'s `recorder.client`, `recorder.model` for an AI SDK model, and `recorder.tools` for AI SDK tools. See [Evals](evals.md#any-model-client).
+
+### AI SDK code
+
+Code that builds its model inline (`openai("gpt-…")`) and passes module-level tools to `generateText` has nothing to inject. Mock `"ai"` in the test and route its calls through the recorder with `recordAiSdk`:
+
+```ts no-check
+// seam.ts: must not import "ai", or the mock below waits on itself.
+let current: AiSdkSeam | undefined;
+export const currentSeam = () => current;
+export function startRecording(standIn: LanguageModelV3) {
+  const recorder = createRecorder();
+  current = { recorder, model: recorder.model(standIn) };
+  return recorder;
+}
+
+// support-agent.test.ts
+vi.mock("ai", async (importOriginal) => {
+  const ai = await importOriginal<typeof import("ai")>();
+  const { recordAiSdk } = await import("@statelyai/agent/testing");
+  const { currentSeam } = await import("./seam");
+  return { ...ai, ...recordAiSdk(ai, currentSeam) };
+});
+```
+
+- Each `generateText` and `streamText` call runs on the real AI SDK with the seam's `model` in place of the code's, and its `tools` wrapped with `recorder.tools`. The code's own tool loop runs.
+- A call made while `currentSeam()` returns `undefined` throws, so no test reaches a real provider.
+- A tool that has `execute` runs inside the `generateText` call. A check the code makes after the call returns comes after the tool already ran: model the order the calls happen in.
+- `recorder.model` records each provider attempt. A failed call that the AI SDK (or the code) retried with the same request has `retriedBy` set to the call that retried it. Skip those effects in the mapping to read one observation per call the code made, and count the calls yourself: `effect.call` counts attempts.
 
 ## Step 1: the model file
 
@@ -132,7 +160,7 @@ Wrap each function of the `effects` object with `recorder.fn` and run the code a
 
 ```ts no-check
 const recorder = createRecorder();
-await handleRefundRequest(
+const outcome = await handleRefundRequest(
   {
     lookupOrder: recorder.fn("lookupOrder", lookupOrder),
     decide: recorder.fn("decide", decide),
@@ -141,6 +169,7 @@ await handleRefundRequest(
   },
   request,
 );
+recorder.output(outcome); // the return value, checked in step 5
 const recording = recorder.recording;
 ```
 
@@ -153,14 +182,17 @@ An observation is one thing the run did, in the model's terms. Map the recording
 ```ts no-check
 function toObservations(recording: Recording): Observation[] {
   return recording.effects.flatMap((effect): Observation[] => {
+    if (effect.kind === "output") return [{ kind: "returned", outcome: effect.value }];
     if (effect.kind !== "call") return [];
     switch (effect.name) {
       case "lookupOrder":
         return [{ kind: "lookup", order: effect.result as Order }];
       case "decide":
         return [{ kind: "decision", decision: effect.result as Decision }];
-      case "requestApproval":
-        return [{ kind: "approval", approved: effect.result as boolean }];
+      case "requestApproval": {
+        const [{ amount }] = effect.args as [{ amount: number }];
+        return [{ kind: "approval", approved: effect.result as boolean, amount }];
+      }
       case "issueRefund":
         return [
           { kind: "refund", ...(effect.args as [{ orderId: string; amount: number }])[0] },
@@ -192,14 +224,22 @@ const report = await checkConformance(refundModel, {
     },
   },
   events: {
-    approval: (observation) => ({ type: observation.approved ? "APPROVE" : "REJECT" }),
+    approval: {
+      event: (observation) => ({ type: observation.approved ? "APPROVE" : "REJECT" }),
+      matches: ({ observation, context }) => observation.amount === context.amount,
+    },
+  },
+  output: {
+    observes: "returned",
+    matches: ({ output, observation }) => output.outcome === observation.outcome,
   },
 });
 ```
 
 - An actor with `observes` consumes the next observation, which must be of that kind. `output` builds the actor's output from it.
 - `matches` compares the actor's input with the observation. Here, the refund the code issued must be for the order and amount the model would refund.
-- `events` sends an observation to the model as an event while the model waits, here the person's approval.
+- `events` sends an observation to the model as an event while the model waits, here the person's approval. Its `matches` compares the observation with the model's context: the person approved the amount the model is waiting to refund.
+- `output` checks the code's return value. The model must finish where the code returned, and `matches` compares the model's output with the recorded one. Leave it out for a run where the code threw, which has no return value.
 - An actor the recording cannot see takes no `observes`. It runs unchecked and is listed in `report.unobserved`.
 - When an actor's output carries state the recording does not show, build it in `output` from the model's own `input` plus the observation.
 
@@ -234,7 +274,7 @@ The model was waiting for a person in `awaitingApproval`, and the code issued th
 
 ## What the check covers
 
-- It checks the order and the content of what the recording shows against what the model allows.
+- It checks the order and the content of what the recording shows against what the model allows, and the code's return value when you pass `output`.
 - It does not see effects the recording does not capture. An actor without `observes` is unchecked, and the report lists it.
 - It does not prove anything about runs you did not record. The proofs cover every path through the outputs and payloads listed in [Step 2](#step-2-proofs), not every value an actor could return. Conformance ties those paths to the recorded runs.
 - A wrong model can conform and prove its rules. Review the model, and treat a deviation as a question about the code or the model.

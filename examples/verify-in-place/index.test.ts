@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { canReach } from "@statelyai/agent/testing";
-import { APPROVAL_THRESHOLD } from "./before.js";
+import { APPROVAL_THRESHOLD, handleRefundRequest } from "./before.js";
 import { SCENARIOS, checkRun, recordRun, runVerifyInPlaceExample } from "./index.js";
 import { refundModel } from "./model.js";
 import { handleRefundRequestRegressed } from "./regression.js";
@@ -113,5 +113,38 @@ describe("verify in place: a seeded regression", () => {
       );
       expect(report.conforms, scenario.id).toBe(true);
     }
+  });
+
+  test("an approval for another amount is an input mismatch", async () => {
+    const scenario = SCENARIOS[1]!; // a refund of 250, approved
+    const recording = await recordRun(scenario, async (fx, request) => {
+      const order = await fx.lookupOrder(request.orderId);
+      const decision = await fx.decide({ request: request.message, order, decisions: 0 });
+      const amount = decision.type === "refund" ? decision.amount : 0;
+      await fx.requestApproval({ orderId: order.orderId, amount: amount / 10 });
+      await fx.issueRefund({ orderId: order.orderId, amount });
+      return "refunded";
+    });
+    const report = await checkRun(scenario, recording);
+    expect(report.deviation).toMatchObject({
+      reason: "input-mismatch",
+      expected: "event approval",
+      observed: { kind: "approval", amount: 25 },
+      state: "awaitingApproval",
+    });
+  });
+
+  test("a return value the model does not end with is an output mismatch", async () => {
+    const scenario = SCENARIOS[0]!; // a small refund
+    const recording = await recordRun(scenario, async (fx, request) => {
+      await handleRefundRequest(fx, request);
+      return "replied";
+    });
+    const report = await checkRun(scenario, recording);
+    expect(report.deviation).toMatchObject({
+      reason: "output-mismatch",
+      observed: { kind: "returned", outcome: "replied" },
+      state: "refunded",
+    });
   });
 });

@@ -4,8 +4,10 @@
  *
  *   1. Record each run of the code with `createRecorder`, wrapping the
  *      functions in its `effects` object. The code is not edited.
- *   2. Map each recorded call to an observation (`toObservations`).
- *   3. Check each run against the model with `checkConformance`.
+ *   2. Map each recorded call, and the return value, to an observation
+ *      (`toObservations`).
+ *   3. Check each run against the model with `checkConformance`, including
+ *      the approval each person gave and the outcome the code returned.
  *   4. Measure which parts of the model no run reached with `traceCoverage`.
  *
  * The model's rules are proved separately with `canReach` (see index.test.ts).
@@ -95,11 +97,13 @@ export async function recordRun(
     requestApproval: recorder.fn("requestApproval", async () => approvals.shift() ?? false),
     issueRefund: recorder.fn("issueRefund", async () => {}),
   };
-  await loop(fx, {
-    orderId: scenario.order.orderId,
-    message: "Please refund my order",
-    repeatCustomer: scenario.repeatCustomer,
-  });
+  recorder.output(
+    await loop(fx, {
+      orderId: scenario.order.orderId,
+      message: "Please refund my order",
+      repeatCustomer: scenario.repeatCustomer,
+    }),
+  );
   return recorder.recording;
 }
 
@@ -108,11 +112,13 @@ export async function recordRun(
 export type Observation =
   | { kind: "lookup"; order: Order }
   | { kind: "decision"; decision: Decision }
-  | { kind: "approval"; approved: boolean }
-  | { kind: "refund"; orderId: string; amount: number };
+  | { kind: "approval"; approved: boolean; amount: number }
+  | { kind: "refund"; orderId: string; amount: number }
+  | { kind: "returned"; outcome: unknown };
 
 export function toObservations(recording: Recording): Observation[] {
   return recording.effects.flatMap((effect): Observation[] => {
+    if (effect.kind === "output") return [{ kind: "returned", outcome: effect.value }];
     if (effect.kind !== "call") return [];
     switch (effect.name) {
       case "lookupOrder":
@@ -120,7 +126,13 @@ export function toObservations(recording: Recording): Observation[] {
       case "decide":
         return [{ kind: "decision", decision: effect.result as Decision }];
       case "requestApproval":
-        return [{ kind: "approval", approved: effect.result as boolean }];
+        return [
+          {
+            kind: "approval",
+            approved: effect.result as boolean,
+            amount: (effect.args as [{ amount: number }])[0].amount,
+          },
+        ];
       case "issueRefund":
         return [{ kind: "refund", ...(effect.args as [{ orderId: string; amount: number }])[0] }];
       default:
@@ -160,11 +172,24 @@ export function checkRun(
       },
     },
     events: {
-      approval: (observation) => ({
-        type: (observation as Extract<Observation, { kind: "approval" }>).approved
-          ? "APPROVE"
-          : "REJECT",
-      }),
+      approval: {
+        event: (observation) => ({
+          type: (observation as Extract<Observation, { kind: "approval" }>).approved
+            ? "APPROVE"
+            : "REJECT",
+        }),
+        // The person approved the amount the model is waiting to refund.
+        matches: ({ observation, context }) =>
+          (observation as Extract<Observation, { kind: "approval" }>).amount ===
+          (context as { amount: number }).amount,
+      },
+    },
+    // The outcome the code returned is the one the model ends with.
+    output: {
+      observes: "returned",
+      matches: ({ output, observation }) =>
+        (output as { outcome: string }).outcome ===
+        (observation as Extract<Observation, { kind: "returned" }>).outcome,
     },
   });
 }
