@@ -32,7 +32,8 @@ export const deskEvents = {
 
 ```ts
 import { z } from "zod";
-import { createPolicyDecider, setupAgent, type AgentDecisionExecutor, type AgentRequestExecutors } from "@statelyai/agent";
+import { setupAgent, type AgentDecisionExecutor, type AgentRequestExecutors } from "@statelyai/agent";
+import { createPolicyDecider } from "@statelyai/agent/policy";
 import { deskEvents, factsSchema } from "./desk.js";
 
 /** One proposal: an environment event with its `type`. */
