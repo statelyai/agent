@@ -514,6 +514,70 @@ const turnAfterStop = await canReach(
 - Test the rule with a mutant that breaks it (a loop that starts another turn after STOP), as with a loosened guard.
 - Don't match strings over `terminal.path` for an ordering rule: it lists branch points only and names actors by generated id.
 
+## Recorded runs against a model
+
+`checkConformance` from `@statelyai/agent/testing` checks a recorded run of existing code against a model of that code. [Verify in place](verify-in-place.md) walks through the whole track with a worked example. The code is not changed and does not run. Use it to verify a workflow in place before, or instead of, migrating it to a machine:
+
+1. Write the model: a machine whose actors stand for the code's work, with placeholder implementations.
+2. Prove the model's rules with `canReach` and `explorePaths`, as ordinary tests.
+3. Record runs of the code with `createRecorder`, and check each one against the model.
+
+```ts no-check
+import { checkConformance, createRecorder } from "@statelyai/agent/testing";
+import { traceCoverage } from "@statelyai/agent/evals";
+
+const recorder = createRecorder();
+await supportLoop({
+  assist: recorder.fn("assist", assist),
+  approve: recorder.fn("approve", approve),
+  send: recorder.fn("send", send),
+});
+
+const report = await checkConformance(supportModel, {
+  input: { maxSteps: 3 },
+  // One observation per recorded call the model can see.
+  observations: recording.effects.flatMap(toObservation),
+  actors: {
+    assist: {
+      observes: "assist",
+      matches: ({ input, observation }) => input.step === observation.step,
+      output: ({ observation }) => ({ done: observation.done, email: observation.email }),
+    },
+    send: { observes: "send" },
+  },
+  // Observations the model receives as events while it waits.
+  events: { approval: (o) => ({ type: o.approved ? "APPROVE" : "REJECT" }) },
+});
+
+report.conforms; // false: the code did something the model does not allow
+report.deviation; // { reason: "extra-observations", expected: "idle, waiting for an event", observed: { kind: "send" }, state: "awaitingApproval" }
+traceCoverage(supportModel, reports.map((r) => r.trace)); // states and handlers no recorded run reached
+```
+
+- The model runs with `runAgent`. Each actor in `actors` is answered from the observations instead of running. An actor with `observes` consumes the next observation, which must be of that kind.
+- `output` builds the actor's output from the observation. When the output carries state the recording does not show, such as a queue the code keeps internally, build it from the model's own `input` and the observation. Rebuilding it from the code's logic would make the check prove nothing.
+- `matches` returns `false` when the actor's input does not fit the observation. `error` returns a value to reject the actor, for work that failed in the recording.
+- An actor without `observes` consumes nothing. It is listed in `report.unobserved`, because the recording cannot check what it did. A run whose history or streaming was off cannot see those effects, so a bug in them goes unnoticed.
+- `events` maps observation kinds to events. When the model settles idle and the next observation has one of those kinds, it is sent and the run resumes. An entry `{ event, matches }` also compares the observation with the model's `context` and `state` before sending it, such as the draft a person approved against the draft the model holds.
+- `output: { observes, matches }` checks the code's return value. Map the recording's `output` effect to an observation of kind `observes`. The model must finish there, and `matches` compares its output with that observation. Without `output`, a recorded return value is an `extra-observations` deviation.
+- The first deviation stops the run and is reported with its `reason`:
+  - `unexpected-observation`: the next observation is of another kind.
+  - `missing-observation`: the recording had ended, or the model finished with `output` set and the code never returned.
+  - `input-mismatch`: an actor's or event's `matches` returned `false`.
+  - `output-mismatch`: the model finished, and `output.matches` returned `false`.
+  - `extra-observations`: the model finished or settled idle, and the recording continues.
+  - `ignored-event`: the model was idle, and it does not handle the event the next observation maps to.
+  - `unmapped-actor`: the model invoked a src with no entry in `actors`.
+
+  `expected` is what the model did next, `observed` is the recording's next observation, and `state` is the model's state value.
+- An `actors` key the model does not declare throws `AgentError` with code `unknown-actor-source`.
+- Every actor the model invokes must be declared by name in `setupAgent({ actors })` and invoked by `src`. An invoke that names its logic inline would run that logic for real, so `checkConformance` throws `inline-actor-source` before the run starts.
+- Code that builds its AI SDK model inline or passes module-level tools to `generateText` is recorded with `recordAiSdk`. See [Verify in place](verify-in-place.md#ai-sdk-code).
+- A callback in `actors`, `events`, or `output` that throws ends the check with `AgentError` code `conformance-callback-error`. It is not counted as the actor failing, so a bug in the mapping cannot pass as a conforming run.
+- Concurrent actors consume observations in the order they start, so a model that runs observed actors in parallel needs observations in that order.
+
+What a conforming run shows: the code behaved as the model allows on that run, and the model's rules are proved. It does not show that the code can never break a rule; a run you did not record still can. After a migration with [`loop-to-machine`](https://github.com/statelyai/skills/blob/main/plugins/stately-agent/skills/loop-to-machine/SKILL.md) and `checkParity`, the machine enforces the rules at runtime, and the same model and proofs carry over.
+
 ## CI checks
 
 Everything on this page runs without an API key, so a small script is enough for CI or a generation loop.

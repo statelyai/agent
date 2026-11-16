@@ -11,7 +11,7 @@ Stately Agent is XState plus typed model requests, decisions, and host executors
 ## Start here
 
 - Greenfield, a new agent: [Quickstart](quickstart.md), then [Thinking in state machines](thinking-in-state-machines.md) or a copied [agent pattern](patterns.md).
-- Brownfield, an existing agent loop: [Migrating from a loop](from-a-loop.md), or the [`loop-to-machine`](https://github.com/statelyai/skills/blob/main/plugins/stately-agent/skills/loop-to-machine/SKILL.md) skill from [statelyai/skills](https://github.com/statelyai/skills).
+- Brownfield, an existing agent loop: [Verify in place](verify-in-place.md) to check it against a model without changing it, or [Migrating from a loop](from-a-loop.md), or the [`loop-to-machine`](https://github.com/statelyai/skills/blob/main/plugins/stately-agent/skills/loop-to-machine/SKILL.md) skill from [statelyai/skills](https://github.com/statelyai/skills).
 - Brownfield, an existing async workflow: [Strangler-fig retrofit](strangler-fig.md). Wrap it unchanged with `wrapWorkflow`, then move one phase at a time into states, checked with `checkParity`.
 - [Choosing a run mode](choosing-a-run-mode.md)
 - [Advanced: bare XState actors and hand-written executors](advanced.md)
@@ -35,7 +35,7 @@ Stately Agent is XState plus typed model requests, decisions, and host executors
 | ------------------------------ | ------------------------------------------------------------------------------------------ |
 | `@statelyai/agent`             | Authoring, running, human interaction, and the executor contract                           |
 | `@statelyai/agent/evals`       | Trace analytics: `foldTraces`, `traceCoverage`, `repeatRuns`, `judgeAgreement`             |
-| `@statelyai/agent/testing`     | `lintAgentMachine`, `simulateAgent`, `canReach`, `checkParity`, trajectories, seams        |
+| `@statelyai/agent/testing`     | `lintAgentMachine`, `canReach`, `checkConformance`, `checkParity`, trajectories, seams     |
 | `@statelyai/agent/log`         | The event log: `replay`, `forkEventLog`, `getDecisionAttempts`, hand-built entries, stores |
 | `@statelyai/agent/ai-sdk`      | `createAiSdkExecutors`: the Vercel AI SDK adapter, for language and decision models        |
 | `@statelyai/agent/openai`      | Executors over the raw `openai` package                                                    |

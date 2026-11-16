@@ -337,6 +337,7 @@ replay.output(await runPort(replay.client("anthropic", stand, { methods })));
 compareRecordings(recorder.recording, replay.recording); // { equivalent: true, divergences: [] }
 ```
 
+- `recorder.model` records each provider attempt as a `model` effect. A failed attempt followed by the same request, such as an AI SDK retry, has `retriedBy` set to the call that retried it.
 - Each call is a `call` effect named `<name>.<method>`, such as `anthropic.messages.create`, with its arguments and its result or error.
 - `recorder.fn(name, asyncFn, options?)` wraps one async function the same way, for a client that is a function.
 - Replay answers each call with the next unused recorded call of the same name, in order, whatever its arguments. A call past the recorded ones throws `RecordingDivergenceError`.

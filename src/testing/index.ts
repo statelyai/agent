@@ -75,10 +75,12 @@ export type {
 export {
   compareRecordings,
   createRecorder,
+  recordAiSdk,
   RecordingDivergenceError,
   sameModelCallShape,
 } from "../equivalence.js";
 export type {
+  AiSdkSeam,
   CompareRecordingsOptions,
   CreateRecorderOptions,
   EffectDivergence,
@@ -101,6 +103,19 @@ export type {
   Recorder,
   Recording,
 } from "../equivalence.js";
+export { checkConformance } from "../conformance.js";
+export type {
+  CheckConformanceOptions,
+  ConformanceActor,
+  ConformanceActorArgs,
+  ConformanceDeviation,
+  ConformanceDeviationReason,
+  ConformanceEvent,
+  ConformanceEventArgs,
+  ConformanceObservation,
+  ConformanceOutput,
+  ConformanceReport,
+} from "../conformance.js";
 export { checkParity } from "../check-parity.js";
 export type {
   CheckParityBaseOptions,

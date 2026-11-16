@@ -10,6 +10,7 @@ import { createOpenAiExecutors } from "./openai/index.js";
 import {
   compareRecordings,
   createRecorder,
+  recordAiSdk,
   RecordingDivergenceError,
   type RecordedEffect,
   type RecordedError,
@@ -1261,5 +1262,97 @@ describe("verified equivalence (any client)", () => {
     );
     expect(await write({ user: "ada", token: "other", at: 2 })).toEqual({ ok: true, at: 2 });
     expect(compareRecordings(recorder.recording, replay.recording).equivalent).toBe(true);
+  });
+});
+
+describe("AI SDK seams", () => {
+  const overloaded = () =>
+    new APICallError({
+      message: "overloaded",
+      url: "https://stand-in.invalid/v1",
+      requestBodyValues: {},
+      statusCode: 503,
+      isRetryable: true,
+    });
+  const answer = (text: string) => ({
+    content: [{ type: "text" as const, text }],
+    finishReason: { unified: "stop" as const, raw: "stop" },
+    usage,
+    warnings: [],
+  });
+
+  test("a model call the AI SDK retried names the call that retried it", async () => {
+    const recorder = createRecorder();
+    let attempt = 0;
+    const model = recorder.model(
+      new MockLanguageModelV3({
+        doGenerate: async () => {
+          if (attempt++ === 0) throw overloaded();
+          return answer(`answer ${attempt}`);
+        },
+      }),
+    );
+    await generateText({ model, prompt: "hello" });
+    await generateText({ model, prompt: "hello again" });
+    const calls = recorder.recording.effects as RecordedModelCall[];
+    expect(calls.map((c) => [c.call, c.retriedBy, c.error?.message])).toEqual([
+      [0, 1, "overloaded"],
+      [1, undefined, undefined],
+      [2, undefined, undefined],
+    ]);
+    // One observation per generateText call: skip the attempts that were retried.
+    expect(calls.filter((c) => c.retriedBy === undefined)).toHaveLength(2);
+  });
+
+  test("a failed call followed by a different request is not a retry", async () => {
+    const recorder = createRecorder();
+    let attempt = 0;
+    const model = recorder.model(
+      new MockLanguageModelV3({
+        doGenerate: async () => {
+          if (attempt++ === 0) throw new Error("bad request");
+          return answer("ok");
+        },
+      }),
+    );
+    await generateText({ model, prompt: "first", maxRetries: 0 }).catch(() => {});
+    await generateText({ model, prompt: "second" });
+    const calls = recorder.recording.effects as RecordedModelCall[];
+    expect(calls.map((c) => c.retriedBy)).toEqual([undefined, undefined]);
+  });
+
+  test("recordAiSdk records a module-level tool and swaps the inline model", async () => {
+    // The code under check: a model built inline and a module-level tool.
+    const getWeather = tool({
+      inputSchema: z.object({ city: z.string() }),
+      execute: async ({ city }) => ({ city, sky: "sunny" }),
+    });
+    const inline = new MockLanguageModelV3({
+      doGenerate: async () => {
+        throw new Error("the real model was called");
+      },
+    });
+    let seam: { recorder: Recorder; model: unknown } | undefined;
+    const ai = recordAiSdk({ generateText, streamText }, () => seam);
+    const code = () =>
+      ai.generateText({
+        model: inline,
+        tools: { getWeather },
+        prompt: "weather in Paris?",
+        stopWhen: stepCountIs(3),
+      });
+
+    expect(code).toThrow(/no run is recording/);
+
+    const recorder = createRecorder();
+    seam = { recorder, model: recorder.model(scriptedModel()) };
+    await code();
+    expect(recorder.recording.effects.map((e) => e.kind)).toEqual(["model", "tool", "model"]);
+    expect(recorder.recording.effects[1]).toMatchObject({
+      kind: "tool",
+      name: "getWeather",
+      output: { city: "Paris", sky: "sunny" },
+    });
+    expect(inline.doGenerateCalls).toHaveLength(0);
   });
 });
