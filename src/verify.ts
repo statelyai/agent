@@ -1320,7 +1320,9 @@ export interface ExplorePathsOptions {
    * uses a default key: the state value, context, status, history, pending
    * requests and their invoke inputs, children and their inputs, armed
    * timers, and coupled children's states. A step whose context or inputs
-   * are not plain data (a `Map`, a class instance) is not deduplicated.
+   * are not plain data (a `Map`, a class instance) is not deduplicated. The
+   * key holds structure, not identity: a guard that compares context with an
+   * object held outside the snapshot needs its own `dedupeBy`.
    */
   dedupeBy?: (snapshot: ExploreSnapshot) => string;
   /**
@@ -1472,9 +1474,16 @@ const FINITE_PAYLOAD_CAP = 64;
 const DEFAULT_MAX_NODES = 100_000;
 
 // A lossless key for plain data: JSON values plus `undefined`, `-0`, null
-// prototypes, key order, and shared references. Anything else (a Map, a
-// class instance, a function, a symbol or hidden property) throws, since JSON
-// would collapse it and merge states that differ.
+// prototypes, key order, and shared references within the key. Anything else
+// (a Map, a class instance, a function, a symbol, hidden, or accessor
+// property) throws, since JSON would collapse it and merge states that differ.
+// Identity against objects outside the snapshot is not keyed.
+// An own property holding a value, not a getter a guard could tell apart.
+function isDataProperty(target: object, key: PropertyKey): boolean {
+  const descriptor = Object.getOwnPropertyDescriptor(target, key);
+  return descriptor !== undefined && "value" in descriptor;
+}
+
 function strictKey(value: unknown, refs = new Map<object, number>()): string {
   if (value === undefined) return "u";
   if (value === null || typeof value === "boolean" || typeof value === "string") {
@@ -1497,14 +1506,16 @@ function strictKey(value: unknown, refs = new Map<object, number>()): string {
     if (proto !== Array.prototype) throw new TypeError("unkeyable array");
     // Every index its own, and nothing besides them and `length`.
     for (let index = 0; index < value.length; index++) {
-      if (!Object.hasOwn(value, index)) throw new TypeError("unkeyable sparse array");
+      if (!isDataProperty(value, index)) throw new TypeError("unkeyable sparse array");
     }
     if (own !== value.length + 1) throw new TypeError("unkeyable array");
     return `[${value.map((item) => strictKey(item, refs)).join(",")}]`;
   }
   if (proto !== Object.prototype && proto !== null) throw new TypeError("unkeyable object");
   const keys = Object.keys(value);
-  if (own !== keys.length) throw new TypeError("unkeyable object");
+  if (own !== keys.length || !keys.every((k) => isDataProperty(value, k))) {
+    throw new TypeError("unkeyable object");
+  }
   // In enumeration order, which a guard can read.
   return `${proto === null ? "N" : ""}{${keys
     .map((k) => `${JSON.stringify(k)}:${strictKey((value as Record<string, unknown>)[k], refs)}`)

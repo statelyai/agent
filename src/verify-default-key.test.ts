@@ -320,6 +320,34 @@ describe("canReach — default key", () => {
     expect(await canReach(machine, "goal", { maxDepth: 3 })).toMatchObject({ reachable: true });
   });
 
+  test("an accessor property is not merged with a data property", async () => {
+    const machine = createMachine({
+      context: { item: { n: 0 } as { n: number } },
+      initial: "waiting",
+      states: {
+        waiting: {
+          on: {
+            WRAP: () => ({
+              context: {
+                item: {
+                  get n() {
+                    return 0;
+                  },
+                },
+              },
+            }),
+            GO: ({ context }) =>
+              Object.getOwnPropertyDescriptor(context.item, "n")?.get
+                ? { target: "goal" }
+                : undefined,
+          },
+        },
+        goal: { type: "final" },
+      },
+    });
+    expect(await canReach(machine, "goal", { maxDepth: 3 })).toMatchObject({ reachable: true });
+  });
+
   test("negative zero is not merged with zero", async () => {
     const machine = createMachine({
       context: { n: 0 },
