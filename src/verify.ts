@@ -1968,6 +1968,22 @@ function stepsOf(log: StepLog | undefined): ExploreStep[] {
 // undelivered, and a live run delivers it. Pending invokes skip them.
 type FinishedChild = { id: string; output: unknown } | { id: string; error: unknown };
 
+// The finished children as invokes, for the coupled pump to register.
+function finishedInvokes(step: AgentStep): PendingInvoke[] {
+  const children = (step.snapshot.children ?? {}) as Record<string, ChildRef | undefined>;
+  return finishedChildren(step).map(({ id }) => {
+    const ref = children[id]!;
+    const own = ref as { src?: unknown; logic?: unknown };
+    return {
+      id,
+      src: typeof own.src === "string" ? own.src : id,
+      input: ref.options?.input,
+      logic: own.logic,
+      ref,
+    };
+  });
+}
+
 function finishedChildren(step: AgentStep): FinishedChild[] {
   const children = (step.snapshot.children ?? {}) as Record<string, ChildRef | undefined>;
   return Object.keys(children)
@@ -2461,10 +2477,13 @@ function explore(
       return undefined;
     }
     const invokes = pendingInvokes(step);
-    if (!invokes.some(isExploredChild)) {
+    // Coupled: a finished child machine is stepped like the others, so
+    // `register` delivers its entry sends before its completion.
+    const finishedKids = coupled ? finishedInvokes(step).filter(isExploredChild) : [];
+    if (!invokes.some(isExploredChild) && finishedKids.length === 0) {
       return undefined;
     }
-    const kids = coupled ? invokes.filter(isExploredChild) : [];
+    const kids = coupled ? [...invokes.filter(isExploredChild), ...finishedKids] : [];
     const blocked: string[] = [];
     const asFork = (
       settle: ReturnType<typeof settleFor>,
@@ -2507,12 +2526,15 @@ function explore(
         .flatMap((invoke) =>
           asFork(settleFor(invoke.id, invoke.src, false, invoke), invoke.id, invoke.src, false),
         ),
-      // Coupled: `register` settles a finished child in id order with the rest.
-      ...(coupled ? [] : finishedChildren(step)).map((finished) =>
-        "error" in finished
-          ? { id: finished.id, errors: [finished.error], outputs: [] }
-          : { id: finished.id, errors: [], outputs: [finished.output] },
-      ),
+      // Coupled: `register` settles a finished child machine in id order with
+      // the rest; any other finished child settles as a fork.
+      ...finishedChildren(step)
+        .filter((finished) => !finishedKids.some((kid) => kid.id === finished.id))
+        .map((finished) =>
+          "error" in finished
+            ? { id: finished.id, errors: [finished.error], outputs: [] }
+            : { id: finished.id, errors: [], outputs: [finished.output] },
+        ),
     ];
     // Each pending decision's choices are branches of the same node; its
     // `errors` entry, if any, is a failing settlement like the others.
@@ -3016,20 +3038,9 @@ function explore(
   // False when priming a child ran past the delivery cap.
   const register = (step: AgentStep, kids: Map<string, KidState>, queue: Delivery[]): boolean => {
     // A child machine that finished as it started is registered too: its
-    // completion is queued in id order with the other children's entry sends.
-    const children = (step.snapshot.children ?? {}) as Record<string, ChildRef | undefined>;
-    const finished = finishedChildren(step).map(({ id }): PendingInvoke => {
-      const ref = children[id]!;
-      const own = ref as { src?: unknown; logic?: unknown };
-      return {
-        id,
-        src: typeof own.src === "string" ? own.src : id,
-        input: ref.options?.input,
-        logic: own.logic,
-        ref,
-      };
-    });
-    const live = [...pendingInvokes(step), ...finished]
+    // entry sends, then its completion, are queued in id order with the
+    // other children's.
+    const live = [...pendingInvokes(step), ...finishedInvokes(step)]
       .filter(isExploredChild)
       .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
     const sessions = new Set(live.map((invoke) => childSession(invoke.id, invoke.ref)));

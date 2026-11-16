@@ -1031,4 +1031,62 @@ describe("coupled child usage", () => {
     expect(startFirst.complete).toBe(true);
     expect(startFirst.terminals.map((terminal) => terminal.state)).toEqual(["sawStart"]);
   });
+
+  test("'coupled' delivers a finished child's entry sends before its completion", async () => {
+    const ready = createMachine({
+      initial: "finished",
+      states: { finished: { type: "final", entry: tell("READY") } },
+    } as never) as AnyStateMachine;
+    const agent = setupAgent({
+      context: z.object({ ready: z.boolean() }),
+      events: { READY: z.object({}) },
+    });
+    const parent = agent.createMachine({
+      context: { ready: false },
+      initial: "waiting",
+      states: {
+        waiting: {
+          invoke: {
+            id: "ready",
+            src: ready,
+            onDone: ({ context }: { context: { ready: boolean } }) => ({
+              target: context.ready ? "done" : "early",
+            }),
+          },
+          on: { READY: ({ context }) => ({ context: { ...context, ready: true } }) },
+        },
+        done: { type: "final" },
+        early: { type: "final" },
+      },
+    });
+    const report = await explorePaths(parent, { children: "coupled", hostEvents: [] });
+    expect(report.complete).toBe(true);
+    expect(report.terminals.map((terminal) => terminal.state)).toEqual(["done"]);
+  });
+
+  test("'coupled' carries a nested finished child's completion up to the root", async () => {
+    const leaf = createMachine({
+      initial: "finished",
+      states: { finished: { type: "final" } },
+    } as never) as AnyStateMachine;
+    const middle = createMachine({
+      initial: "waiting",
+      states: {
+        waiting: { invoke: { id: "leaf", src: leaf, onDone: { target: "finished" } } },
+        finished: { type: "final" },
+      },
+    } as never) as AnyStateMachine;
+    const root = createMachine({
+      initial: "waiting",
+      states: {
+        waiting: { invoke: { id: "middle", src: middle, onDone: { target: "done" } } },
+        done: { type: "final" },
+      },
+    } as never) as AnyStateMachine;
+    const report = await explorePaths(root, { children: "coupled", hostEvents: [] });
+    expect(report.complete).toBe(true);
+    expect(report.terminals.map((terminal) => [terminal.status, terminal.state])).toEqual([
+      ["done", "done"],
+    ]);
+  });
 });
