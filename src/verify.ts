@@ -3114,7 +3114,7 @@ function explore(
     }
     const held = kids ?? new Map<string, KidState>();
     if (
-      pendingInvokes(step)
+      [...pendingInvokes(step), ...finishedInvokes(step)]
         .filter(isExploredChild)
         .some((invoke) => !held.has(childSession(invoke.id, invoke.ref)))
     ) {

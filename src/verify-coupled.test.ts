@@ -1062,6 +1062,36 @@ describe("coupled child usage", () => {
     const report = await explorePaths(parent, { children: "coupled", hostEvents: [] });
     expect(report.complete).toBe(true);
     expect(report.terminals.map((terminal) => terminal.state)).toEqual(["done"]);
+    // Entered later (START): the snapshot before its entry send applies is not
+    // a state the machines are in.
+    const gated = setupAgent({
+      context: z.object({ ready: z.boolean() }),
+      events: { READY: z.object({}), START: z.object({}) },
+    }).createMachine({
+      context: { ready: false },
+      initial: "idle",
+      states: {
+        idle: { on: { START: { target: "waiting" } } },
+        waiting: {
+          invoke: {
+            id: "ready",
+            src: ready,
+            onDone: ({ context }: { context: { ready: boolean } }) => ({
+              target: context.ready ? "done" : "early",
+            }),
+          },
+          on: { READY: ({ context }) => ({ context: { ...context, ready: true } }) },
+        },
+        done: { type: "final" },
+        early: { type: "final" },
+      },
+    });
+    const stale = await canReach(
+      gated,
+      (snapshot) => snapshot.matches("waiting") && !snapshot.context.ready,
+      { children: "coupled", hostEvents: ["START"] },
+    );
+    expect(stale).toMatchObject({ reachable: false, complete: true });
   });
 
   test("'coupled' carries a nested finished child's completion up to the root", async () => {
