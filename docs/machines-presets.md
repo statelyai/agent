@@ -26,7 +26,7 @@ One model turn's tool calls, each approved or rejected on its own. Only approved
 
 ```ts
 import { createAsyncLogic } from "xstate";
-import { createAgentRuntime, runToQuiescence } from "@statelyai/agent";
+import { runAgent } from "@statelyai/agent";
 import { createApprovalBatchMachine } from "@statelyai/agent/machines";
 
 const machine = createApprovalBatchMachine({
@@ -40,10 +40,10 @@ const machine = createApprovalBatchMachine({
   }),
 });
 
-const paused = await runToQuiescence(createAgentRuntime(machine), {
+const paused = await runAgent(machine, {
   input: { calls: [{ id: "call_1", name: "deleteFile", args: { path: "a.txt" } }] },
 });
-const result = await runToQuiescence(createAgentRuntime(machine), {
+const result = await runAgent(machine, {
   snapshot: paused.persist(),
   event: { type: "APPROVE", callId: "call_1" },
 });
@@ -77,7 +77,7 @@ Examples to eject toward:
 The preset machine carries `version: "1"`, using XState's standard `createMachine({ version })` prop. This is the machine's own topology version. It is unrelated to the `@statelyai/agent` package version. Native persisted snapshots and trace events carry that version:
 
 ```ts
-const result = await runToQuiescence(createAgentRuntime(machine, { executors }), { input });
+const result = await runAgent(machine, { executors, input });
 // result.persist().version === "1"
 ```
 
@@ -86,7 +86,7 @@ The versioning policy:
 - The version identifies the machine's topology, not the release that built it. Prompt wording can change without a version bump.
 - A topology change that an old snapshot cannot restore bumps the version. Migrate it with XState's machine-level `migrate(snapshot, fromVersion)`.
 
-The same prop works for your own machines. Set `version` in `createMachine(...)` and `runToQuiescence` stamps that value instead of the structural hash, which changes on any edit.
+The same prop works for your own machines. Set `version` in `createMachine(...)` and `runAgent` stamps that value instead of the structural hash, which changes on any edit.
 
 ## Related
 

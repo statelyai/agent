@@ -6,12 +6,8 @@
 import { describe, expect, test, vi } from "vitest";
 import { createMachine, initialTransition, type InspectionEvent } from "xstate";
 import { z } from "zod";
-import {
-  createAgentRuntime,
-  runToQuiescence,
-  setupAgent,
-  type AgentRequestExecutors,
-} from "./index.js";
+import { createAgentRuntime, setupAgent, type AgentRequestExecutors } from "./index.js";
+import { runToQuiescence } from "./run-agent.js";
 import { replay } from "./log/index.js";
 
 function deferred<T = void>(): { promise: Promise<T>; resolve: (value: T) => void } {

@@ -8,12 +8,12 @@ import {
   createTextLogic,
   provideExecutors,
   createAgentRuntime,
-  runToQuiescence,
   setupAgent,
   traceTransitions,
   type AgentTraceEvent,
   type ChosenEvent,
 } from "./index.js";
+import { runToQuiescence } from "./run-agent.js";
 
 /** Drops the versioned envelope fields, leaving only the trace payload. */
 function stripEnvelope(event: AgentTraceEvent): Record<string, unknown> {

@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { createAgentRuntime, runToQuiescence } from "@statelyai/agent";
+import { runAgent } from "@statelyai/agent";
 import { createMockModelExecutors } from "../mock-model.js";
 import { reflectionWriterMachine, runReflectionWriterExample } from "./index.js";
 
@@ -204,13 +204,11 @@ test("every rewrite sees its previous draft and the latest critique; counters ag
     },
   });
   const emitted: Array<{ type: string; rewrite: number }> = [];
-  const result = await runToQuiescence(
-    createAgentRuntime(reflectionWriterMachine, {
-      executors,
-      on: { "*": (event) => emitted.push({ type: event.type, rewrite: event.rewrite }) },
-    }),
-    { input: { topic: "Car-free downtowns" } },
-  );
+  const result = await runAgent(reflectionWriterMachine, {
+    executors,
+    on: { "*": (event) => emitted.push({ type: event.type, rewrite: event.rewrite }) },
+    input: { topic: "Car-free downtowns" },
+  });
   expect(result.status).toBe("done");
 
   // Each rewrite's transcript ends with the draft it rewrites and the critique

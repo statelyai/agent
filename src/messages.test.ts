@@ -1,12 +1,7 @@
 import { expect, test } from "vitest";
 import { z } from "zod";
-import {
-  getMessageText,
-  isAgentMessages,
-  createAgentRuntime,
-  runToQuiescence,
-  setupAgent,
-} from "./index.js";
+import { getMessageText, isAgentMessages, createAgentRuntime, setupAgent } from "./index.js";
+import { runToQuiescence } from "./run-agent.js";
 
 test("request actors resolve with the executor's framework-native messages on output.messages", async () => {
   const agent = setupAgent({

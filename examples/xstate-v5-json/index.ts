@@ -23,12 +23,7 @@ import { readFileSync } from "node:fs";
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import {
-  createAgentRuntime,
-  createTextLogic,
-  runToQuiescence,
-  type AgentRequestExecutors,
-} from "@statelyai/agent";
+import { createTextLogic, type AgentRequestExecutors, runAgent } from "@statelyai/agent";
 import { fromV5Config } from "./from-v5-config.js";
 
 /** Change requests allowed before the machine gives up. */
@@ -104,11 +99,12 @@ export async function runXstateV5JsonExample(
     ...reviews,
   ];
 
-  let result = await runToQuiescence(createAgentRuntime(supportReplyMachine, { executors }));
+  let result = await runAgent(supportReplyMachine, { executors });
   while (result.status === "idle") {
     const event = events.shift();
     if (!event) throw new Error(`No event left to send in '${String(result.snapshot.value)}'.`);
-    result = await runToQuiescence(createAgentRuntime(supportReplyMachine, { executors }), {
+    result = await runAgent(supportReplyMachine, {
+      executors,
       snapshot: result.persist(),
       event: event as never,
     });

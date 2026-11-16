@@ -119,7 +119,6 @@ export {
   createAgentRuntime,
   isAgentIdle,
   runAgent,
-  runToQuiescence,
   serializeTraceEvent,
   traceTransitions,
 } from "./run-agent.js";

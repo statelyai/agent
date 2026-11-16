@@ -3,21 +3,19 @@
 The machine owns agent control flow. A host supplies model request executors.
 
 ```ts no-check
-const result = await runToQuiescence(
-  createAgentRuntime(machine, {
-    executors: {
-      generateText: async (request, { signal }) => {
-        const response = await mySdk.generate({
-          model: request.model,
-          prompt: request.prompt,
-          signal,
-        });
-        return { result: response.text, messages: response.messages };
-      },
+const result = await runAgent(machine, {
+  executors: {
+    generateText: async (request, { signal }) => {
+      const response = await mySdk.generate({
+        model: request.model,
+        prompt: request.prompt,
+        signal,
+      });
+      return { result: response.text, messages: response.messages };
     },
-  }),
-  { input },
-);
+  },
+  input,
+});
 ```
 
 Text, stream, and decision executors all receive `(request, info)`; cancellation is `info.signal`.
@@ -35,7 +33,7 @@ Execution is at-least-once. A host runs the request and then journals its comple
 - A [decision strategy](decisions.md#decision-strategies)'s sub-calls append their role: `<executionId>:<requestId>#<n>.<attempt>.pick`, `.group`, or `.fill`.
 - A resumed run re-executing an in-flight request passes the same `callKey` as the original attempt.
 - A fork mints its own lineage id (see [Fork](event-log.md#fork)), so none of its calls shares a key with its parent's.
-- It is `undefined` off the `runToQuiescence` path (a bare `provideExecutors` bind) and on a run with no event log.
+- It is `undefined` off the `runAgent` path (a bare `provideExecutors` bind) and on a run with no event log.
 - Only model calls get one. A plain actor (`createAsyncLogic`, a tool) in flight at a crash runs again on resume with no key. Derive an idempotency key from the domain (an order id, a booking key) and dedupe inside the effect.
 
 The key names the call _site_, not the request. A version bridge keeps the lineage id, so a migrated machine that asks something else at the same invoke site produces the same key for a different request. Cache on `callKey` **and** a fingerprint of the request, and reuse the cached result only when the request also matches. Pass `callKey` to a provider as its dedupe key for that identical request:
@@ -63,10 +61,7 @@ import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 const models = { fast: openai("gpt-6-luna") };
 const agent = setupAgent({ models /* schemas and requests */ });
 
-await runToQuiescence(
-  createAgentRuntime(machine, { executors: createAiSdkExecutors({ models }) }),
-  { input },
-);
+await runAgent(machine, { executors: createAiSdkExecutors({ models }), input });
 ```
 
 Passing the same `models` map to `setupAgent({ models })` types the machine's model refs, so a request naming a model the host does not have is a compile error. Executors are always passed explicitly. Core does not import or require the AI SDK at runtime.
@@ -97,7 +92,7 @@ const executors = createOpenAiExecutors({
   },
 });
 
-await runToQuiescence(createAgentRuntime(machine, { executors }), { input });
+await runAgent(machine, { executors, input });
 ```
 
 `client` is injected, so the API key, base URL, and transport stay with the host. `openai` 5 or newer is required. It is an optional peer dependency with no version range, so an app on `openai` 4 still installs the core, and it is imported for types only. A client wrapper must forward both `responses.create` and `chat.completions.create` unless `api` pins one of them.
@@ -164,7 +159,7 @@ const executors = createTanStackAiExecutors({
   },
 });
 
-await runToQuiescence(createAgentRuntime(machine, { executors }), { input });
+await runAgent(machine, { executors, input });
 ```
 
 The options mirror `createAiSdkExecutors`:
@@ -197,7 +192,7 @@ The rest of the contract matches the other adapters:
 
 ## Finish reasons and truncation
 
-An executor result may report `finishReason`, normalized to `'stop'`, `'length'`, `'tool-calls'`, `'content-filter'`, or `'other'`. Map the provider's own vocabulary onto those five and leave the raw value on `raw`. `runToQuiescence` lifts the normalized reason onto the `request.end` trace event, beside `usage`.
+An executor result may report `finishReason`, normalized to `'stop'`, `'length'`, `'tool-calls'`, `'content-filter'`, or `'other'`. Map the provider's own vocabulary onto those five and leave the raw value on `raw`. `runAgent` lifts the normalized reason onto the `request.end` trace event, beside `usage`.
 
 A `'length'` finish is the host's to interpret, because only the host sees it:
 
@@ -255,7 +250,7 @@ Tool-bearing calls are not retried here because tools may have side effects. Use
 
 ## Resume events off the wire
 
-A host that resumes a run from an HTTP request or a socket frame parses the payload at the boundary, then hands the parsed event to `runToQuiescence`:
+A host that resumes a run from an HTTP request or a socket frame parses the payload at the boundary, then hands the parsed event to `runAgent`:
 
 ```ts no-check
 let event;
@@ -265,9 +260,7 @@ try {
   return Response.json({ error: String(error) }, { status: 400 });
 }
 
-const result = await runToQuiescence(createAgentRuntime(machine, { store, threadId, executors }), {
-  event,
-});
+const result = await runAgent(machine, { store, threadId, executors, event });
 
 if (result.ignored) {
   return Response.json(
@@ -279,7 +272,7 @@ if (result.ignored) {
 
 - `parseAgentEvent(machineOrSnapshot, payload)` takes `unknown` and returns the event typed as the machine's event union. Give it the machine to read the event schemas `setupAgent` registered, or any snapshot of it.
 - It throws `AgentInvalidEventPayloadError` (code `invalid-event-payload`) for a payload that is not an object with a string `type`, a reserved `@agent.*` type, or fields that fail the schema. That is the 400.
-- It does not ask whether the current state handles the event, and `runToQuiescence` adds no check of its own.
+- It does not ask whether the current state handles the event, and `runAgent` adds no check of its own.
 - An event the resumed state has no transition for is ignored: the run settles normally and `result.ignored` holds the event. Answer 409 if the client should know nothing happened.
 
 See [Persistence](persistence.md#resume-with-an-event-off-the-wire).

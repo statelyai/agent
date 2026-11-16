@@ -23,7 +23,6 @@ import {
   isAgentIdle,
   createAgentRuntime,
   runAgent,
-  runToQuiescence,
   serializeTraceEvent,
   setupAgent,
   type AgentDecisionRequest,
@@ -35,6 +34,7 @@ import {
   type AgentTraceEvent,
   type ChosenEvent,
 } from "./index.js";
+import { runToQuiescence } from "./run-agent.js";
 import {
   AGENT_INIT_EVENT_TYPE,
   forkEventLog,

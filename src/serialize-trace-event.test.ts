@@ -7,13 +7,13 @@ import {
   createAgentSchemas,
   createTextLogic,
   createAgentRuntime,
-  runToQuiescence,
   serializeTraceEvent,
   setupAgent,
   type AgentTraceEvent,
   type JsonSerializableTraceEvent,
   type AgentRunErrorCause,
 } from "./index.js";
+import { runToQuiescence } from "./run-agent.js";
 import { AgentLintError } from "./testing/index.js";
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 

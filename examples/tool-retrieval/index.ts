@@ -72,13 +72,7 @@ import { createAsyncLogic } from "xstate";
 import { experimental_decide, type Experimental_DecisionModel } from "ai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import {
-  getStatePath,
-  createAgentRuntime,
-  runToQuiescence,
-  setupAgent,
-  type AgentRequestExecutors,
-} from "@statelyai/agent";
+import { getStatePath, setupAgent, type AgentRequestExecutors, runAgent } from "@statelyai/agent";
 
 const models = { agent: openai("gpt-6-luna") };
 
@@ -530,22 +524,18 @@ export async function runToolRetrievalExample(
     onProgress,
   } = options;
   const progress: string[] = [];
-  const result = await runToQuiescence(
-    createAgentRuntime(toolRetrievalMachine, {
-      ...(decide
-        ? { executors: { decide } }
-        : { executors: createAiSdkExecutors(toolRetrievalMachine) }),
-      ...(judge ? { actors: { selectTools: createSelectTools(judge) } } : {}),
-      onTransition: (snapshot) => {
-        const state = getStatePath(snapshot);
-        progress.push(state);
-        onProgress?.(state);
-      },
-    }),
-    {
-      input: { question },
+  const result = await runAgent(toolRetrievalMachine, {
+    ...(decide
+      ? { executors: { decide } }
+      : { executors: createAiSdkExecutors(toolRetrievalMachine) }),
+    ...(judge ? { actors: { selectTools: createSelectTools(judge) } } : {}),
+    onTransition: (snapshot) => {
+      const state = getStatePath(snapshot);
+      progress.push(state);
+      onProgress?.(state);
     },
-  );
+    input: { question },
+  });
 
   if (result.status !== "done") {
     throw new Error(`Tool retrieval example did not complete: ${result.status}`);

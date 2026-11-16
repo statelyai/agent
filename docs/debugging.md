@@ -3,14 +3,12 @@
 Use the XState inspection protocol for framework behavior and Agent traces for request behavior.
 
 ```ts no-check
-const result = await runToQuiescence(
-  createAgentRuntime(machine, {
-    executors,
-    inspect: (event) => inspector.next(event),
-    onTrace: (event) => logger.write(serializeTraceEvent(event)),
-  }),
-  { input },
-);
+const result = await runAgent(machine, {
+  executors,
+  inspect: (event) => inspector.next(event),
+  onTrace: (event) => logger.write(serializeTraceEvent(event)),
+  input,
+});
 ```
 
 `inspect` is the raw XState stream. `onTrace` adds Agent request start/end/error, chunks, usage, emitted events, transitions, and the terminal run result.
