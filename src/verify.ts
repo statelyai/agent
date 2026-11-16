@@ -1316,7 +1316,11 @@ export interface ExplorePathsOptions {
    * at a shallower depth), so payload and output branching that converges
    * stays tractable. Return everything a guard, choice, or output reads:
    * a key that drops a field the machine reads makes the search unsound.
-   * Without it, every path is explored in full.
+   * Without it, `explorePaths` explores every path in full, and `canReach`
+   * uses a default key: the state value, context, status, history, pending
+   * requests, children, armed timers, and coupled children's states. A step
+   * whose context is not plain data (a `Map`, a class instance) is not
+   * deduplicated.
    */
   dedupeBy?: (snapshot: ExploreSnapshot) => string;
   /**
@@ -1466,6 +1470,69 @@ const FINITE_PAYLOAD_CAP = 64;
 
 // Default cap on branch points expanded per exploration.
 const DEFAULT_MAX_NODES = 100_000;
+
+// A lossless key for plain data: JSON values plus `undefined`. Anything else
+// (a Map, a class instance, a function, a cycle) throws, since JSON would
+// collapse it and merge states that differ.
+function strictKey(value: unknown, seen = new Set<object>()): string {
+  if (value === undefined) return "u";
+  if (value === null || typeof value === "boolean" || typeof value === "string") {
+    return JSON.stringify(value);
+  }
+  if (typeof value === "number") {
+    return `n${String(value)}`;
+  }
+  if (typeof value !== "object") {
+    throw new TypeError(`unkeyable ${typeof value}`);
+  }
+  if (seen.has(value)) throw new TypeError("unkeyable cycle");
+  seen.add(value);
+  let key: string;
+  if (Array.isArray(value)) {
+    key = `[${value.map((item) => strictKey(item, seen)).join(",")}]`;
+  } else {
+    const proto = Object.getPrototypeOf(value);
+    if (proto !== Object.prototype && proto !== null) throw new TypeError("unkeyable object");
+    key = `{${Object.keys(value)
+      .sort()
+      .map((k) => `${JSON.stringify(k)}:${strictKey((value as Record<string, unknown>)[k], seen)}`)
+      .join(",")}}`;
+  }
+  seen.delete(value);
+  return key;
+}
+
+function tryKey(key: () => string): string | undefined {
+  try {
+    return key();
+  } catch {
+    return undefined;
+  }
+}
+
+// canReach's default `dedupeBy`: everything a settled step's future reads.
+// Throws (no dedupe for that step) when a value is not plain data.
+function defaultStepKey(step: AgentStep): string {
+  const snapshot = step.snapshot as AnyMachineSnapshot & {
+    historyValue?: unknown;
+    timers?: readonly Record<string, unknown>[];
+  };
+  return strictKey([
+    snapshot.value,
+    snapshot.context,
+    snapshot.status,
+    snapshot.historyValue ?? null,
+    step.requests.map((request) => request.id),
+    Object.keys(snapshot.children ?? {}).sort(),
+    (snapshot.timers ?? []).map((timer) => [
+      timer["id"],
+      timer["type"],
+      timer["delay"],
+      timer["event"],
+      timer["target"] === "self" ? "self" : (timer["target"] as { id?: string } | undefined)?.id,
+    ]),
+  ]);
+}
 
 // Cap on nested child-machine explorations (`children: "explore"`).
 const MAX_CHILD_NESTING = 4;
@@ -2042,6 +2109,8 @@ function explore(
   // canReach's state target matches states passed through, so it is checked
   // while coupled children are still starting; a predicate sees settled steps.
   stateTarget = false,
+  // canReach without `dedupeBy`: dedupe on every field a step's future reads.
+  defaultDedupe = false,
 ): {
   report: AgentPathReport;
   witness?: ChosenEvent[];
@@ -3325,7 +3394,7 @@ function explore(
     const snapshot = kid.step.snapshot as AnyMachineSnapshot;
     try {
       return (
-        JSON.stringify([
+        strictKey([
           snapshot.value,
           snapshot.context,
           snapshot.status,
@@ -3412,9 +3481,14 @@ function explore(
     // below it. A shallower revisit explores again: it has more depth left
     // (the depth-first walk can reach a key deep before it reaches it
     // shallow).
-    if (options.dedupeBy) {
+    const base = options.dedupeBy
+      ? options.dedupeBy(withKidSnapshots(settled.snapshot as AnyMachineSnapshot, nodeKids))
+      : defaultDedupe
+        ? tryKey(() => defaultStepKey(settled))
+        : undefined;
+    if (base !== undefined) {
       const key =
-        options.dedupeBy(withKidSnapshots(settled.snapshot as AnyMachineSnapshot, nodeKids)) +
+        base +
         (delivered?.size ? `\u0001${[...delivered].sort().join("\u0001")}` : "") +
         kidsKey(nodeKids) +
         // An ordering target's trigger is history the snapshot does not hold.
@@ -4166,6 +4240,7 @@ export async function canReach(
     false,
     ordering,
     resolvedTarget !== undefined,
+    options.dedupeBy === undefined,
   );
   if (witness !== undefined) {
     return {

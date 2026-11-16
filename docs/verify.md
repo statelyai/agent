@@ -259,6 +259,7 @@ By default, events are applied as `{ type }`. A guard that reads the payload, su
 - A text request's canned value is its `result`, with `messages: []`. Wrap it in `textOutput(result, { messages })` from `@statelyai/agent/testing` when the machine reads `output.messages`.
 - `dedupeBy` projects a settled snapshot to a key. Each key is explored once, or again when reached at a shallower depth. The key must include every field a guard, choice, or `onDone` reads, or the search misses paths. Include `snapshot.timers` when a delayed `enq.raise` outlives the state that scheduled it.
 - Under `dedupeBy`, `terminals` are representative paths, not every path: a revisited key is not explored again, so the paths below it appear once.
+- `canReach` without `dedupeBy` uses a default key: the state value, context, status, history, pending requests, children, armed timers, and coupled children's states. A step whose context holds anything but plain data (a `Map`, a class instance, a function) is not deduplicated. `explorePaths` without `dedupeBy` explores every path in full.
 
 ```ts
 const amounts = [0, 1, 100, 100.01, 500];
@@ -387,7 +388,7 @@ const report = await explorePaths(parentMachine, {
 - What a child's move sends its own children, and their replies, happen in the same move. A child's send to a sibling is delivered to that sibling, entry sends included. A child's sends reach their targets in the order it made them, each run to quiescence before the next, as a live run does. A send to an actor the search does not model lists the event type in `unexpandedEvents`, so the report is not complete.
 - Child moves count against `maxDepth` like the parent's own branches. On a path they carry `actor` with the child's id (a grandchild's as `child.grandchild`): the host events it received, its choices, its settled work. The events it sends the parent appear as the parent receives them.
 - A target predicate and `dedupeBy` see each coupled child's explored state: `snapshot.children[id].getSnapshot()` returns the state the search stepped the child to, its own coupled children likewise. A parent's send and the child's receipt are one state, so a cross-actor invariant such as "every chunk the parent forwarded, a child received" can be a target.
-- With `dedupeBy`, each child's state joins the key. Without it, every interleaving is explored in full.
+- With `dedupeBy`, and in `canReach`'s default key, each child's state joins the key. `explorePaths` without `dedupeBy` explores every interleaving in full.
 - A coupled child's text requests deliver `@agent.usage` to the root, as a run does. See [Usage events](#usage-events).
 - A child that stops on `needs-output` or `max-depth` ends the parent branch the same way, so the parent report is not complete.
 
@@ -464,7 +465,7 @@ When `complete` is false, `unexplored` lists why, in the wording of the `explore
 
 Raise the caps, add `dedupeBy`, supply the missing outputs, or add `payloads` entries until it is true.
 
-A long-lived machine that never finishes, such as a chat loop, ends every path at `maxDepth`, so `complete` is never true. Its proofs are bounded:
+A long-lived machine that never finishes, such as a chat loop, ends every path at `maxDepth` unless its states repeat, so `complete` is false when its context keeps growing. Its proofs are bounded:
 
 - `reachable: false` whose only `unexplored` notes are `max-depth` notes means no path of up to `maxDepth` branch points reaches the target.
 - Any other note, such as `needs-output` or `unexpanded`, is a gap within that bound too.

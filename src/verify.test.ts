@@ -693,13 +693,14 @@ describe("canReach — reachability with a witness path", () => {
 
   test("an incomplete search says why: a path that hit maxDepth", async () => {
     const machine = setupAgent({
-      context: z.object({}),
+      context: z.object({ n: z.number() }),
       events: { TICK: z.object({}) },
     }).createMachine({
-      context: () => ({}),
+      // The counter makes every state new, so no default key repeats.
+      context: () => ({ n: 0 }),
       initial: "a",
       states: {
-        a: { on: { TICK: { target: "b" } } },
+        a: { on: { TICK: ({ context }) => ({ target: "b", context: { n: context.n + 1 } }) } },
         b: { on: { TICK: { target: "a" } } },
         never: {},
       },
