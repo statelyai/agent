@@ -8,7 +8,7 @@ What you get:
 
 - **Proofs with no model.** Put the rule that must never break behind a sentinel state, then `canReach(machine, "refundedOverLimit", options)` returns `reachable: false` and `complete: true` with no API key. See [Testing and verification](https://github.com/statelyai/agent/blob/next/docs/verify.md).
 - **Resume and replay from the event log.** A paused run resumes with `runAgent(machine, { snapshot, event })`, and `replay(machine, result.events)` rebuilds any point of a run with no model calls. See [The event log](https://github.com/statelyai/agent/blob/next/docs/event-log.md).
-- **Checked ports.** `createRecorder` records the old loop's model and tool calls, `compareRecordings` replays them against the machine, and `compareRuns` labels every scenario `same`, `intended`, or `regression`. See [Parity with the code you replace](https://github.com/statelyai/agent/blob/next/docs/evals.md#parity-with-the-code-you-replace).
+- **Checked ports.** `checkParity` records the old code's side effects, replays them against the machine, and reports every scenario where the two differ. `compareRuns` labels outcome-level differences `same`, `intended`, or `regression`. See [Parity with the code you replace](https://github.com/statelyai/agent/blob/next/docs/evals.md#parity-with-the-code-you-replace).
 
 The machine is also a diagram: stream any run to the Stately inspector with `runAgent`'s `inspect` option. See [Inspect a run](https://github.com/statelyai/agent/blob/next/docs/observability.md#inspect-a-run).
 

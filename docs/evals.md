@@ -245,6 +245,18 @@ for (const { states, request } of getDecisionRequests(trace, { name: "chooseReso
 
 ## Parity with the code you replace
 
+Start with `checkParity`. Pick a lower-level tool only when the old code does not route its side effects through one object.
+
+| The old code                                                    | Use                                                                                 | Compares                                            |
+| --------------------------------------------------------------- | ----------------------------------------------------------------------------------- | --------------------------------------------------- |
+| Sends every side effect through one `effects` object            | `checkParity`, see [Check parity](strangler-fig.md#check-parity)                    | Each effect's name, order, arguments, and result    |
+| Calls a model client or SDK directly                            | `createRecorder` and `compareRecordings`, see [Any model client](#any-model-client) | Each recorded call and the output                   |
+| Changes on purpose, or a live model makes calls differ each run | `compareRuns`, see [Outcome labels](#outcome-labels)                                | The terminal outcome, the effects, and rule breaks  |
+
+`checkParity` records `before` with `createRecorder`, replays `after` against the recording, and compares the two with `compareRecordings`, in one call per scenario.
+
+### Outcome labels
+
 `compareRuns` (from `@statelyai/agent/testing`) runs every scenario through the existing implementation and its replacement, and labels each difference. Use it when you port a loop to a machine and need to show where they behave the same and where the machine differs on purpose.
 
 ```ts no-check
