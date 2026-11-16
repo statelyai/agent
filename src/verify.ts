@@ -40,6 +40,7 @@ import { isTextLogic, type AgentCallUsage, type AgentTextResult } from "./text-l
 import type { AgentMessage } from "./types.js";
 import { AGENT_USAGE_EVENT_TYPE, type AgentUsageEvent } from "./usage.js";
 import { executorBoundLogics, getRegisteredAgentExecutionOptions } from "./internal/registry.js";
+import { resolveMachineInput } from "./internal/machine-input.js";
 import {
   doneEvent,
   errorEvent,
@@ -598,6 +599,11 @@ export interface SimulationTrailEntry {
 
 /** Options for {@link simulateAgent}. */
 export interface SimulateAgentOptions {
+  /**
+   * The machine input. A machine with a declared input schema validates it as
+   * a run does: input the schema rejects throws `invalid-machine-input`, and
+   * the parsed value (defaults filled) seeds the search.
+   */
   input?: unknown;
   script: SimulationScript;
   /** Max steps before returning `'exhausted'`. Default 100. */
@@ -707,6 +713,7 @@ export async function simulateAgent(
   machine: AnyStateMachine,
   options: SimulateAgentOptions,
 ): Promise<SimulateAgentResult> {
+  options = withMachineInput(machine, options, "simulateAgent");
   const maxSteps = options.maxSteps ?? 100;
   const script: SimulationScript = {
     // Each queue is copied, not just the map: `takeFromQueue` shifts entries
@@ -1125,6 +1132,11 @@ export interface CanReachOrdering {
 export type CanReachTarget = string | ((snapshot: ExploreSnapshot) => boolean) | CanReachOrdering;
 
 export interface ExplorePathsOptions {
+  /**
+   * The machine input. A machine with a declared input schema validates it as
+   * a run does: input the schema rejects throws `invalid-machine-input`, and
+   * the parsed value (defaults filled) seeds the search.
+   */
   input?: unknown;
   /** Max branch points (decisions + external-event forks) along any path. Default 8. */
   maxDepth?: number;
@@ -3989,6 +4001,21 @@ function explore(
 }
 
 /**
+ * Validates `options.input` against the machine's input schema, as a run
+ * would, and seeds the search with the parsed value (defaults filled). Input
+ * the machine would reject throws `invalid-machine-input` instead of giving a
+ * proof over a start state no run can reach.
+ */
+function withMachineInput<T extends { input?: unknown }>(
+  machine: AnyStateMachine,
+  options: T,
+  caller: string,
+): T {
+  if (options.input === undefined) return options;
+  return { ...options, input: resolveMachineInput(machine, options.input, caller) };
+}
+
+/**
  * Enumerates a machine's decision and external-event branches to a bounded
  * depth, model-free, and reports which states are reached and how each path
  * terminates. At each decision request it forks one branch per candidate event
@@ -4028,7 +4055,7 @@ export async function explorePaths(
   machine: AnyStateMachine,
   options: ExplorePathsOptions = {},
 ): Promise<AgentPathReport> {
-  return explore(machine, options).report;
+  return explore(machine, withMachineInput(machine, options, "explorePaths")).report;
 }
 
 /** The result of a {@link canReach} query. */
@@ -4114,6 +4141,7 @@ export async function canReach(
   target: CanReachTarget,
   options: ExplorePathsOptions = {},
 ): Promise<CanReachResult> {
+  options = withMachineInput(machine, options, "canReach");
   const resolvedTarget =
     typeof target === "string" ? resolveStateTarget(machine, target) : undefined;
   const ordering = typeof target === "object" ? target : undefined;
