@@ -375,7 +375,8 @@ A decision model such as Jev answers only closed choices. `'pick-then-fill'` tur
 A decision can be answered by another machine: a policy that applies a rule when the facts are enough and asks a model only for the rest. `createPolicyDecider` turns a policy machine into a decide executor.
 
 ```ts no-check
-import { createPolicyDecider, runAgent } from "@statelyai/agent";
+import { runAgent } from "@statelyai/agent";
+import { createPolicyDecider } from "@statelyai/agent/policy";
 
 const decide = createPolicyDecider(policyMachine, { executors: modelExecutors });
 
@@ -408,7 +409,7 @@ A machine does not have to know about AI. `decideNext` asks a model to pick one 
 - It never sends. The host sends the event, after checking `can` again, because the actor may have moved while the model was choosing.
 
 ```ts
-import { decideNext } from "@statelyai/agent";
+import { decideNext } from "@statelyai/agent/policy";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import { openai } from "@ai-sdk/openai";
 import { createActor, createMachine } from "xstate";

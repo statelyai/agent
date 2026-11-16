@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { proposeApprovalRules, proposeCaps } from "./testing/index.js";
+import { proposeApprovalRules, proposeCaps } from "./evals/index.js";
 
 type TraceEvent = { type: string; [key: string]: unknown };
 interface Pending {

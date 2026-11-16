@@ -41,7 +41,6 @@ import { createAsyncLogic, setup, type AnyActorSystem, type SnapshotFrom } from 
 import {
   type AgentRunInit,
   AgentDecisionExhaustedError,
-  decideNext,
   type AgentDecisionExecutor,
   type AgentEventLogStore,
   type AgentLogEntry,
@@ -50,6 +49,7 @@ import {
   type DecisionAttempt,
   runAgent,
 } from "@statelyai/agent";
+import { decideNext } from "@statelyai/agent/policy";
 import { createInMemoryEventLogStore, getDecisionAttempts } from "@statelyai/agent/log";
 import {
   APPROVAL_THRESHOLD,

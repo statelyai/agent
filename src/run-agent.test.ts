@@ -20,7 +20,6 @@ import {
   createTextLogic,
   AgentInvalidEventPayloadError,
   parseAgentEvent,
-  inspectTransitions,
   isAgentIdle,
   createAgentRuntime,
   runAgent,
@@ -44,7 +43,7 @@ import {
   replay,
   createInMemoryEventLogStore,
 } from "./log/index.js";
-import { getMachineStructuralHash } from "./index.js";
+import { getMachineStructuralHash } from "./utils.js";
 
 /**
  * A promise plus its resolver. Tests drive a run's timing off these instead of
@@ -3325,61 +3324,6 @@ describe("machine version prop (createMachine({ version }))", () => {
       event: { type: "GO" },
     });
     expect(migrated.status).toBe("done");
-  });
-});
-
-// ─── inspectTransitions (item 4) ───
-describe("inspectTransitions", () => {
-  test("observes an invoked child machine's transitions with its actorRef", async () => {
-    const childAgent = setupAgent({
-      context: z.object({}),
-      output: z.object({ ok: z.boolean() }),
-    });
-    const childMachine = childAgent.createMachine({
-      id: "insp-child",
-      context: () => ({}),
-      output: () => ({ ok: true }),
-      initial: "childWorking",
-      states: {
-        childWorking: { always: { target: "childDone" } },
-        childDone: { type: "final" },
-      },
-    });
-    const parentAgent = setupAgent({
-      context: z.object({}),
-      output: z.object({ ok: z.boolean() }),
-      actors: { child: childMachine },
-    });
-    const parentMachine = parentAgent.createMachine({
-      id: "insp-parent",
-      context: () => ({}),
-      output: () => ({ ok: true }),
-      initial: "delegating",
-      states: {
-        delegating: { invoke: { id: "child", src: "child", onDone: { target: "done" } } },
-        done: { type: "final" },
-      },
-    });
-
-    const observed: Array<{ id: string; value: unknown }> = [];
-    const result = await runToQuiescence(
-      createAgentRuntime(parentMachine, {
-        inspect: inspectTransitions((snapshot, actorRef) => {
-          observed.push({ id: actorRef.id, value: snapshot.value });
-        }),
-        executors: {
-          generateText: async () => ({ result: {} }),
-        },
-      }),
-      {
-        input: {},
-      },
-    );
-
-    expect(result.status).toBe("done");
-    expect(observed.some((entry) => entry.id === "child" && entry.value === "childDone")).toBe(
-      true,
-    );
   });
 });
 

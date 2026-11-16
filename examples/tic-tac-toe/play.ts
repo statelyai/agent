@@ -15,7 +15,6 @@
 import {
   type AgentRunInit,
   AgentDecisionExhaustedError,
-  decideNext,
   type AgentDecisionExecutor,
   type AgentEventLogStore,
   type AgentLogEntry,
@@ -23,6 +22,7 @@ import {
   type DecisionAttempt,
   runAgent,
 } from "@statelyai/agent";
+import { decideNext } from "@statelyai/agent/policy";
 import { createInMemoryEventLogStore, getDecisionAttempts } from "@statelyai/agent/log";
 import { boardFeatures } from "./features.js";
 import { emptyCells, formatBoard, ticTacToeMachine, type GameSnapshot, type Mark } from "./game.js";

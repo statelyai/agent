@@ -36,6 +36,9 @@
       "ai-sdk": [
         "./dist/ai-sdk.d.mts"
       ],
+      "evals": [
+        "./dist/evals.d.mts"
+      ],
       "log": [
         "./dist/log.d.mts"
       ],
@@ -47,6 +50,9 @@
       ],
       "otel": [
         "./dist/otel.d.mts"
+      ],
+      "policy": [
+        "./dist/policy.d.mts"
       ],
       "tanstack-ai": [
         "./dist/tanstack-ai.d.mts"
@@ -78,6 +84,16 @@
       "require": {
         "types": "./dist/ai-sdk.d.cts",
         "default": "./dist/ai-sdk.cjs"
+      }
+    },
+    "./evals": {
+      "import": {
+        "types": "./dist/evals.d.mts",
+        "default": "./dist/evals.mjs"
+      },
+      "require": {
+        "types": "./dist/evals.d.cts",
+        "default": "./dist/evals.cjs"
       }
     },
     "./log": {
@@ -118,6 +134,16 @@
       "require": {
         "types": "./dist/otel.d.cts",
         "default": "./dist/otel.cjs"
+      }
+    },
+    "./policy": {
+      "import": {
+        "types": "./dist/policy.d.mts",
+        "default": "./dist/policy.mjs"
+      },
+      "require": {
+        "types": "./dist/policy.d.cts",
+        "default": "./dist/policy.cjs"
       }
     },
     "./tanstack-ai": {
