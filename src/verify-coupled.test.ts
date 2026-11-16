@@ -967,4 +967,34 @@ describe("coupled child usage", () => {
     const { budget: _budget, callKey: _callKey, ...live } = seen[0] as Record<string, unknown>;
     expect(live).toEqual(usageEvent(10));
   });
+
+  test("'coupled' settles a child whose initial state is final", async () => {
+    const instant = createMachine({
+      initial: "finished",
+      states: { finished: { type: "final", output: () => ({ ok: true }) } },
+    } as never) as AnyStateMachine;
+    const parent = createMachine({
+      initial: "delegating",
+      states: {
+        delegating: {
+          invoke: {
+            id: "instant",
+            src: instant,
+            onDone: ({ output }: { output: { ok: boolean } }) =>
+              output.ok ? { target: "done" } : { target: "wrong" },
+          },
+        },
+        done: { type: "final" },
+        wrong: { type: "final" },
+      },
+    } as never) as AnyStateMachine;
+    // Every mode: the child's own output settles it, with no `outputs` entry.
+    for (const children of ["coupled", "explore", "outputs"] as const) {
+      const report = await explorePaths(parent, { children });
+      expect(report.complete, children).toBe(true);
+      expect(report.terminals.map((terminal) => [terminal.status, terminal.state])).toEqual([
+        ["done", "done"],
+      ]);
+    }
+  });
 });

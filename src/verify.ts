@@ -1963,6 +1963,23 @@ function stepsOf(log: StepLog | undefined): ExploreStep[] {
   return steps;
 }
 
+// A child that settled as it started (a machine whose initial state is final,
+// or one that failed at once): pure transitions leave its completion
+// undelivered, and a live run delivers it at once. Pending invokes skip it.
+function finishedChild(
+  step: AgentStep,
+): { id: string; output: unknown } | { id: string; error: unknown } | undefined {
+  const children = (step.snapshot.children ?? {}) as Record<string, ChildRef | undefined>;
+  for (const id of Object.keys(children).sort()) {
+    const snapshot = children[id]?.getSnapshot?.() as
+      | { status?: unknown; output?: unknown; error?: unknown }
+      | undefined;
+    if (snapshot?.status === "done") return { id, output: snapshot.output };
+    if (snapshot?.status === "error") return { id, error: snapshot.error };
+  }
+  return undefined;
+}
+
 // Shared engine for explorePaths/canReach. Without `stopWhen` it walks depth
 // first (explorePaths' terminal order). With `stopWhen` (canReach) it walks
 // breadth first by path length and halts on the first snapshot the predicate
@@ -2683,6 +2700,15 @@ function explore(
       }
       if (current.done) {
         return { step: current };
+      }
+      const finished = finishedChild(current);
+      if (finished) {
+        current =
+          "error" in finished
+            ? rejectStep(current, finished.id, finished.error)
+            : resolveStep(current, finished.id, finished.output);
+        recordState(current);
+        continue;
       }
       const request = current.requests.find(
         (pending) => pending.kind !== "text" || !neverSettles(pending.src),
