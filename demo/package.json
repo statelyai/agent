@@ -1,6 +1,6 @@
 {
   "name": "@statelyai/agent-demo",
-  "version": "0.0.1-alpha.27",
+  "version": "0.0.1-alpha.28",
   "private": true,
   "type": "module",
   "scripts": {

@@ -1,5 +1,19 @@
 # @statelyai/agent
 
+## 2.0.0-alpha.40
+
+### Patch Changes
+
+- [#247](https://github.com/statelyai/agent/pull/247) [`1f63610`](https://github.com/statelyai/agent/commit/1f636103210aa368580676e8ae88cdaf821523b1) Thanks [@davidkpiano](https://github.com/davidkpiano)! - - `createAgentInbox` and `runtime.send`: an event the host sends is handed out ahead of completions the run already holds. Before, a send landed only once the machine stopped when its actors settled in microtasks, so a pause sent before start or mid-run was never applied.
+  - `canReach` ordering targets check `reach` on the step that matched `after` too: what the trigger's own transition starts comes after it. Before, a turn started in the trigger's step was missed.
+  - `createGeneratorBridge`: a consumer that pulls a value yielded while unwinding resumes the pass, as `yield*` does. `forward` reports `closed: false` (its `value` is then `undefined`), and `stream` hands a failed run back instead of throwing it.
+
+- [#251](https://github.com/statelyai/agent/pull/251) [`5f72ebd`](https://github.com/statelyai/agent/commit/5f72ebd8a657c7107ce941857977b59b0062d863) Thanks [@davidkpiano](https://github.com/davidkpiano)! - - `wrapWorkflow`: `run(input, { live })` passes a live object to the workflow as `context.live`, so one wrapped workflow serves every instance of a class-shaped loop. When the workflow types `live`, every `run` call must pass it.
+  - `abortWith.event` can be a function of `signal.reason`, so aborts with different reasons send different events.
+  - `runAgent({ onIdle: "inbox" })`: an idle state waits for the next inbox send. Needs `inbox`.
+
+- [#250](https://github.com/statelyai/agent/pull/250) [`bb74c83`](https://github.com/statelyai/agent/commit/bb74c838e1d7140395be59b1f9e13f799dc8f3b2) Thanks [@davidkpiano](https://github.com/davidkpiano)! - `canReach`, `explorePaths`, and `simulateAgent` validate `input` against the machine's input schema, as `runAgent` does. Input the schema rejects throws `AgentError` with code `invalid-machine-input`, and the parsed value (defaults filled) seeds the search. Before, a misspelled input field could report `reachable: false, complete: true` for a start state no run can reach.
+
 ## 2.0.0-alpha.39
 
 ### Minor Changes
