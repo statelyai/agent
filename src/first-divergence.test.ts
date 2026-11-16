@@ -10,7 +10,7 @@ import {
   setupAgent,
   type AgentTraceEvent,
 } from "./index.js";
-import { firstDivergence, foldTraces } from "./testing/index.js";
+import { firstDivergence, foldTraces } from "./evals/index.js";
 
 const schemas = createAgentSchemas({
   context: z.object({ limit: z.number() }),

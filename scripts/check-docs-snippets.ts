@@ -27,6 +27,7 @@ const COMPILER_OPTIONS: ts.CompilerOptions = {
   paths: {
     "@statelyai/agent": ["./src/index.ts"],
     "@statelyai/agent/ai-sdk": ["./src/ai-sdk/index.ts"],
+    "@statelyai/agent/evals": ["./src/evals/index.ts"],
     "@statelyai/agent/log": ["./src/log/index.ts"],
     "@statelyai/agent/testing": ["./src/testing/index.ts"],
     "@statelyai/agent/machines": ["./src/machines/index.ts"],
@@ -89,6 +90,7 @@ function checkGlobalsFile(): string[] {
 const PACKAGE_ENTRIES: Record<string, string> = {
   "@statelyai/agent": "src/index.ts",
   "@statelyai/agent/ai-sdk": "src/ai-sdk/index.ts",
+  "@statelyai/agent/evals": "src/evals/index.ts",
   "@statelyai/agent/log": "src/log/index.ts",
   "@statelyai/agent/machines": "src/machines/index.ts",
   "@statelyai/agent/openai": "src/openai/index.ts",

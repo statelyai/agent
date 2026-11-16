@@ -13,7 +13,7 @@ import {
   judgeAgreement,
   repeatRuns,
   traceCoverage,
-} from "@statelyai/agent/testing";
+} from "@statelyai/agent/evals";
 import { SCENARIOS, type Scenario } from "./contract.js";
 import { refundDeskMachine, runDeskEpisode } from "./desk.js";
 import { eagerChoice, isRefundTicket, rightPath } from "./test-doubles.js";
