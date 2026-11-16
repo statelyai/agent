@@ -101,6 +101,16 @@ export type {
   Recorder,
   Recording,
 } from "../equivalence.js";
+export { checkConformance } from "../conformance.js";
+export type {
+  CheckConformanceOptions,
+  ConformanceActor,
+  ConformanceActorArgs,
+  ConformanceDeviation,
+  ConformanceDeviationReason,
+  ConformanceObservation,
+  ConformanceReport,
+} from "../conformance.js";
 export { checkParity } from "../check-parity.js";
 export type {
   CheckParityBaseOptions,
