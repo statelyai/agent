@@ -1,127 +1,26 @@
 ---
 title: Preset machines
-description: Factories for proven agent shapes (tool loop, sequential, router, parallel, loop, supervisor, handoff, approval batch) that return ordinary, inspectable agent machines.
+description: createApprovalBatchMachine, a factory that gates one model turn's tool calls on approval and returns an ordinary, inspectable agent machine.
 ---
 
 > **Alpha:** `@statelyai/agent` 2.0 is in alpha. APIs can change between releases; pin an exact version. Feedback: [github.com/statelyai/agent](https://github.com/statelyai/agent/issues).
 
 ## Overview
 
-`@statelyai/agent/machines` ships factories for common agent shapes. Each factory is a thin composition over `setupAgent(...).createMachine(...)`.
+`@statelyai/agent/machines` ships `createApprovalBatchMachine`, a factory over `setupAgent(...).createMachine(...)`.
 
 - The result is an ordinary machine, with the same states, guards, snapshots, and `lintAgentMachine` support as a machine you write yourself.
-- Executors stay separate. Presets name no SDK, so the host passes `executors` to `runToQuiescence`.
-- Each preset is around 100 lines of states that you can read, diagram, and copy into your own project.
+- Executors stay separate. The preset names no SDK.
 
-```ts
-import { tool } from "ai";
-import { openai } from "@ai-sdk/openai";
-import { z } from "zod";
-import { runToQuiescence } from "@statelyai/agent";
-import { createToolLoopMachine } from "@statelyai/agent/machines";
-import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
+Other shapes are runnable examples to copy and edit. See [Agent patterns](patterns.md) for the full list.
 
-// Model IDs here are illustrative; substitute your provider's current models.
-const models = { quick: openai("gpt-6-luna") };
+- Prompt chain: [prompt-chaining](https://github.com/statelyai/agent/blob/next/examples/prompt-chaining/index.ts)
+- Supervisor: [agent-supervisor](https://github.com/statelyai/agent/blob/next/examples/agent-supervisor/index.ts)
+- Handoff: [swarm-handoff](https://github.com/statelyai/agent/blob/next/examples/swarm-handoff/index.ts)
+- Fan-out: [parallel-streams](https://github.com/statelyai/agent/blob/next/examples/parallel-streams/index.ts) and [map-reduce](https://github.com/statelyai/agent/blob/next/examples/map-reduce/index.ts)
+- Tool calls with review: [review-tool-calls](https://github.com/statelyai/agent/blob/next/examples/review-tool-calls/index.ts)
 
-const calculate = tool({
-  description: "Evaluate an arithmetic expression.",
-  inputSchema: z.object({ expression: z.string() }),
-  execute: async ({ expression }) => Number(expression),
-});
-
-const machine = createToolLoopMachine({
-  model: "quick",
-  instructions: "Answer using the tools.",
-  tools: { calculate },
-  maxSteps: 5,
-});
-
-const result = await runToQuiescence(
-  createAgentRuntime(machine, { executors: createAiSdkExecutors({ models }) }),
-  { input: { prompt: "What is 42 times 17?" } },
-);
-```
-
-Snapshots and log entries carry `machine.version` automatically. See [Versioning](#versioning).
-
-## Preset taxonomy
-
-Three questions separate the seven model-driven presets. `createApprovalBatchMachine` is the odd one out: it makes no model call.
-
-- Who runs the work? One request in `toolLoop`, a fixed chain in `sequential`, or named sub-units in the rest.
-- Who picks the next unit? The author in `sequential`, `parallel`, and `loop`. The model in `router`, `supervisor`, and `handoff`.
-- Does control come back? Delegation returns in `supervisor`. Routing ends the run in `router`. Handoff transfers control permanently in `handoff`.
-
-| Preset                       | Shape                                                        | Model chooses                    | Control returns        |
-| ---------------------------- | ------------------------------------------------------------ | -------------------------------- | ---------------------- |
-| `createToolLoopMachine`      | One request, host-run tool loop                              | tools                            | n/a                    |
-| `createSequentialMachine`    | Prompt chain, step by step                                   | nothing                          | n/a                    |
-| `createRouterMachine`        | One decision picks one destination                           | the route                        | no, the run ends there |
-| `createParallelMachine`      | Static fan-out, joined                                       | nothing                          | yes, at the join       |
-| `createLoopMachine`          | Bounded repeat                                               | nothing                          | yes, each iteration    |
-| `createSupervisorMachine`    | Delegate, accumulate, repeat                                 | the worker, or `FINISH`          | yes, every turn        |
-| `createHandoffMachine`       | Peer swarm, `activeAgent` names the agent that runs the turn | n/a (host sends `transfer_to_*`) | no, transfer is final  |
-| `createApprovalBatchMachine` | One child per proposed tool call: approve, then execute      | nothing (policy or person)       | n/a                    |
-
-## Config names
-
-Every preset uses the same vocabulary:
-
-| Option         | Meaning                                                                                    |
-| -------------- | ------------------------------------------------------------------------------------------ |
-| `model`        | A model ref or a `models` alias. A `model` on an entry overrides the factory default.      |
-| `instructions` | The system prompt.                                                                         |
-| `tools`        | Tools the host runs inside one request.                                                    |
-| `outputSchema` | Structured output. Omit it for plain text.                                                 |
-| `maxSteps`     | The bound on a request's host-side tool loop. It lowers to the request's typed `maxSteps`. |
-| `maxTurns`     | The bound on a machine loop or delegation count. It is enforced by a guard.                |
-
-Worker, route, branch, and agent entries are a record. The key is the entry's `name`, and each entry carries a `description` that the deciding model reads.
-
-An entry is either an inline request, written as `{ description, instructions, model, outputSchema, tools }`, or a child machine, written as `{ description, machine, input? }`. Child machines are registered as actor sources, so `runToQuiescence` binds their executors too.
-
-## The presets
-
-### `createToolLoopMachine`
-
-One text request carries the `tools`, and the host runs the tool loop inside that request. `maxSteps` bounds the loop through the request's typed `maxSteps` field. The states are `answering` and `done`.
-
-This preset is the default for tool use. It does not add machine states, and it sets no request `metadata`. To gate the calls on approval, run them through [`createApprovalBatchMachine`](#createapprovalbatchmachine), or eject. See [Ejection](#ejection).
-
-### `createSequentialMachine`
-
-A prompt chain with one state per step. Each step's output feeds the next step. A step's `prompt(ctx)` can read `{ prompt, results, previous }`. Without a `prompt`, the step's default prompt is the previous step's output.
-
-<!-- viz: state diagram of createSequentialMachine: step1 -> step2 -> step3 -> done, each step invoking one request and writing into results -->
-
-### `createRouterMachine`
-
-One `agent.decide` picks exactly one declared route, then the machine runs it. Route events are named `ROUTE_<name>`. Build the string with `routeEventType(name)` when you send or assert these events. Undeclared routes have no event, no state, and no transition, so the model cannot take them. Add `fallback` to target a state when the decision fails. Without `fallback`, a failed decision errors the run.
-
-<!-- viz: state diagram of createRouterMachine: routing state invoking agent.decide, one ROUTE_<name> transition per declared route, plus the optional fallback target -->
-
-### `createParallelMachine`
-
-Static parallel work with one region per branch. All branches run concurrently and join into a keyed `results` object. Dynamic fan-out remains ordinary XState actor composition.
-
-<!-- viz: state diagram of createParallelMachine: parallel state with one region per branch, all joining into a single done state with keyed results -->
-
-### `createLoopMachine`
-
-A bounded repeat. The machine runs `body`, evaluates `until` over `{ prompt, iterations, results, last }`, then repeats or stops. `maxTurns` is a guard, so the loop terminates even if `until` never returns true.
-
-### `createSupervisorMachine`
-
-Each turn, one `agent.decide` picks a worker or finishes. `maxTurns` bounds the delegations and defaults to 6. It is a machine budget, and it never lowers a request's `maxSteps`. Worker events are named `DELEGATE_<name>`, built with `delegateEventType(name)`. The finish event is `FINISH`, exported as `FINISH_EVENT_TYPE`. Results accumulate in context and are rendered into the next decision. When the `maxTurns` budget is spent, every delegate is removed from the candidate set, and a guard rejects a delegate event if one is chosen anyway.
-
-<!-- viz: state diagram of createSupervisorMachine: deciding -> DELEGATE_<name> -> worker state -> back to deciding, with FINISH -> done and the maxTurns guard -->
-
-### `createHandoffMachine`
-
-A peer swarm. `context.activeAgent` names the agent that runs the current turn. After the turn, the machine settles idle in `waiting`. A `transfer_to_<name>` event, built with `transferEventType(name)`, changes `activeAgent` and re-routes. There is no final state. The conversation ends when the host stops resuming it. Persist the idle snapshot between turns.
-
-### `createApprovalBatchMachine`
+## `createApprovalBatchMachine`
 
 One model turn's tool calls, each approved or rejected on its own. Only approved calls execute. No model call: the host maps the turn's calls to `input.calls` and feeds `output.results` back as tool results. See [Tools](tools.md#approval-gate).
 
@@ -165,19 +64,17 @@ const result = await runToQuiescence(createAgentRuntime(machine), {
 
 A preset is a starting point. When you need one more state, a human gate, a different bound, or your own typed context:
 
-1. Open the preset's source at `src/machines/<preset>.ts`. It is one small file of states.
+1. Open the preset's source at `src/machines/approval-batch.ts`.
 2. Copy it into your project and edit the `setupAgent(...)` call directly.
 3. Run it as before. The copied machine runs, lints, and persists the same way.
 
 Examples to eject toward:
 
 - [review-tool-calls](https://github.com/statelyai/agent/blob/next/examples/review-tool-calls/index.ts): an approval gate.
-- [reflection-writer](https://github.com/statelyai/agent/blob/next/examples/reflection-writer/index.ts): a critique loop.
-- [hierarchical-teams](https://github.com/statelyai/agent/blob/next/examples/hierarchical-teams/index.ts) and [swarm-handoff](https://github.com/statelyai/agent/blob/next/examples/swarm-handoff/index.ts): multi-agent topologies.
 
 ## Versioning
 
-Every preset machine carries `version: "1"`, using XState's standard `createMachine({ version })` prop. This is the machine's own topology version. It is unrelated to the `@statelyai/agent` package version. Native persisted snapshots and trace events carry that version:
+The preset machine carries `version: "1"`, using XState's standard `createMachine({ version })` prop. This is the machine's own topology version. It is unrelated to the `@statelyai/agent` package version. Native persisted snapshots and trace events carry that version:
 
 ```ts
 const result = await runToQuiescence(createAgentRuntime(machine, { executors }), { input });
