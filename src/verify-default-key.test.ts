@@ -294,6 +294,32 @@ describe("canReach — default key", () => {
     expect(await canReach(machine, "goal", { maxDepth: 3 })).toMatchObject({ reachable: true });
   });
 
+  test("an inherited index is not merged with an own one", async () => {
+    // One hole filled by the prototype, plus an extra own property.
+    const inherited = (): unknown[] => {
+      const items = new Array(1);
+      const proto = Object.create(Array.prototype) as Record<number, unknown>;
+      proto[0] = "x";
+      Object.setPrototypeOf(items, proto);
+      return Object.assign(items, { extra: true });
+    };
+    const machine = createMachine({
+      context: { items: ["x"] as unknown[] },
+      initial: "waiting",
+      states: {
+        waiting: {
+          on: {
+            INHERIT: () => ({ context: { items: inherited() } }),
+            GO: ({ context }) =>
+              !Object.hasOwn(context.items, 0) ? { target: "goal" } : undefined,
+          },
+        },
+        goal: { type: "final" },
+      },
+    });
+    expect(await canReach(machine, "goal", { maxDepth: 3 })).toMatchObject({ reachable: true });
+  });
+
   test("negative zero is not merged with zero", async () => {
     const machine = createMachine({
       context: { n: 0 },
