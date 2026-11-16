@@ -52,7 +52,7 @@ export async function handleRefundRequest(
 }
 ```
 
-The check does not edit this file. Code whose side effects are spread across modules needs a seam first: route them through one object, or record them at the client with `createRecorder`'s `recorder.client` or `recorder.model`. See [Evals](evals.md#any-model-client).
+The check does not edit this file. Code whose side effects are spread across modules needs a seam first: route them through one object, or record them at the client with `createRecorder`'s `recorder.client`, `recorder.model` for an AI SDK model, and `recorder.tools` for AI SDK tools. See [Evals](evals.md#any-model-client). With the AI SDK, a tool that has `execute` runs inside the `generateText` call, so a check the code makes after the call returns comes after the tool already ran; model the order the calls happen in.
 
 ## Step 1: the model file
 
