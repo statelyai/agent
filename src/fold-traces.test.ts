@@ -12,7 +12,7 @@ import {
   traceTransitions,
   type AgentTraceEvent,
 } from "./index.js";
-import { foldTraces } from "./testing/index.js";
+import { foldTraces } from "./evals/index.js";
 
 const schemas = createAgentSchemas({
   context: z.object({ limit: z.number() }),

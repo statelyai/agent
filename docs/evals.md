@@ -199,10 +199,10 @@ A queue that runs dry throws an `AgentError` with code `seam-script-exhausted`, 
 
 ## Per-state stats
 
-`foldTraces` (from `@statelyai/agent/testing`) folds many runs' traces into one row per state: how many runs visited it, how many of those failed, how many options the guards withheld at decisions made there, and how many events it ignored.
+`foldTraces` (from `@statelyai/agent/evals`) folds many runs' traces into one row per state: how many runs visited it, how many of those failed, how many options the guards withheld at decisions made there, and how many events it ignored.
 
 ```ts no-check
-import { foldTraces } from "@statelyai/agent/testing";
+import { foldTraces } from "@statelyai/agent/evals";
 
 // One AgentTraceEvent[] per run, collected with onTrace.
 const stats = foldTraces(traces, {
@@ -224,10 +224,10 @@ const stats = foldTraces(traces, {
 
 ## Decision requests from traces
 
-`getDecisionRequests` (from `@statelyai/agent/testing`) lists the decisions a run asked for, read from its trace: each decision's first `request.start`, and the states the run was in.
+`getDecisionRequests` (from `@statelyai/agent/evals`) lists the decisions a run asked for, read from its trace: each decision's first `request.start`, and the states the run was in.
 
 ```ts no-check
-import { getDecisionRequests } from "@statelyai/agent/testing";
+import { getDecisionRequests } from "@statelyai/agent/evals";
 
 for (const { states, request } of getDecisionRequests(trace, { name: "chooseResolution" })) {
   const { event } = await decide(request); // a candidate decider
@@ -349,10 +349,11 @@ compareRecordings(recorder.recording, replay.recording); // { equivalent: true, 
 
 ## Suite coverage
 
-`traceCoverage` (from `@statelyai/agent/testing`) reports which states and handlers no trace exercised, so a suite can say how much of the machine it covers.
+`traceCoverage` (from `@statelyai/agent/evals`) reports which states and handlers no trace exercised, so a suite can say how much of the machine it covers.
 
 ```ts no-check
-import { explorePaths, traceCoverage } from "@statelyai/agent/testing";
+import { explorePaths } from "@statelyai/agent/testing";
+import { traceCoverage } from "@statelyai/agent/evals";
 
 const report = traceCoverage(machine, traces, {
   reachable: await explorePaths(machine, { input }),
@@ -376,10 +377,10 @@ report.handlers[0];
 
 ## Where failures start
 
-`firstDivergence` (from `@statelyai/agent/testing`) finds the first step where a run departs from a reference, and names the state the run was in.
+`firstDivergence` (from `@statelyai/agent/evals`) finds the first step where a run departs from a reference, and names the state the run was in.
 
 ```ts no-check
-import { firstDivergence, foldTraces } from "@statelyai/agent/testing";
+import { firstDivergence, foldTraces } from "@statelyai/agent/evals";
 
 firstDivergence(failingTrace, passingTrace);
 // { index: 0, state: "deciding", decision: "chooseResolution", actual: { event: "escalate", … }, expected: { event: "refund", … } }
@@ -405,10 +406,10 @@ const stats = foldTraces(traces, {
 
 ## Proposals from traces
 
-`proposeApprovalRules` and `proposeCaps` (from `@statelyai/agent/testing`) read many runs' traces and propose changes for a machine with no decision point: which approvals a rule could answer, and what each cap should be. They are proposals for a person. Nothing promotes them or edits the machine.
+`proposeApprovalRules` and `proposeCaps` (from `@statelyai/agent/evals`) read many runs' traces and propose changes for a machine with no decision point: which approvals a rule could answer, and what each cap should be. They are proposals for a person. Nothing promotes them or edits the machine.
 
 ```ts no-check
-import { proposeApprovalRules, proposeCaps } from "@statelyai/agent/testing";
+import { proposeApprovalRules, proposeCaps } from "@statelyai/agent/evals";
 
 const rules = proposeApprovalRules(traces, {
   approvalState: "awaitingApproval",
@@ -438,10 +439,10 @@ const caps = proposeCaps(traces, {
 
 ## Repeated runs
 
-`repeatRuns` (from `@statelyai/agent/testing`) runs every scenario `k` times and reports how reliably each one passes. With a live model, one run per scenario says little: τ-bench found the rate at which all `k` runs of a task pass (pass^k) falls well below the single-run rate.
+`repeatRuns` (from `@statelyai/agent/evals`) runs every scenario `k` times and reports how reliably each one passes. With a live model, one run per scenario says little: τ-bench found the rate at which all `k` runs of a task pass (pass^k) falls well below the single-run rate.
 
 ```ts no-check
-import { repeatRuns } from "@statelyai/agent/testing";
+import { repeatRuns } from "@statelyai/agent/evals";
 
 const report = await repeatRuns({
   scenarios, // [{ id, ...your fields }]
@@ -473,7 +474,7 @@ report.passHat(5); // the chance 5 runs of a scenario all pass
 For runs collected elsewhere, such as CI shards or production replays, `summarizeRepeats` takes the runs per scenario and returns the same report. `repeatRuns` collects runs and calls it.
 
 ```ts no-check
-import { summarizeRepeats } from "@statelyai/agent/testing";
+import { summarizeRepeats } from "@statelyai/agent/evals";
 
 const report = summarizeRepeats([
   {
@@ -489,10 +490,10 @@ const report = summarizeRepeats([
 
 ## Judge agreement
 
-`judgeAgreement` (from `@statelyai/agent/testing`) measures how well a judge agrees with people on the same cases. Check it before a judge-graded eval gates anything.
+`judgeAgreement` (from `@statelyai/agent/evals`) measures how well a judge agrees with people on the same cases. Check it before a judge-graded eval gates anything.
 
 ```ts no-check
-import { judgeAgreement } from "@statelyai/agent/testing";
+import { judgeAgreement } from "@statelyai/agent/evals";
 
 const report = judgeAgreement(
   confirmed.map((row) => ({

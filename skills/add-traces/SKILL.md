@@ -118,7 +118,7 @@ Write these tests, with the stand-in model from `loop-to-machine`:
 
 ```ts
 import { getDecisionAttempts, replay } from "@statelyai/agent/log";
-import { foldTraces } from "@statelyai/agent/testing";
+import { foldTraces } from "@statelyai/agent/evals";
 
 test("a recorded run replays to its final state with no model calls", async () => {
   const result = await runAgent(deskMachine, { input, executors, store, threadId: "test:careful:small-clean:r1", metadata });
