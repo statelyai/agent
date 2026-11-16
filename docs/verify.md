@@ -171,13 +171,13 @@ settled?.resolvedRequest; // { kind: 'text', src: 'parse', id: 'parse', outcome:
 
 ## Branch exploration
 
-`explorePaths(machine, { input, maxDepth?, maxPaths?, maxNodes?, budget?, outputs?, errors?, payloads?, dedupeBy?, interleave?, children?, timers?, usage? })` enumerates decision and external-event branches without a model, and reports coverage.
+`explorePaths(machine, { input, maxDepth?, maxPaths?, maxNodes?, budget?, outputs?, errors?, payloads?, dedupeBy?, interleave?, children?, timers?, usage?, steps? })` enumerates decision and external-event branches without a model, and reports coverage.
 
 - At each decision, it forks one branch per candidate event. Guard-rejected candidates count in `prunedByGuard` and are not explored.
 - A decision with no candidate the snapshot takes, because its guards refuse every one or the closed choice offers nothing, exhausts as it does in a live run. That branch records `{ type: 'xstate.error.actor', actorId }` and takes the invoke's `onError`. With no `onError`, it ends in an `error` terminal.
 - At an idle wait, it forks one branch per externally accepted event and per armed timer. See [Timers](#timers).
 - `outputs` is a map of output lists, keyed by src: a text request's src or any other invoked actor's src. A one-element list is a canned output, reused every time that src is reached. A text request resolves with it as its `result`. A longer list forks one branch per output. See [Payloads and invoke outputs](#payloads-and-invoke-outputs).
-- A src with one canned output resolves without a fork, so it does not appear in the path.
+- A src with one canned output resolves without a fork, so it does not appear in the path. `steps: true` records it. See [Steps](#steps).
 - Each `done` terminal carries the machine's `output`, so one report lists every output the search reached.
 - A src with no `outputs` entry halts that branch with a `needs-output` terminal instead of throwing. The terminal's `missingSrc` names it.
 - `errors` is a map of canned failures per src. A src listed there forks an extra branch where that invoke is rejected, so states behind an `onError` are explored. A decision keys on its src, usually `agent.decide`, or on its invoke id; its success branch stays the per-candidate-event fork, so the failure is explored in addition to the candidates. The failure and the candidates are sibling branches: each spends one level of `maxDepth`.
@@ -218,6 +218,29 @@ const report = await explorePaths(machine, {
 });
 // report.terminals → one path per branch: the parsed state and the onError state
 ```
+
+### Steps
+
+`path` lists branch points only. `steps: true` adds `steps` to each terminal: every macrostep from the start, as an `ExploreStep`.
+
+- `event`: the event the step processed. A host event, a fork, a canned output settling (`xstate.done.actor` or `xstate.error.actor`), or `xstate.init` for the start.
+- `state`: the state value after the step.
+- `started`: srcs of the invokes and spawned actors that started in the step. An actor restarted under the same id counts again.
+- `settled`: srcs of the actors that finished, done or error, in the step.
+
+```ts no-check
+const report = await explorePaths(loopMachine, {
+  outputs: { turn: [{ kind: "continue" }] },
+  steps: true,
+});
+// report.terminals[0].steps → [
+//   { event: { type: "xstate.init" }, state: "running", started: ["turn"], settled: [] },
+//   { event: { type: "xstate.done.actor", actorId: "turn", … }, state: "running", started: ["turn"], settled: ["turn"] },
+//   …
+// ]
+```
+
+Steps are off by default: they cost memory for every step of every path. Steps cover the root machine. With `children: "coupled"`, a child's own moves show up through the events and outputs they deliver to the root.
 
 ### Payloads and invoke outputs
 
@@ -416,6 +439,7 @@ Set `budget.ms` under the test runner's timeout, so a long search fails its asse
 
 - A state path or state-node ID.
 - A snapshot predicate, `(snapshot) => boolean`, for a property no single state names: a context invariant, a tag, a state plus context.
+- An ordering, `{ after, reach }`, for a rule about order: "no turn starts after STOP". See [Ordering targets](#ordering-targets).
 
 ```ts no-check
 const violation = await canReach(
@@ -466,6 +490,28 @@ const failure = await canReach(machine, "failed", {
 });
 // failure.reachable → true; failure.witness → [{ type: 'xstate.error.actor', actorId: 'parse' }]
 ```
+
+### Ordering targets
+
+A snapshot predicate sees one snapshot, so it cannot ask what happened earlier on the path. An ordering target can:
+
+```ts no-check
+const turnAfterStop = await canReach(
+  loopMachine,
+  { after: "STOP", reach: (step) => step.started.includes("turn") },
+  { outputs: { turn: [{ kind: "continue" }] }, interleave: "pending" },
+);
+// turnAfterStop.reachable → false with complete: true: no turn starts after STOP
+```
+
+- `after` and `reach` match [steps](#steps). `after` is an event type or a step predicate.
+- `reach` is checked on each step after the first step that matched `after`, not on that step itself.
+- `after` and `reach` may read an event's payload, so an event with no schema is unexpanded until `payloads` lists its variants, even when no transition reads it. A timer's step carries the event the timer delivers.
+- The witness is the event sequence to the first violation.
+- A turn already running when STOP arrives started before it, so it is not a violation. Check that turn with `settled` if the rule covers it.
+- `dedupeBy` stays sound: the search adds "`after` has matched" to each key, so a snapshot reached before and after the trigger is explored both ways.
+- Test the rule with a mutant that breaks it (a loop that starts another turn after STOP), as with a loosened guard.
+- Don't match strings over `terminal.path` for an ordering rule: it lists branch points only and names actors by generated id.
 
 ## CI checks
 

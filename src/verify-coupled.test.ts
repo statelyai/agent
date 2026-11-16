@@ -967,4 +967,68 @@ describe("coupled child usage", () => {
     const { budget: _budget, callKey: _callKey, ...live } = seen[0] as Record<string, unknown>;
     expect(live).toEqual(usageEvent(10));
   });
+
+  test("'coupled' settles a child whose initial state is final", async () => {
+    const instant = createMachine({
+      initial: "finished",
+      states: { finished: { type: "final", output: () => ({ ok: true }) } },
+    } as never) as AnyStateMachine;
+    const parent = createMachine({
+      initial: "delegating",
+      states: {
+        delegating: {
+          invoke: {
+            id: "instant",
+            src: instant,
+            onDone: ({ output }: { output: { ok: boolean } }) =>
+              output.ok ? { target: "done" } : { target: "wrong" },
+          },
+        },
+        done: { type: "final" },
+        wrong: { type: "final" },
+      },
+    } as never) as AnyStateMachine;
+    // Every mode: the child's own output settles it, with no `outputs` entry.
+    for (const children of ["coupled", "explore", "outputs"] as const) {
+      const report = await explorePaths(parent, { children });
+      expect(report.complete, children).toBe(true);
+      expect(report.terminals.map((terminal) => [terminal.status, terminal.state])).toEqual([
+        ["done", "done"],
+      ]);
+    }
+  });
+
+  test("'coupled' settles a finished child in id order with a sibling's entry sends", async () => {
+    const instant = createMachine({
+      initial: "finished",
+      states: { finished: { type: "final" } },
+    } as never) as AnyStateMachine;
+    const announcer = createMachine({
+      initial: "running",
+      states: { running: { entry: tell("STARTED") } },
+    } as never) as AnyStateMachine;
+    // As a run starts invokes in order, and each queues to the parent as it starts.
+    const parentWith = (first: AnyStateMachine, second: AnyStateMachine) =>
+      createMachine({
+        initial: "both",
+        states: {
+          both: {
+            invoke: [
+              { id: "a", src: first, ...(first === instant && { onDone: { target: "after" } }) },
+              { id: "b", src: second, ...(second === instant && { onDone: { target: "after" } }) },
+            ],
+            on: { STARTED: { target: "sawStart" } },
+          },
+          after: { type: "final" },
+          sawStart: { type: "final" },
+        },
+      } as never) as AnyStateMachine;
+    const options = { children: "coupled" as const, hostEvents: [] };
+    const doneFirst = await explorePaths(parentWith(instant, announcer), options);
+    expect(doneFirst.complete).toBe(true);
+    expect(doneFirst.terminals.map((terminal) => terminal.state)).toEqual(["after"]);
+    const startFirst = await explorePaths(parentWith(announcer, instant), options);
+    expect(startFirst.complete).toBe(true);
+    expect(startFirst.terminals.map((terminal) => terminal.state)).toEqual(["sawStart"]);
+  });
 });
