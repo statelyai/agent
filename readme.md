@@ -46,10 +46,10 @@ Stately Agent 2 is in alpha. APIs may change before the stable release.
 <!-- Match the published agent release with its published XState peer. -->
 
 ```sh
-pnpm add @statelyai/agent@2.0.0-alpha.38 xstate@6.0.0-beta.0 zod
+pnpm add @statelyai/agent@2.0.0-alpha.39 xstate@6.0.0-beta.2 zod
 ```
 
-This is the published pair as of November 11, 2026. This source checkout requires XState `6.0.0-beta.2`; use that version when building the checkout. XState is pinned while its experimental durable restoration API evolves.
+This is the published pair as of November 16, 2026. XState is pinned to the exact version the package peers on, because its experimental durable restoration API evolves between prereleases.
 
 For the optional Vercel AI SDK executor:
 
@@ -75,7 +75,7 @@ Upgrading from an earlier alpha: see [Upgrading between alphas](https://github.c
 
 Requirements:
 
-- Node 22 or newer. This source checkout requires XState exactly `6.0.0-beta.2`; the published release above requires `6.0.0-beta.0`.
+- Node 22 or newer, and XState exactly `6.0.0-beta.2`.
 - TypeScript 5.4 or newer. Older versions accept the code, but callback parameters in `createMachine` silently become `any`.
 - A [Standard Schema](https://standardschema.dev) library: zod 4, zod 3.24 or newer, Valibot, or ArkType. `setupAgent` throws `invalid-schema` for zod 3.23 and earlier.
 - The package is ESM-first. CommonJS builds are published too, so `require()` works. Subpath imports (`@statelyai/agent/testing`) resolve under every `moduleResolution`, including `node`.
