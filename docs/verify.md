@@ -567,6 +567,8 @@ traceCoverage(supportModel, reports.map((r) => r.trace)); // states and handlers
 
   `expected` is what the model did next, `observed` is the recording's next observation, and `state` is the model's state value.
 - An `actors` key the model does not declare throws `AgentError` with code `unknown-actor-source`.
+- Every actor the model invokes must be declared by name in `setupAgent({ actors })` and invoked by `src`. An invoke that names its logic inline would run that logic for real, so `checkConformance` throws `inline-actor-source` before the run starts.
+- A callback in `actors` that throws ends the check with `AgentError` code `conformance-callback-error`. It is not counted as the actor failing, so a bug in the mapping cannot pass as a conforming run.
 - Concurrent actors consume observations in the order they start, so a model that runs observed actors in parallel needs observations in that order.
 
 What a conforming run shows: the code behaved as the model allows on that run, and the model's rules are proved. It does not show that the code can never break a rule; a run you did not record still can. After a migration with [`loop-to-machine`](https://github.com/statelyai/skills/blob/main/plugins/stately-agent/skills/loop-to-machine/SKILL.md) and `checkParity`, the machine enforces the rules at runtime, and the same model and proofs carry over.

@@ -322,6 +322,57 @@ describe("checkConformance", () => {
     expect(failed.conforms).toBe(true);
   });
 
+  test("a model that invokes inline logic is rejected before anything runs", async () => {
+    let ran = false;
+    const inline = setupAgent({
+      context: z.object({}),
+      actors: { send: placeholder },
+    }).createMachine({
+      context: () => ({}),
+      initial: "working",
+      states: {
+        working: {
+          invoke: {
+            src: createAsyncLogic({
+              run: async () => {
+                ran = true;
+              },
+            }),
+            onDone: { target: "done" },
+          },
+        },
+        done: { type: "final" },
+      },
+    });
+    await expect(
+      checkConformance(inline, { observations: [], actors: { send: {} } }),
+    ).rejects.toMatchObject({
+      code: "inline-actor-source",
+      message: expect.stringContaining("working"),
+    });
+    expect(ran).toBe(false);
+  });
+
+  test("a callback that throws fails the check instead of passing as an actor failure", async () => {
+    const recording = await record([{ done: true, email: false }], [], 3);
+    const observations = recording.effects.flatMap(toObservation);
+    for (const which of ["matches", "error", "output"] as const) {
+      const boom = () => {
+        throw new Error(`bad ${which}`);
+      };
+      await expect(
+        checkConformance(model, {
+          input: { maxSteps: 3 },
+          observations,
+          actors: { assist: { observes: "assist", [which]: boom }, send: { observes: "send" } },
+        }),
+      ).rejects.toMatchObject({
+        code: "conformance-callback-error",
+        message: `checkConformance: actors.assist.${which} threw: bad ${which}`,
+      });
+    }
+  });
+
   test("an invoked src with no entry deviates; an entry the model does not declare throws", async () => {
     const recording = await record([{ done: true, email: true }], [true], 3);
     const report = await checkConformance(model, {

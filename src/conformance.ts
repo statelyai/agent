@@ -127,6 +127,23 @@ export interface ConformanceReport<TObservation extends ConformanceObservation> 
 
 const NEVER = new Promise<never>(() => {});
 
+// States whose invoke names its logic inline instead of by src: that logic
+// would run for real, because only named sources can be swapped for answers.
+function inlineInvokeStates(machine: AnyStateMachine): string[] {
+  const found: string[] = [];
+  const stack = [machine.root];
+  while (stack.length > 0) {
+    const node = stack.pop()!;
+    const invoke = (node.config as { invoke?: unknown }).invoke;
+    const invokes = invoke === undefined ? [] : Array.isArray(invoke) ? invoke : [invoke];
+    if (invokes.some((entry) => typeof (entry as { src?: unknown }).src !== "string")) {
+      found.push(node.path.join(".") || "(root)");
+    }
+    stack.push(...Object.values(node.states));
+  }
+  return found.sort();
+}
+
 function actorSources(machine: AnyStateMachine): string[] {
   const actors =
     (getRegisteredAgentExecutionOptions(machine).actors as Record<string, unknown> | undefined) ??
@@ -148,6 +165,11 @@ function actorSources(machine: AnyStateMachine): string[] {
  * `canReach`, then check that recorded runs of the code conform to the model.
  * A conforming run shows the code behaved as the model allows on that run; it
  * does not prove the code can never break a rule.
+ *
+ * Every actor the model invokes must be declared by name: a model whose invoke
+ * names logic inline throws `inline-actor-source`, because that logic would
+ * run. A callback in `actors` that throws ends the check with
+ * `conformance-callback-error` instead of counting as an actor failure.
  *
  * @example
  * ```ts
@@ -171,6 +193,14 @@ export async function checkConformance<
   options: CheckConformanceOptions<TMachine, TObservation>,
 ): Promise<ConformanceReport<TObservation>> {
   const { observations, actors: specs, events = {} } = options;
+  const inline = inlineInvokeStates(machine);
+  if (inline.length > 0) {
+    throw new AgentError(
+      "inline-actor-source",
+      `checkConformance: ${inline.join(", ")} invoke${inline.length === 1 ? "s" : ""} inline actor logic, which would run for real. ` +
+        "Declare each actor by name in setup ({ actors }) and invoke it by src, so the recording can answer it.",
+    );
+  }
   for (const src of Object.keys(specs)) {
     if (!actorSources(machine).includes(src)) {
       throw new AgentError(
@@ -182,6 +212,8 @@ export async function checkConformance<
 
   let index = 0;
   let deviation: ConformanceDeviation<TObservation> | undefined;
+  // A callback that throws is a bug in the check, not a modeled failure.
+  let callbackError: AgentError | undefined;
   let state: StateValue = machine.config.initial as StateValue;
   const unobserved = new Set<string>();
   const trace: AgentTraceEvent[] = [];
@@ -207,7 +239,7 @@ export async function checkConformance<
   const answer = (src: string, spec: ConformanceActor<TObservation> | undefined): AnyActorLogic =>
     createAsyncLogic({
       run: async ({ input }: { input: unknown }) => {
-        if (deviation) return NEVER;
+        if (deviation || callbackError) return NEVER;
         if (!spec) return deviate("unmapped-actor", src, input);
         let observation: TObservation | undefined;
         if (spec.observes === undefined) {
@@ -220,13 +252,31 @@ export async function checkConformance<
           index += 1;
         }
         const args = { input, observation, observations, index };
-        if (spec.matches && !spec.matches(args)) {
-          index -= observation ? 1 : 0;
-          return deviate("input-mismatch", src, input);
+        const call = <T>(name: "matches" | "error" | "output", fn: () => T): T | typeof NEVER => {
+          try {
+            return fn();
+          } catch (cause) {
+            callbackError ??= new AgentError(
+              "conformance-callback-error",
+              `checkConformance: actors.${src}.${name} threw: ${cause instanceof Error ? cause.message : String(cause)}`,
+              { cause },
+            );
+            controller.abort();
+            return NEVER;
+          }
+        };
+        if (spec.matches) {
+          const fits = call("matches", () => spec.matches!(args));
+          if (fits === NEVER) return NEVER;
+          if (!fits) {
+            index -= observation ? 1 : 0;
+            return deviate("input-mismatch", src, input);
+          }
         }
-        const error = spec.error?.(args);
+        const error = call("error", () => spec.error?.(args));
+        if (error === NEVER) return NEVER;
         if (error !== undefined) throw error;
-        return spec.output?.(args);
+        return call("output", () => spec.output?.(args));
       },
     });
 
@@ -246,7 +296,7 @@ export async function checkConformance<
     ...shared,
     ...(options.input !== undefined ? { input: options.input } : {}),
   } as AgentRunOptions<TMachine>);
-  while (!deviation && result.status === "idle") {
+  while (!deviation && !callbackError && result.status === "idle") {
     const next = observations[index];
     const toEvent = next === undefined ? undefined : events[next.kind];
     if (!toEvent || next === undefined) break;
@@ -258,6 +308,7 @@ export async function checkConformance<
     } as AgentRunOptions<TMachine>);
   }
 
+  if (callbackError) throw callbackError;
   if (!deviation && index < observations.length) {
     deviation = {
       reason: "extra-observations",
