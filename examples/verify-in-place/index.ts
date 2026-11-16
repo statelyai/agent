@@ -109,7 +109,7 @@ export type Observation =
   | { kind: "lookup"; order: Order }
   | { kind: "decision"; decision: Decision }
   | { kind: "approval"; approved: boolean }
-  | { kind: "refund"; amount: number };
+  | { kind: "refund"; orderId: string; amount: number };
 
 export function toObservations(recording: Recording): Observation[] {
   return recording.effects.flatMap((effect): Observation[] => {
@@ -122,7 +122,7 @@ export function toObservations(recording: Recording): Observation[] {
       case "requestApproval":
         return [{ kind: "approval", approved: effect.result as boolean }];
       case "issueRefund":
-        return [{ kind: "refund", amount: (effect.args as [{ amount: number }])[0].amount }];
+        return [{ kind: "refund", ...(effect.args as [{ orderId: string; amount: number }])[0] }];
       default:
         return [];
     }
@@ -152,9 +152,11 @@ export function checkRun(
       issueRefund: {
         observes: "refund",
         // The refund the code issued must be the one the model would issue.
-        matches: ({ input, observation }) =>
-          (input as { amount: number }).amount ===
-          (observation as Extract<Observation, { kind: "refund" }>).amount,
+        matches: ({ input, observation }) => {
+          const refund = observation as Extract<Observation, { kind: "refund" }>;
+          const expected = input as { orderId: string; amount: number };
+          return expected.orderId === refund.orderId && expected.amount === refund.amount;
+        },
       },
     },
     events: {

@@ -89,6 +89,22 @@ describe("verify in place: a seeded regression", () => {
     });
   });
 
+  test("a refund to the wrong order is an input mismatch", async () => {
+    const scenario = SCENARIOS[0]!;
+    const recording = await recordRun(scenario, async (fx, request) => {
+      await fx.lookupOrder(request.orderId);
+      await fx.decide({ request: request.message, order: scenario.order, decisions: 0 });
+      await fx.issueRefund({ orderId: "OTHER", amount: 40 });
+    });
+    const report = await checkRun(scenario, recording);
+    expect(report.deviation).toMatchObject({
+      reason: "input-mismatch",
+      expected: "issueRefund",
+      observed: { kind: "refund", orderId: "OTHER", amount: 40 },
+      actorInput: { orderId: "A-1", amount: 40 },
+    });
+  });
+
   test("the other runs of the regressed code still conform", async () => {
     for (const scenario of SCENARIOS.filter((s) => !s.repeatCustomer)) {
       const report = await checkRun(

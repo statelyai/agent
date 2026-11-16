@@ -122,7 +122,7 @@ const result = await canReach(
 // { reachable: false, complete: true }
 ```
 
-- `reachable: false` is a proof only with `complete: true`.
+- `reachable: false` is a proof only with `complete: true`, and only over the outputs and payloads you list. The search forks on those values and no others: a refund of 150 is not explored unless `outputs` lists it. List each rule's boundary values (just under and over a threshold, the cap reached).
 - Check that the search reaches the path the rule guards, for example a large refund through approval. Otherwise a model where that path does not exist proves the rule vacuously.
 - See [Testing and verification](verify.md#reachability-checks) for payloads, ordering targets, and bounds.
 
@@ -162,7 +162,9 @@ function toObservations(recording: Recording): Observation[] {
       case "requestApproval":
         return [{ kind: "approval", approved: effect.result as boolean }];
       case "issueRefund":
-        return [{ kind: "refund", amount: (effect.args as [{ amount: number }])[0].amount }];
+        return [
+          { kind: "refund", ...(effect.args as [{ orderId: string; amount: number }])[0] },
+        ];
       default:
         return [];
     }
@@ -185,7 +187,8 @@ const report = await checkConformance(refundModel, {
     decide: { observes: "decision", output: ({ observation }) => observation.decision },
     issueRefund: {
       observes: "refund",
-      matches: ({ input, observation }) => input.amount === observation.amount,
+      matches: ({ input, observation }) =>
+        input.orderId === observation.orderId && input.amount === observation.amount,
     },
   },
   events: {
@@ -195,7 +198,7 @@ const report = await checkConformance(refundModel, {
 ```
 
 - An actor with `observes` consumes the next observation, which must be of that kind. `output` builds the actor's output from it.
-- `matches` compares the actor's input with the observation. Here, the refund the code issued must be the amount the model would refund.
+- `matches` compares the actor's input with the observation. Here, the refund the code issued must be for the order and amount the model would refund.
 - `events` sends an observation to the model as an event while the model waits, here the person's approval.
 - An actor the recording cannot see takes no `observes`. It runs unchecked and is listed in `report.unobserved`.
 - When an actor's output carries state the recording does not show, build it in `output` from the model's own `input` plus the observation.
@@ -233,7 +236,7 @@ The model was waiting for a person in `awaitingApproval`, and the code issued th
 
 - It checks the order and the content of what the recording shows against what the model allows.
 - It does not see effects the recording does not capture. An actor without `observes` is unchecked, and the report lists it.
-- It does not prove anything about runs you did not record. The proofs on the model cover every path of the model; conformance ties those paths to the recorded runs.
+- It does not prove anything about runs you did not record. The proofs cover every path through the outputs and payloads listed in [Step 2](#step-2-proofs), not every value an actor could return. Conformance ties those paths to the recorded runs.
 - A wrong model can conform and prove its rules. Review the model, and treat a deviation as a question about the code or the model.
 
 ## Migrate later
