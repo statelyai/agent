@@ -127,9 +127,9 @@ export async function runDeadlineEscalationExample(
 ) {
   const { executors = liveExecutors(), ...runOptions } = options ?? {};
   return runAgent(deadlineEscalationMachine, {
-    executors,
     input: { requestId: REQUEST_ID, task: "Schedule a maintenance window", windowMs: 60_000 },
     ...runOptions,
+    executors,
   });
 }
 

@@ -194,7 +194,10 @@ export function createHost({
    */
   async function startDraft(prompt: string): Promise<ToolResult> {
     const handle = `draft-${++nextHandle}`;
-    const opened = await runAgent(emailDrafter, { ...run, input: undefined });
+    const opened = await runAgent(emailDrafter, {
+      ...run,
+      input: undefined,
+    });
     const pending = toToolResult(opened, handle);
     if (pending.status !== "pending") return pending;
     if (!pending.interaction?.textEvent) {

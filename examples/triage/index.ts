@@ -429,7 +429,10 @@ export async function main() {
     onTransition: (snapshot: TriageSnapshot) => console.log("[state]", getStatePath(snapshot)),
   };
 
-  let result = await runAgent(triageMachine, { input: { ticket }, ...shared });
+  let result = await runAgent(triageMachine, {
+    input: { ticket },
+    ...shared,
+  });
 
   // A low-confidence classification settles the run idle; resume it with the
   // human's decision.

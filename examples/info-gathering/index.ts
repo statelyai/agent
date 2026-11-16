@@ -401,7 +401,10 @@ export async function runInfoGatheringExample(
     },
   };
 
-  let result = await runAgent(infoGatheringMachine, { input: { opener }, ...shared });
+  let result = await runAgent(infoGatheringMachine, {
+    input: { opener },
+    ...shared,
+  });
   while (result.status === "idle") {
     const question = getInteraction(result.snapshot)?.label ?? result.snapshot.context.question;
     onQuestion?.(question);

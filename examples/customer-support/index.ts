@@ -757,9 +757,9 @@ export async function runCustomerSupportExample(
 
   // Phase 1: classify, then either answer (done) or settle idle.
   let first = await runAgent(customerSupportMachine, {
-    onTransition: track,
     input: { query },
     ...executors,
+    onTransition: track,
   });
 
   // Every question the bot asks is another leg. The machine decides when to
@@ -772,10 +772,10 @@ export async function runCustomerSupportExample(
     const reply = pending.shift();
     const replyType = first.snapshot.hasTag("awaiting-code") ? "PROVIDE_CODE" : "PROVIDE_INFO";
     first = await runAgent(customerSupportMachine, {
-      onTransition: track,
       snapshot: first.persist(),
       event: reply === undefined ? { type: "STOP_ASKING" } : { type: replyType, text: reply },
       ...executors,
+      onTransition: track,
     });
   }
 
@@ -802,10 +802,10 @@ export async function runCustomerSupportExample(
     ? ({ type: "APPROVE" } as const)
     : ({ type: "DENY", reason: denyReason } as const);
   const second = await runAgent(customerSupportMachine, {
-    onTransition: track,
     snapshot: first.persist(),
     event,
     ...executors,
+    onTransition: track,
   });
   if (second.status !== "done") {
     throw new Error(`Expected done after ${event.type}, got '${second.status}'.`);

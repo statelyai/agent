@@ -186,7 +186,10 @@ export async function startDraft(
     AgentRunInit<typeof emailDrafter> = currentRunOptions(),
 ): Promise<ToolResult> {
   const handle = `draft-${++nextHandle}`;
-  const opened = await runAgent(emailDrafter, { ...runOptions, input: undefined });
+  const opened = await runAgent(emailDrafter, {
+    ...runOptions,
+    input: undefined,
+  });
   const pending = toToolResult(opened, handle);
   if (pending.status === "done") return pending;
 

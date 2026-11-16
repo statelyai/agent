@@ -153,8 +153,8 @@ export async function runFileSnapshotStoreExample(
 
   // Request/process one: run until the machine waits for approval.
   const paused = await runAgent(releaseNoteMachine, {
-    executors,
     ...(observers as object),
+    executors,
     input: { topic: "application-owned storage" },
   });
   if (paused.status !== "idle") throw new Error(`Expected idle, got '${paused.status}'.`);
@@ -164,8 +164,8 @@ export async function runFileSnapshotStoreExample(
   const snapshot = await loadSnapshot(directory, runId);
   if (!snapshot) throw new Error(`No snapshot stored for '${runId}'.`);
   const resumed = await runAgent(releaseNoteMachine, {
-    executors,
     ...(observers as object),
+    executors,
     snapshot,
     event: { type: "APPROVE" },
   });

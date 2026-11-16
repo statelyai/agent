@@ -291,7 +291,10 @@ export async function startTool(
   input: { amount: number; orderId: string },
   runOptions: RefundRunOptions,
 ): Promise<ToolResult> {
-  const result = await runAgent(refundMachine, { ...runOptions, input });
+  const result = await runAgent(refundMachine, {
+    ...runOptions,
+    input,
+  });
   return toToolResult(result);
 }
 
@@ -302,7 +305,11 @@ export async function resumeTool(
   runOptions: RefundRunOptions,
 ): Promise<ToolResult> {
   const snapshot = JSON.parse(handle);
-  const result = await runAgent(refundMachine, { ...runOptions, snapshot, event });
+  const result = await runAgent(refundMachine, {
+    ...runOptions,
+    snapshot,
+    event,
+  });
 
   // The state has no transition for the event, so the machine ignored it and
   // nothing happened. That is not a library error: `runAgent` settled

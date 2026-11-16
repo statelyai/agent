@@ -572,7 +572,10 @@ export function toGuesserEvent(text: string): GuesserEvent {
 export async function main() {
   const shared = { executors: createAiSdkExecutors(justOneMachine) };
 
-  let result = await runAgent(justOneMachine, { input: { rounds: 3 }, ...shared });
+  let result = await runAgent(justOneMachine, {
+    input: { rounds: 3 },
+    ...shared,
+  });
 
   // Every guessing turn settles the run idle. Resume from `result.persist()`.
   while (result.status === "idle") {

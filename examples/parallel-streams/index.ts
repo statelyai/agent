@@ -187,13 +187,13 @@ export async function runParallelStreamsExample(
 
   const result = await runAgent(parallelStreamsMachine, {
     executors: createAiSdkExecutors(parallelStreamsMachine),
+    input: { topic: "state machines" },
+    ...options,
     onChunk: (chunk, { request }) => {
       buffers[request.id] = (buffers[request.id] ?? "") + chunk;
       lastChunkAt[request.id] = Date.now() - startedAt;
     },
     onTransition: observe,
-    input: { topic: "state machines" },
-    ...options,
   });
 
   if (result.status !== "done") {

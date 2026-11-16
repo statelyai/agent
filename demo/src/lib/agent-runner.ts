@@ -330,6 +330,8 @@ export async function startScenarioRun(
   const machine = machineFor(scenarioId);
   const result = await runAgent(machine, {
     executors,
+    input: inputFor(scenarioId, prompt),
+    ...judgeActors(scenarioId, judge),
     ...(signal ? { signal } : {}),
     ...(observers.onChunk ? { onChunk: observers.onChunk } : {}),
     onTransition,
@@ -342,8 +344,6 @@ export async function startScenarioRun(
       "start",
       scenarioDiagramHints[scenarioId],
     ),
-    input: inputFor(scenarioId, prompt),
-    ...judgeActors(scenarioId, judge),
   });
   return toResult(scenarioId, model, result as AgentRunResult<AnyStateMachine>, trace);
 }
@@ -368,6 +368,9 @@ export async function resumeScenarioRun(
   // error: the run settles unchanged and reports `result.ignored`.
   const result = await runAgent(machine, {
     executors,
+    snapshot,
+    event,
+    ...judgeActors(scenarioId, judge),
     ...(signal ? { signal } : {}),
     ...(observers.onChunk ? { onChunk: observers.onChunk } : {}),
     onTransition,
@@ -380,9 +383,6 @@ export async function resumeScenarioRun(
       "resume",
       scenarioDiagramHints[scenarioId],
     ),
-    snapshot,
-    event,
-    ...judgeActors(scenarioId, judge),
   });
   return toResult(scenarioId, model, result as AgentRunResult<AnyStateMachine>, trace);
 }

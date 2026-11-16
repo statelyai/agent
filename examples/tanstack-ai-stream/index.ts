@@ -253,6 +253,7 @@ export async function* agentRunToAgUiStream<TMachine extends AnyStateMachine>(
   emit({ type: EventType.RUN_STARTED, threadId, runId });
 
   const run = runAgent(machine, {
+    ...runOptions,
     onChunk: (chunk, { request }) => {
       if (!openMessages.has(request.id)) {
         openMessages.add(request.id);
@@ -285,7 +286,6 @@ export async function* agentRunToAgUiStream<TMachine extends AnyStateMachine>(
       emit({ type: EventType.STEP_STARTED, stepName });
       currentStep = stepName;
     },
-    ...runOptions,
   }).then(
     (result) => {
       closeOpen();

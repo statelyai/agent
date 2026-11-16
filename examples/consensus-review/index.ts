@@ -345,8 +345,8 @@ export async function runConsensusReviewExample(
     input?: unknown;
   };
   return runAgent(consensusReviewMachine, {
-    actors: { ...actors, review: actors?.review ?? createReview(judge ?? liveJudge()) },
     ...runOptions,
+    actors: { ...actors, review: actors?.review ?? createReview(judge ?? liveJudge()) },
     // Last on purpose: the host-derived input wins over anything spread above.
     input:
       patch === undefined

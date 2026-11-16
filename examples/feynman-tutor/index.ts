@@ -577,7 +577,10 @@ export async function runFeynmanTutorExample(
     },
   };
 
-  let result = await runAgent(feynmanTutorMachine, { input: { topic }, ...shared });
+  let result = await runAgent(feynmanTutorMachine, {
+    input: { topic },
+    ...shared,
+  });
   while (result.status === "idle") {
     const { notice, lastFeedback } = result.snapshot.context;
     const label = [

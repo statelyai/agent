@@ -253,9 +253,9 @@ export async function runCase(
   const actors = judge ? { actors: { evaluatePrompt: createEvaluatePrompt(judge) } } : {};
   let result = await runAgent(machine, {
     executors,
-    onTrace,
     input: { prompt: emailCase.prompt },
     ...actors,
+    onTrace,
   });
 
   let guard = 0;
@@ -314,10 +314,10 @@ export async function runCase(
 
     result = await runAgent(machine, {
       executors,
-      onTrace,
       snapshot,
       event: event as never,
       ...actors,
+      onTrace,
     });
   }
 

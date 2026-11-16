@@ -188,7 +188,6 @@ export function agentRunToUIMessageStream<TMachine extends AnyStateMachine>(
           const state = getStatePath(snapshot);
           writer.write({ type: AGENT_STATE_PART, data: { state } });
         },
-        ...options,
       });
 
       // Close any part still open (e.g. the run errored mid-stream), surface a

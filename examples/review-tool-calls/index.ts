@@ -344,9 +344,9 @@ export async function runReviewToolCallsExample(
     onProgress?.(getStatePath(snapshot.value));
 
   let result = await runAgent(reviewToolCallsMachine, {
-    onTransition: track,
     input: { request },
     ...runOptions,
+    onTransition: track,
   });
 
   const proposals: RefundCall[] = [];
@@ -373,10 +373,10 @@ export async function runReviewToolCallsExample(
     }
     i++;
     result = await runAgent(reviewToolCallsMachine, {
-      onTransition: track,
       snapshot: result.persist(),
       event,
       ...runOptions,
+      onTransition: track,
     });
   }
 

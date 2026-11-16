@@ -74,7 +74,10 @@ async function play(options: PlayOptions) {
   const { executor } = createClueGivers(options.script, options.captured);
   const shared = { executors: { generateText: executor } };
 
-  let result = await runAgent(justOneMachine, { input: options.input, ...shared });
+  let result = await runAgent(justOneMachine, {
+    input: options.input,
+    ...shared,
+  });
 
   while (result.status === "idle") {
     // Every idle state must advertise how a host can unblock it.

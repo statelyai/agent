@@ -262,9 +262,9 @@ export async function runBookingCompensationExample(
 ) {
   const { executors = liveExecutors(), ...runOptions } = options ?? {};
   return runAgent(bookingCompensationMachine, {
-    executors,
     input: { bookingId: "trip-1", destination: "Lisbon" },
     ...runOptions,
+    executors,
   });
 }
 

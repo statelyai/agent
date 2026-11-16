@@ -187,11 +187,11 @@ export async function runUntilCrash({
   // Write-ahead: each entry reaches the store as it is appended, and the outline
   // call cannot start until the entries before it are durable.
   const crashed = await runAgent(crashRecoveryMachine, {
+    ...(observers as object),
     store,
     threadId,
     executors: observed.executors,
     signal: runSignal,
-    ...(observers as object),
     input: { topic },
   });
 
@@ -227,11 +227,11 @@ export async function recover({
   // No `events`, no snapshot: the store's thread IS the resume, and the run
   // keeps appending to it, so the thread stays replayable end to end.
   const recovered = await runAgent(crashRecoveryMachine, {
+    ...(observers as object),
     store,
     threadId,
     executors: observed.executors,
     ...(signal ? { signal } : {}),
-    ...(observers as object),
   });
 
   console.log(`recovered with status '${recovered.status}'`);

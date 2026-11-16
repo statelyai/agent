@@ -279,7 +279,10 @@ export async function runSqlAgentExample(
     ...runOptions,
   };
 
-  const first = await runAgent(sqlAgentMachine, { input: { question }, ...resolved });
+  const first = await runAgent(sqlAgentMachine, {
+    input: { question },
+    ...resolved,
+  });
   // Planning failed: the run is already in `failed`, with nothing to approve.
   if (first.status === "done") {
     return { interaction: undefined, output: first.output };
