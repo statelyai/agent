@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
-import { createAsyncLogic, createMachine } from "xstate";
+import { createAsyncLogic, createMachine, type AnyStateMachine } from "xstate";
 import { setupAgent } from "./index.js";
 import { canReach, explorePaths } from "./testing/index.js";
 
@@ -123,5 +123,83 @@ describe("canReach — default key", () => {
       maxDepth: 3,
     });
     expect(result.reachable).toBe(true);
+  });
+
+  test("a pending invoke's input is part of the key", async () => {
+    // A and B enter `deciding` with equal context; only B's decision can APPROVE.
+    const agent = setupAgent({
+      context: z.object({}),
+      events: { A: z.object({}), B: z.object({}), APPROVE: z.object({}), REJECT: z.object({}) },
+    });
+    const machine = agent.createMachine({
+      context: {},
+      initial: "start",
+      states: {
+        start: { on: { A: { target: "deciding" }, B: { target: "deciding" } } },
+        deciding: {
+          invoke: {
+            id: "review",
+            src: "agent.decide",
+            input: ({ event }: { event: { type: string } }) => ({
+              model: "m",
+              prompt: "approve?",
+              allowedEvents: event.type === "B" ? (["APPROVE"] as const) : (["REJECT"] as const),
+            }),
+          },
+          on: { APPROVE: { target: "approved" }, REJECT: { target: "rejected" } },
+        },
+        approved: { type: "final" },
+        rejected: { type: "final" },
+      },
+    });
+    expect(await canReach(machine, "approved")).toMatchObject({ reachable: true });
+  });
+
+  test("a coupled child's armed timer is part of the key", async () => {
+    // ARM schedules TIMEOUT without changing the child's state or context.
+    const child = createMachine({
+      initial: "waiting",
+      states: {
+        waiting: {
+          on: {
+            ARM: (_: unknown, enq: { raise: (event: unknown, options: unknown) => void }) => {
+              enq.raise({ type: "TIMEOUT" }, { delay: 50 });
+            },
+            TIMEOUT: { target: "timedOut" },
+          },
+        },
+        timedOut: { type: "final" },
+      },
+    } as never) as AnyStateMachine;
+    const parent = createMachine({
+      initial: "running",
+      states: {
+        running: { invoke: { id: "child", src: child, onDone: { target: "expired" } } },
+        expired: { type: "final" },
+      },
+    } as never) as AnyStateMachine;
+    const result = await canReach(parent, "expired", {
+      children: "coupled",
+      childEvents: { child: ["ARM"] },
+    });
+    expect(result.reachable).toBe(true);
+  });
+
+  test("a sparse array is not merged with a shorter one", async () => {
+    const machine = createMachine({
+      context: { items: [] as unknown[] },
+      initial: "waiting",
+      states: {
+        waiting: {
+          on: {
+            KEEP: { context: { items: [] } },
+            HOLE: { context: { items: new Array(1) } },
+            GO: ({ context }) => (context.items.length === 1 ? { target: "goal" } : undefined),
+          },
+        },
+        goal: { type: "final" },
+      },
+    });
+    expect(await canReach(machine, "goal", { maxDepth: 3 })).toMatchObject({ reachable: true });
   });
 });

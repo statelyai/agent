@@ -1318,9 +1318,9 @@ export interface ExplorePathsOptions {
    * a key that drops a field the machine reads makes the search unsound.
    * Without it, `explorePaths` explores every path in full, and `canReach`
    * uses a default key: the state value, context, status, history, pending
-   * requests, children, armed timers, and coupled children's states. A step
-   * whose context is not plain data (a `Map`, a class instance) is not
-   * deduplicated.
+   * requests and their invoke inputs, children and their inputs, armed
+   * timers, and coupled children's states. A step whose context or inputs
+   * are not plain data (a `Map`, a class instance) is not deduplicated.
    */
   dedupeBy?: (snapshot: ExploreSnapshot) => string;
   /**
@@ -1489,6 +1489,8 @@ function strictKey(value: unknown, seen = new Set<object>()): string {
   seen.add(value);
   let key: string;
   if (Array.isArray(value)) {
+    // A hole or an extra own property would vanish from the key.
+    if (Object.keys(value).length !== value.length) throw new TypeError("unkeyable array");
     key = `[${value.map((item) => strictKey(item, seen)).join(",")}]`;
   } else {
     const proto = Object.getPrototypeOf(value);
@@ -1511,19 +1513,24 @@ function tryKey(key: () => string): string | undefined {
 }
 
 // canReach's default `dedupeBy`: everything a settled step's future reads.
-// Throws (no dedupe for that step) when a value is not plain data.
-function defaultStepKey(step: AgentStep): string {
+// A pending invoke's input decides its request (a decision's candidates, a
+// child's start). Throws (no dedupe for that step) when a value is not plain data.
+function stepKeyParts(step: AgentStep): unknown[] {
   const snapshot = step.snapshot as AnyMachineSnapshot & {
     historyValue?: unknown;
     timers?: readonly Record<string, unknown>[];
   };
-  return strictKey([
+  const children = (snapshot.children ?? {}) as Record<string, ChildRef | undefined>;
+  return [
     snapshot.value,
     snapshot.context,
     snapshot.status,
     snapshot.historyValue ?? null,
     step.requests.map((request) => request.id),
-    Object.keys(snapshot.children ?? {}).sort(),
+    pendingInvokes(step).map((invoke) => [invoke.id, invoke.src, invoke.input]),
+    Object.keys(children)
+      .sort()
+      .map((id) => [id, children[id]?.options?.input]),
     (snapshot.timers ?? []).map((timer) => [
       timer["id"],
       timer["type"],
@@ -1531,7 +1538,11 @@ function defaultStepKey(step: AgentStep): string {
       timer["event"],
       timer["target"] === "self" ? "self" : (timer["target"] as { id?: string } | undefined)?.id,
     ]),
-  ]);
+  ];
+}
+
+function defaultStepKey(step: AgentStep): string {
+  return strictKey(stepKeyParts(step));
 }
 
 // Cap on nested child-machine explorations (`children: "explore"`).
@@ -3391,19 +3402,8 @@ function explore(
     return `\u0003${parts.sort().join("\u0003")}`;
   };
   const stateKey = (kid: KidState): string => {
-    const snapshot = kid.step.snapshot as AnyMachineSnapshot;
     try {
-      return (
-        strictKey([
-          snapshot.value,
-          snapshot.context,
-          snapshot.status,
-          (snapshot as { historyValue?: unknown }).historyValue ?? null,
-          kid.step.requests.map((request) => request.id),
-          Object.keys(snapshot.children ?? {}),
-          pumped.has(kid.step),
-        ]) + kidsKey(kid.kids)
-      );
+      return strictKey([...stepKeyParts(kid.step), pumped.has(kid.step)]) + kidsKey(kid.kids);
     } catch {
       return `\u0002${unkeyable++}`;
     }
