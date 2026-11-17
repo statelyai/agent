@@ -2,4 +2,4 @@
 "@statelyai/agent": patch
 ---
 
-Update the XState 4 and 5 workspace guide to install Agent 2.0.0-alpha.38.
+Update installation guidance to use Agent 2.0.0-alpha.40 with XState 6.0.0-beta.2.

@@ -27,7 +27,7 @@
 - [#242](https://github.com/statelyai/agent/pull/242) [`fdc0a0f`](https://github.com/statelyai/agent/commit/fdc0a0f65266f53e89b691d51d90621dcbed4efa) Thanks [@davidkpiano](https://github.com/davidkpiano)! - The agent skills no longer ship in the package. `graph-engineering`, `loop-to-machine`, `build-machine`, `generate-machine`, `add-traces`, `add-evals`, and `improve-machine` moved to the `stately-agent` plugin in [statelyai/skills](https://github.com/statelyai/skills). Install them with `/plugin install stately-agent@stately` in Claude Code, or `npx skills add statelyai/skills`.
 
 - [#241](https://github.com/statelyai/agent/pull/241) [`ca81ebf`](https://github.com/statelyai/agent/commit/ca81ebfd783efed67f7ffd28e7cba4db5639fdbd) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Remove seven preset factories from `@statelyai/agent/machines`: `createToolLoopMachine`, `createSequentialMachine`, `createRouterMachine`, `createParallelMachine`, `createLoopMachine`, `createSupervisorMachine`, and `createHandoffMachine`, with `routeEventType`, `delegateEventType`, `transferEventType`, `FINISH_EVENT_TYPE`, and the `PresetEntry` types. `createApprovalBatchMachine` stays. For the other shapes, copy the matching example (`prompt-chaining`, `agent-supervisor`, `swarm-handoff`, `parallel-streams`, `map-reduce`).
-  
+
   Remove `inspectTransitions` and its `InspectedActorRef` type; filter `@xstate.transition` events in your own `inspect` handler, or use `traceTransitions`. `getMachineStructuralHash` and `rebindActorSession` (from `@statelyai/agent/log`) are no longer exported; set `version` on the machine to pin snapshot identity.
 
 ### Patch Changes
@@ -41,7 +41,7 @@
 - [#237](https://github.com/statelyai/agent/pull/237) [`c0ebe59`](https://github.com/statelyai/agent/commit/c0ebe59e9a971c738c7ed2a630357641c1566e22) Thanks [@davidkpiano](https://github.com/davidkpiano)! - `loop-to-machine` skill and strangler-fig docs: extract a mid-method phase at step 0 and call it from the carved actor, instead of copying its lines. Copying stays only for code you can't edit, pinned with a hash test.
 
 - [#236](https://github.com/statelyai/agent/pull/236) [`77d1fb9`](https://github.com/statelyai/agent/commit/77d1fb9eddad7d469425777a3939ccbf7ec47295) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Bind live objects per run:
-  
+
   - `runAgent` and `createAgentRuntime` take `actions`, merged onto the machine like `actors`. Keys and params are checked against the actions declared in `setupAgent`.
   - `setupAgent` keeps the declared action types, so `actions.name` in a transition is typed and a misspelled name is a type error.
   - `checkParity` takes `setup: (scenario, side) => liveObject`, called once per side; its result is passed to `effects`, `before` and `after`.
