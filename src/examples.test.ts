@@ -15,7 +15,8 @@ import { createRateJoke } from "../examples/joke/index.js";
 // The examples' repo-internal judge double: an AI SDK evaluation model with
 // scripted answers keyed by question id.
 import { createMockJudge } from "../examples/mock-judge.js";
-import { createAgentRuntime, runAgent, runToQuiescence, type AgentTextRequest } from "./index.js";
+import { createAgentRuntime, runAgent, type AgentTextRequest } from "./index.js";
+import { runToQuiescence } from "./run-agent.js";
 // The step envelope (getAgentRequests/resolveAgentStep/transitionAgentStep) is
 // internal now — imported straight from ./steps.js (it backs verify.ts and these
 // example checks); resolveDecision remains on the public /steps subpath.

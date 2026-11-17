@@ -432,10 +432,12 @@ describe("explorePaths — dedupeBy", () => {
 });
 
 describe("canReach completeness", () => {
+  // The counter makes every state new, so no default key repeats.
   const loop = createMachine({
+    context: { n: 0 },
     initial: "a",
     states: {
-      a: { on: { NEXT: { target: "b" } } },
+      a: { on: { NEXT: ({ context }) => ({ target: "b", context: { n: context.n + 1 } }) } },
       b: { on: { NEXT: { target: "a" }, FINISH: { target: "goal" } } },
       goal: { type: "final" },
       never: {},
@@ -704,10 +706,16 @@ describe("canReach — proof soundness", () => {
   });
 
   // Every event loops back, so terminals are rare: only `maxDepth` ends a path.
+  // The counter makes every state new, so no default key repeats.
+  const tick = ({ context }: { context: { n: number } }) => ({
+    target: "spin",
+    context: { n: context.n + 1 },
+  });
   const spin = createMachine({
+    context: { n: 0 },
     initial: "spin",
     states: {
-      spin: { on: { A: { target: "spin" }, B: { target: "spin" }, C: { target: "spin" } } },
+      spin: { on: { A: tick, B: tick, C: tick } },
       never: {},
     },
   });

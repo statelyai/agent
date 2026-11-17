@@ -4,11 +4,11 @@ import type { AgentDecisionExecutor } from "./decision.js";
 import {
   createAgentRuntime,
   createAgentSchemas,
-  runToQuiescence,
   setupAgent,
   type AgentTraceEvent,
 } from "./index.js";
-import { foldTraces, repeatRuns, summarizeRepeats } from "./testing/index.js";
+import { runToQuiescence } from "./run-agent.js";
+import { foldTraces, repeatRuns, summarizeRepeats } from "./evals/index.js";
 
 const schemas = createAgentSchemas({
   context: z.object({}),

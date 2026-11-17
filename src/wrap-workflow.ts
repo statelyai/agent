@@ -19,13 +19,23 @@ export type WorkflowEffects<TEffects> = {
 };
 
 /** What a wrapped workflow's `run` gets besides its input and effects. */
-export interface WorkflowRunContext {
+export interface WorkflowRunContext<TLive = undefined> {
   /** Aborted when the run is aborted or the machine stops the workflow. */
   signal: AbortSignal;
+  /**
+   * The live object this call passed as `live` (the instance a class-shaped
+   * loop runs on), so one wrapped workflow serves every instance.
+   */
+  live: TLive;
 }
 
 /** Options for {@link wrapWorkflow}. */
-export interface WrapWorkflowConfig<TInput, TOutput, TEffects extends WorkflowEffects<TEffects>> {
+export interface WrapWorkflowConfig<
+  TInput,
+  TOutput,
+  TEffects extends WorkflowEffects<TEffects>,
+  TLive = undefined,
+> {
   /** The machine id. */
   id: string;
   /** The machine version, for the event log. Default `"1"`. */
@@ -40,7 +50,11 @@ export interface WrapWorkflowConfig<TInput, TOutput, TEffects extends WorkflowEf
    * functions is passed as is. An effect that resolves to a stream (anything
    * `for await` reads) settles once the stream is read, with its chunks.
    */
-  run: (input: TInput, effects: TEffects, context: WorkflowRunContext) => PromiseLike<TOutput>;
+  run: (
+    input: TInput,
+    effects: TEffects,
+    context: WorkflowRunContext<TLive>,
+  ) => PromiseLike<TOutput>;
   /**
    * Maps an effect's arguments, result, or error before it is journaled as an
    * event. Return a redacted value for secrets and private records: every
@@ -93,7 +107,12 @@ export type WrappedWorkflowContext<TInput, TOutput> = {
 };
 
 /** Options for {@link WrappedWorkflow.run}: `runAgent` options that fit a black box, plus fakes and a recorder. */
-export interface WrappedWorkflowRunOptions<TEffects, TInput, TOutput> extends Pick<
+export interface WrappedWorkflowRunOptions<
+  TEffects,
+  TInput,
+  TOutput,
+  TLive = undefined,
+> extends Pick<
   AgentRunOptions<WrappedWorkflowMachine<TInput, TOutput>>,
   "signal" | "inspect" | "onTransition" | "onTrace" | "onEvent" | "metadata" | "verification"
 > {
@@ -109,10 +128,12 @@ export interface WrappedWorkflowRunOptions<TEffects, TInput, TOutput> extends Pi
    * JSON, `revive` to rebuild it in replay, `redact` for arguments.
    */
   recordOptions?: { [K in keyof TEffects]?: RecordCallOptions };
+  /** Passed to the workflow as `context.live`: this call's live object. */
+  live?: TLive;
 }
 
 /** The result of {@link wrapWorkflow}. */
-export interface WrappedWorkflow<TInput, TOutput, TEffects> {
+export interface WrappedWorkflow<TInput, TOutput, TEffects, TLive = undefined> {
   /**
    * `running` invokes the workflow and counts its effect calls; `done` is
    * final with the workflow's result as output. A rejection is unhandled, so
@@ -129,7 +150,10 @@ export interface WrappedWorkflow<TInput, TOutput, TEffects> {
    */
   run(
     input: TInput,
-    options?: WrappedWorkflowRunOptions<TEffects, TInput, TOutput>,
+    // `live` is required when the workflow's `context.live` cannot be `undefined`.
+    ...options: undefined extends TLive
+      ? [options?: WrappedWorkflowRunOptions<TEffects, TInput, TOutput, TLive>]
+      : [options: WrappedWorkflowRunOptions<TEffects, TInput, TOutput, TLive> & { live: TLive }]
   ): Promise<TOutput>;
 }
 
@@ -144,7 +168,7 @@ function typeOnly<T>(): StandardSchemaV1<T> {
   };
 }
 
-type Redact = NonNullable<WrapWorkflowConfig<unknown, unknown, never>["redact"]>;
+type Redact = NonNullable<WrapWorkflowConfig<unknown, unknown, never, unknown>["redact"]>;
 
 /**
  * Wraps each effect so its call and settlement reach the machine as events.
@@ -363,11 +387,16 @@ function isPlainData(value: unknown, seen: WeakSet<object>, hidden: { found: boo
   });
 }
 
-function workflowLogic<TInput, TOutput, TEffects>(
-  run: (input: TInput, effects: TEffects, context: WorkflowRunContext) => PromiseLike<TOutput>,
+function workflowLogic<TInput, TOutput, TEffects, TLive>(
+  run: (
+    input: TInput,
+    effects: TEffects,
+    context: WorkflowRunContext<TLive>,
+  ) => PromiseLike<TOutput>,
   effects: TEffects,
   runSignal?: AbortSignal,
   redact?: Redact,
+  live?: TLive,
 ) {
   return createAsyncLogic<TOutput, TInput>({
     run: async ({ input: contextInput, self, signal }) => {
@@ -385,7 +414,7 @@ function workflowLogic<TInput, TOutput, TEffects>(
       return run(
         ownCopy(input),
         observeEffects(effects, (event) => parent?.send(event), combined, redact),
-        { signal: combined },
+        { signal: combined, live: live as TLive },
       );
     },
   });
@@ -485,9 +514,14 @@ export type WrappedWorkflowMachine<TInput, TOutput> = PresetMachine<
  * const reply = await support.run(ticket); // what legacyRunTicket returned
  * ```
  */
-export function wrapWorkflow<TInput, TOutput, TEffects extends WorkflowEffects<TEffects>>(
-  config: WrapWorkflowConfig<TInput, TOutput, TEffects>,
-): WrappedWorkflow<TInput, TOutput, TEffects> {
+export function wrapWorkflow<
+  TInput,
+  TOutput,
+  TEffects extends WorkflowEffects<TEffects>,
+  TLive = undefined,
+>(
+  config: WrapWorkflowConfig<TInput, TOutput, TEffects, TLive>,
+): WrappedWorkflow<TInput, TOutput, TEffects, TLive> {
   const machine = createWrappedMachine<TInput, TOutput>(
     config.id,
     config.version ?? "1",
@@ -495,8 +529,9 @@ export function wrapWorkflow<TInput, TOutput, TEffects extends WorkflowEffects<T
   );
   return {
     machine,
-    async run(input, options = {}) {
-      const { effects: overrides, recorder, recordOptions, ...runOptions } = options;
+    async run(input, ...args) {
+      const options: WrappedWorkflowRunOptions<TEffects, TInput, TOutput, TLive> = args[0] ?? {};
+      const { effects: overrides, recorder, recordOptions, live, ...runOptions } = options;
       // A class instance's prototype methods count, bound to the instance.
       let effects = {
         ...mapEffects(config.effects, (_name, effect) => effect),
@@ -514,7 +549,7 @@ export function wrapWorkflow<TInput, TOutput, TEffects extends WorkflowEffects<T
         ...agentOptions,
         input: input as never,
         actors: {
-          workflow: workflowLogic(config.run, effects, options.signal, config.redact),
+          workflow: workflowLogic(config.run, effects, options.signal, config.redact, live),
         },
       });
       if (result.status === "done") {

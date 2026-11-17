@@ -8,7 +8,7 @@ What you get:
 
 - **Proofs with no model.** Put the rule that must never break behind a sentinel state, then `canReach(machine, "refundedOverLimit", options)` returns `reachable: false` and `complete: true` with no API key. See [Testing and verification](https://github.com/statelyai/agent/blob/next/docs/verify.md).
 - **Resume and replay from the event log.** A paused run resumes with `runAgent(machine, { snapshot, event })`, and `replay(machine, result.events)` rebuilds any point of a run with no model calls. See [The event log](https://github.com/statelyai/agent/blob/next/docs/event-log.md).
-- **Checked ports.** `createRecorder` records the old loop's model and tool calls, `compareRecordings` replays them against the machine, and `compareRuns` labels every scenario `same`, `intended`, or `regression`. See [Parity with the code you replace](https://github.com/statelyai/agent/blob/next/docs/evals.md#parity-with-the-code-you-replace).
+- **Checked ports.** `checkParity` records the old code's side effects, replays them against the machine, and reports every scenario where the two differ. `compareRuns` labels outcome-level differences `same`, `intended`, or `regression`. See [Parity with the code you replace](https://github.com/statelyai/agent/blob/next/docs/evals.md#parity-with-the-code-you-replace).
 
 The machine is also a diagram: stream any run to the Stately inspector with `runAgent`'s `inspect` option. See [Inspect a run](https://github.com/statelyai/agent/blob/next/docs/observability.md#inspect-a-run).
 
@@ -31,9 +31,10 @@ Stately Agent 2 is in alpha. APIs may change before the stable release.
 
 ### Brownfield: an existing agent
 
+- **Verify an existing agent in place.** Write a model of the code's control flow, prove its rules with `canReach`, and check recorded runs of the unchanged code against it with `checkConformance`. Migrating the code to a machine stays optional. See [Verify in place](https://github.com/statelyai/agent/blob/next/docs/verify-in-place.md).
 - **Wrap an existing workflow, then carve it.** `wrapWorkflow` runs an async workflow unchanged inside a machine. In minutes and with no rewrite, you get inspection, traces, the event log, and a recorded baseline. Reliability proofs such as `canReach` arrive per phase, as each phase moves into states, with `checkParity` against the original after each. See [Strangler-fig retrofit](https://github.com/statelyai/agent/blob/next/docs/strangler-fig.md).
-- **Retrofit an existing agent.** Turn a `while` loop into a machine: your SDK calls, tools, and retry code become the executors; the machine replaces only the control flow. See [Migrating from a hand-rolled loop](https://github.com/statelyai/agent/blob/next/docs/from-a-loop.md). A coding agent does it with the shipped `loop-to-machine` skill (see [Agent skills](#agent-skills)): "Use the loop-to-machine skill to convert `src/support-agent.ts` to a machine."
-- **Let an agent improve its own logic (experimental).** Keep the rules in a fixed TypeScript environment and let a model rewrite the JSON policy inside it, gated by `verifyAgentConfig` and promoted only when held-out scenarios improve. See [Environment and policy](https://github.com/statelyai/agent/blob/next/docs/environment-and-policy.md) and the [`improve-machine` skill](https://github.com/statelyai/agent/blob/next/skills/improve-machine/SKILL.md).
+- **Retrofit an existing agent.** Turn a `while` loop into a machine: your SDK calls, tools, and retry code become the executors; the machine replaces only the control flow. See [Migrating from a hand-rolled loop](https://github.com/statelyai/agent/blob/next/docs/from-a-loop.md). A coding agent does it with the `loop-to-machine` skill (see [Agent skills](#agent-skills)): "Use the loop-to-machine skill to convert `src/support-agent.ts` to a machine."
+- **Let an agent improve its own logic (experimental).** Keep the rules in a fixed TypeScript environment and let a model rewrite the JSON policy inside it, gated by `verifyAgentConfig` and promoted only when held-out scenarios improve. See [Environment and policy](https://github.com/statelyai/agent/blob/next/docs/environment-and-policy.md) and the [`improve-machine` skill](https://github.com/statelyai/skills/blob/main/plugins/stately-agent/skills/improve-machine/SKILL.md).
 
 ## Environment and policy
 
@@ -84,30 +85,38 @@ Requirements:
 
 An app that already uses XState 4 or 5 keeps it: put the agent in its own workspace package. See [Use in an XState 4 or 5 app](https://github.com/statelyai/agent/blob/next/docs/xstate-4-and-5-apps.md). If both versions land in one `node_modules`, the package fails with errors that do not mention a version:
 
-| Error                                                                                                                           | Cause                                       |
-| ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
-| `createAsyncLogic is not a function`                                                                                            | `xstate` resolved to 4 or 5 from CommonJS   |
-| `Cannot find module '…/node_modules/xstate/durable'`                                                                            | `xstate` resolved to 4 or 5 from ESM        |
-| An unmet or incorrect XState peer dependency warning                                                                            | The install's only warning of the two above |
+| Error                                                | Cause                                       |
+| ---------------------------------------------------- | ------------------------------------------- |
+| `createAsyncLogic is not a function`                 | `xstate` resolved to 4 or 5 from CommonJS   |
+| `Cannot find module '…/node_modules/xstate/durable'` | `xstate` resolved to 4 or 5 from ESM        |
+| An unmet or incorrect XState peer dependency warning | The install's only warning of the two above |
 
 ## Agent skills
 
-The package ships agent skills in `node_modules/@statelyai/agent/skills/`, and its docs in `node_modules/@statelyai/agent/docs/` with an index in `llms.txt`. Copy the skills into your coding agent's skills directory (for Claude Code, `.claude/skills/`):
+The agent skills live in [statelyai/skills](https://github.com/statelyai/skills), in the `stately-agent` plugin. The package ships its docs in `node_modules/@statelyai/agent/docs/` with an index in `llms.txt`.
 
-```sh
-mkdir -p .claude/skills
-cp -R node_modules/@statelyai/agent/skills/* .claude/skills/
+In Claude Code:
+
+```text
+/plugin marketplace add statelyai/skills
+/plugin install stately-agent@stately
 ```
 
-| Skill                                                                                                 | What it does                                                                     |
-| ----------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| [`graph-engineering`](https://github.com/statelyai/agent/blob/next/skills/graph-engineering/SKILL.md) | Finds which step a project is at and routes to the next skill                    |
-| [`loop-to-machine`](https://github.com/statelyai/agent/blob/next/skills/loop-to-machine/SKILL.md)     | Converts existing agent code into a machine and checks parity with `compareRuns` |
-| [`build-machine`](https://github.com/statelyai/agent/blob/next/skills/build-machine/SKILL.md)         | Builds a TypeScript machine from a spec and proves its invariants                |
-| [`generate-machine`](https://github.com/statelyai/agent/blob/next/skills/generate-machine/SKILL.md)   | Authors a JSON policy machine from scratch and runs `verifyAgentConfig`          |
-| [`add-traces`](https://github.com/statelyai/agent/blob/next/skills/add-traces/SKILL.md)               | Stamps and persists every run so it replays                                      |
-| [`add-evals`](https://github.com/statelyai/agent/blob/next/skills/add-evals/SKILL.md)                 | Writes evals per state, at the cheapest level that catches the failure           |
-| [`improve-machine`](https://github.com/statelyai/agent/blob/next/skills/improve-machine/SKILL.md)     | Experimental. Improves a policy from traces; a person reviews the pull request   |
+For other coding agents:
+
+```sh
+npx skills add statelyai/skills
+```
+
+| Skill                                                                                                                        | What it does                                                                     |
+| ---------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| [`graph-engineering`](https://github.com/statelyai/skills/blob/main/plugins/stately-agent/skills/graph-engineering/SKILL.md) | Finds which step a project is at and routes to the next skill                    |
+| [`loop-to-machine`](https://github.com/statelyai/skills/blob/main/plugins/stately-agent/skills/loop-to-machine/SKILL.md)     | Converts existing agent code into a machine and checks parity with `compareRuns` |
+| [`build-machine`](https://github.com/statelyai/skills/blob/main/plugins/stately-agent/skills/build-machine/SKILL.md)         | Builds a TypeScript machine from a spec and proves its invariants                |
+| [`generate-machine`](https://github.com/statelyai/skills/blob/main/plugins/stately-agent/skills/generate-machine/SKILL.md)   | Authors a JSON policy machine from scratch and runs `verifyAgentConfig`          |
+| [`add-traces`](https://github.com/statelyai/skills/blob/main/plugins/stately-agent/skills/add-traces/SKILL.md)               | Stamps and persists every run so it replays                                      |
+| [`add-evals`](https://github.com/statelyai/skills/blob/main/plugins/stately-agent/skills/add-evals/SKILL.md)                 | Writes evals per state, at the cheapest level that catches the failure           |
+| [`improve-machine`](https://github.com/statelyai/skills/blob/main/plugins/stately-agent/skills/improve-machine/SKILL.md)     | Experimental. Improves a policy from traces; a person reviews the pull request   |
 
 ## Quick start
 

@@ -9,13 +9,8 @@ import {
 import { beforeEach, describe, expect, test } from "vitest";
 import { createActor, toPromise } from "xstate";
 import { z } from "zod";
-import {
-  provideExecutors,
-  createAgentRuntime,
-  runToQuiescence,
-  setupAgent,
-  traceTransitions,
-} from "../index.js";
+import { provideExecutors, createAgentRuntime, setupAgent, traceTransitions } from "../index.js";
+import { runToQuiescence } from "../run-agent.js";
 import type { AgentRequestExecutors } from "../index.js";
 import { createOtelTraceHandler } from "./index.js";
 

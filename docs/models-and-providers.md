@@ -18,7 +18,7 @@ const executors = createAiSdkExecutors({
   models: { quick: someLanguageModel, careful: anotherLanguageModel },
 });
 
-await runToQuiescence(createAgentRuntime(machine, { executors }), { input });
+await runAgent(machine, { executors, input });
 ```
 
 ## Declaring models once
@@ -122,7 +122,7 @@ import { z } from "zod";
 import { Agent } from "@mastra/core/agent";
 import { createTool } from "@mastra/core/tools";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import { runToQuiescence } from "@statelyai/agent";
+import { runAgent } from "@statelyai/agent";
 
 const executors = createAiSdkExecutors({ models });
 
@@ -132,9 +132,7 @@ const startWorkflow = createTool({
   inputSchema: z.object({ prompt: z.string() }),
   outputSchema: z.object({ status: z.string() }),
   execute: async ({ prompt }) => {
-    const result = await runToQuiescence(createAgentRuntime(machine, { executors }), {
-      input: { prompt },
-    });
+    const result = await runAgent(machine, { executors, input: { prompt } });
     return { status: result.status };
   },
 });
@@ -172,14 +170,12 @@ export default {
   async fetch(request, env) {
     // Model IDs here are illustrative; substitute your provider's current models.
     const workersai = createWorkersAI({ binding: env.AI });
-    const result = await runToQuiescence(
-      createAgentRuntime(machine, {
-        executors: createAiSdkExecutors({
-          models: { quick: workersai("@cf/meta/llama-3.1-8b-instruct") },
-        }),
+    const result = await runAgent(machine, {
+      executors: createAiSdkExecutors({
+        models: { quick: workersai("@cf/meta/llama-3.1-8b-instruct") },
       }),
-      { input: await request.json() },
-    );
+      input: await request.json(),
+    });
     return Response.json(result);
   },
 };
@@ -198,14 +194,12 @@ import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 // Model IDs here are illustrative; substitute your provider's current models.
 const ollama = createOpenAI({ baseURL: "http://localhost:11434/v1", apiKey: "ollama" });
 
-await runToQuiescence(
-  createAgentRuntime(machine, {
-    executors: createAiSdkExecutors({
-      models: { quick: ollama("llama3.1") },
-    }),
+await runAgent(machine, {
+  executors: createAiSdkExecutors({
+    models: { quick: ollama("llama3.1") },
   }),
-  { input },
-);
+  input,
+});
 ```
 
 To use Groq, vLLM, Together, OpenRouter, or LM Studio, change `baseURL` and use the endpoint's real `apiKey`. Nothing else changes.
@@ -256,13 +250,13 @@ The `decide` executor asks for one structured-output object naming the event, or
 
 Each example is a runnable host for one provider stack.
 
-| Example                                                                                                                 | Backing                                                                                                              |
-| ----------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| [ai-sdk-host](https://github.com/statelyai/agent/blob/next/examples/ai-sdk-host/index.ts)                               | Vercel AI SDK, through the optional adapter                                                                          |
+| Example                                                                       | Backing                                                                                                           |
+| ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| [ai-sdk-host](https://github.com/statelyai/agent/blob/next/examples/ai-sdk-host/index.ts)                               | Vercel AI SDK, through the optional adapter                                                                       |
 | [openai-sdk-host](https://github.com/statelyai/agent/blob/next/examples/openai-sdk-host/index.ts)                       | `createOpenAiExecutors` from `@statelyai/agent/openai`, over the raw `openai` package (Responses + Chat Completions) |
 | [tanstack-ai-stream](https://github.com/statelyai/agent/blob/next/examples/tanstack-ai-stream/index.ts)                 | `createTanStackAiExecutors` from `@statelyai/agent/tanstack-ai`, streamed to a `useChat` client over AG-UI           |
 | [anthropic-sdk-host](https://github.com/statelyai/agent/blob/next/examples/anthropic-sdk-host/index.ts)                 | raw `@anthropic-ai/sdk` (Messages); structured via forced tool call, decisions via `tool_choice: { type: 'any' }`    |
 | [langchain-host](https://github.com/statelyai/agent/blob/next/examples/langchain-host/index.ts)                         | LangChain `BaseChatModel` (`@langchain/core`), wrapped into the executor contract                                    |
-| [mastra-host](https://github.com/statelyai/agent/blob/next/examples/mastra-host/index.ts)                               | Mastra `Agent` and `createTool`, bridging to `runToQuiescence`                                                       |
+| [mastra-host](https://github.com/statelyai/agent/blob/next/examples/mastra-host/index.ts)                               | Mastra `Agent` and `createTool`, bridging to `runAgent`                                                       |
 | [cloudflare-agent-host](https://github.com/statelyai/agent/blob/next/examples/cloudflare-agent-host/index.ts)           | Durable Object                                                                                                       |
 | [cloudflare-workers-ai-host](https://github.com/statelyai/agent/blob/next/examples/cloudflare-workers-ai-host/index.ts) | Workers AI binding                                                                                                   |

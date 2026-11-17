@@ -1,11 +1,6 @@
 import { test } from "vitest";
 import assert from "node:assert/strict";
-import {
-  createAgentRuntime,
-  getInteraction,
-  runToQuiescence,
-  type AgentTextRequest,
-} from "@statelyai/agent";
+import { getInteraction, type AgentTextRequest, runAgent } from "@statelyai/agent";
 import { createMockModelExecutors } from "../mock-model.js";
 import { runSwarmHandoffExample, swarmHandoffMachine, MAX_TURNS } from "./index.js";
 
@@ -105,7 +100,8 @@ test("the spent turn budget is a state where only END is offered", async () => {
 
 test("END's output does not repeat the last reply, which the idle turn already showed", async () => {
   const executors = scripted("food");
-  const idle = await runToQuiescence(createAgentRuntime(swarmHandoffMachine, { executors }), {
+  const idle = await runAgent(swarmHandoffMachine, {
+    executors,
     input: { message: "I want a 3-day trip to Lisbon." },
   });
   assert.equal(idle.status, "idle");
@@ -113,7 +109,8 @@ test("END's output does not repeat the last reply, which the idle turn already s
   const lastReply = idle.snapshot.context.reply;
   assert.equal(lastReply, "[travel] I want a 3-day trip to Lisbon.");
 
-  const done = await runToQuiescence(createAgentRuntime(swarmHandoffMachine, { executors }), {
+  const done = await runAgent(swarmHandoffMachine, {
+    executors,
     snapshot: JSON.parse(JSON.stringify(idle.persist())),
     event: { type: "END" },
   });

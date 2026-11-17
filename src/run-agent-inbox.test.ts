@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import { createAsyncLogic } from "xstate";
 import { z } from "zod";
 import {
   AgentError,
@@ -207,5 +208,95 @@ describe("runAgent inbox", () => {
     const inbox = createAgentInbox<EventOf<typeof steps>>();
     await runAgent(steps, { inbox });
     await expect(runAgent(steps, { inbox })).rejects.toThrow(AgentError);
+  });
+
+  // Actors that settle in microtasks complete inside the batch that starts
+  // them, so a host send must not wait behind their completions.
+  const microtaskLoop = setupAgent({
+    context: z.object({ passes: z.number() }),
+    events: { PAUSE: z.object({}) },
+    actors: { work: createAsyncLogic({ run: async () => 1 }) },
+  }).createMachine({
+    context: { passes: 0 },
+    initial: "working",
+    on: { PAUSE: { target: ".paused" } },
+    states: {
+      working: {
+        invoke: {
+          src: "work",
+          onDone: ({ context }) =>
+            context.passes >= 4
+              ? { target: "done" }
+              : { target: "working", reenter: true, context: { passes: context.passes + 1 } },
+        },
+      },
+      paused: { type: "final" },
+      done: { type: "final" },
+    },
+  });
+
+  test("a send before start lands ahead of completions that settle in microtasks", async () => {
+    const inbox = createAgentInbox<EventOf<typeof microtaskLoop>>();
+    const run = runAgent(microtaskLoop, { inbox });
+    expect(inbox.send({ type: "PAUSE" })).toBe(true);
+    const result = await run;
+    expect(result.snapshot.value).toBe("paused");
+    expect(result.snapshot.context.passes).toBe(0);
+  });
+
+  test("a send mid-run lands before the next microtask completion", async () => {
+    const inbox = createAgentInbox<EventOf<typeof microtaskLoop>>();
+    let transitions = 0;
+    const result = await runAgent(microtaskLoop, {
+      inbox,
+      onTransition: () => {
+        if (++transitions === 2) inbox.send({ type: "PAUSE" });
+      },
+    });
+    expect(result.snapshot.value).toBe("paused");
+    expect(result.snapshot.context.passes).toBe(1);
+  });
+
+  test('`onIdle: "inbox"` waits at an idle state for the next inbox send', async () => {
+    const pausable = setupAgent({
+      context: z.object({}),
+      events: { PAUSE: z.object({}), RESUME: z.object({}) },
+      requests: { work: text("work") },
+    }).createMachine({
+      context: {},
+      initial: "working",
+      states: {
+        working: {
+          invoke: { src: "work", input: {}, onDone: { target: "done" } },
+          on: { PAUSE: { target: "paused" } },
+        },
+        paused: { on: { RESUME: { target: "working" } } },
+        done: { type: "final" },
+      },
+    });
+    const inbox = createAgentInbox<EventOf<typeof pausable>>();
+    let release!: () => void;
+    const worked = new Promise<void>((resolve) => (release = resolve));
+    let calls = 0;
+    const executors: AgentRequestExecutors = {
+      // The first call waits until released; the resumed one answers at once.
+      generateText: async () => {
+        if (++calls === 1) await worked;
+        return { result: "ok" };
+      },
+    };
+    const run = runAgent(pausable, { inbox, onIdle: "inbox", executors });
+    inbox.send({ type: "PAUSE" });
+    release();
+    await tick();
+    // Paused and idle: without `onIdle: "inbox"` the run would return here.
+    inbox.send({ type: "RESUME" });
+    const result = await run;
+    expect(result.status).toBe("done");
+    expect(calls).toBe(2);
+  });
+
+  test('`onIdle: "inbox"` without an inbox throws', async () => {
+    await expect(runAgent(steps, { onIdle: "inbox" })).rejects.toThrow(AgentError);
   });
 });

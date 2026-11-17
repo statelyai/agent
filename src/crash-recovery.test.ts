@@ -9,10 +9,10 @@ import {
   createDecisionLogic,
   createAgentRuntime,
   createTextLogic,
-  runToQuiescence,
   setupAgent,
   type AgentDecisionExecutor,
 } from "./index.js";
+import { runToQuiescence } from "./run-agent.js";
 
 const executors = {
   generateText: async (request: { prompt?: unknown }) => ({

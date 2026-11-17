@@ -1,5 +1,64 @@
 # @statelyai/agent
 
+## 2.0.0-alpha.40
+
+### Patch Changes
+
+- [#247](https://github.com/statelyai/agent/pull/247) [`1f63610`](https://github.com/statelyai/agent/commit/1f636103210aa368580676e8ae88cdaf821523b1) Thanks [@davidkpiano](https://github.com/davidkpiano)! - - `createAgentInbox` and `runtime.send`: an event the host sends is handed out ahead of completions the run already holds. Before, a send landed only once the machine stopped when its actors settled in microtasks, so a pause sent before start or mid-run was never applied.
+  - `canReach` ordering targets check `reach` on the step that matched `after` too: what the trigger's own transition starts comes after it. Before, a turn started in the trigger's step was missed.
+  - `createGeneratorBridge`: a consumer that pulls a value yielded while unwinding resumes the pass, as `yield*` does. `forward` reports `closed: false` (its `value` is then `undefined`), and `stream` hands a failed run back instead of throwing it.
+
+- [#251](https://github.com/statelyai/agent/pull/251) [`5f72ebd`](https://github.com/statelyai/agent/commit/5f72ebd8a657c7107ce941857977b59b0062d863) Thanks [@davidkpiano](https://github.com/davidkpiano)! - - `wrapWorkflow`: `run(input, { live })` passes a live object to the workflow as `context.live`, so one wrapped workflow serves every instance of a class-shaped loop. When the workflow types `live`, every `run` call must pass it.
+  - `abortWith.event` can be a function of `signal.reason`, so aborts with different reasons send different events.
+  - `runAgent({ onIdle: "inbox" })`: an idle state waits for the next inbox send. Needs `inbox`.
+
+- [#250](https://github.com/statelyai/agent/pull/250) [`bb74c83`](https://github.com/statelyai/agent/commit/bb74c838e1d7140395be59b1f9e13f799dc8f3b2) Thanks [@davidkpiano](https://github.com/davidkpiano)! - `canReach`, `explorePaths`, and `simulateAgent` validate `input` against the machine's input schema, as `runAgent` does. Input the schema rejects throws `AgentError` with code `invalid-machine-input`, and the parsed value (defaults filled) seeds the search. Before, a misspelled input field could report `reachable: false, complete: true` for a start state no run can reach.
+
+## 2.0.0-alpha.39
+
+### Minor Changes
+
+- [#243](https://github.com/statelyai/agent/pull/243) [`5690efd`](https://github.com/statelyai/agent/commit/5690efd0b8125e16a8107ec67710e7eb362f3a0c) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Move the trace analytics from `@statelyai/agent/testing` to a new `@statelyai/agent/evals` subpath: `foldTraces`, `traceCoverage`, `firstDivergence`, `getDecisionRequests`, `repeatRuns`, `summarizeRepeats`, `judgeAgreement`, `proposeApprovalRules`, and `proposeCaps`, with their types. `@statelyai/agent/testing` keeps lint, simulation, exploration, trajectories, seams, crash recovery, and parity. Change the import path; the functions are unchanged.
+
+- [#245](https://github.com/statelyai/agent/pull/245) [`23edb29`](https://github.com/statelyai/agent/commit/23edb29b8e2eda9f1b645e994dad75969b2813b9) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Move `decideNext` and `createPolicyDecider`, with `DecideNextOptions`, `DecideNextResult`, and `PolicyDeciderOptions`, from the root export to a new `@statelyai/agent/policy` subpath. The root keeps `agent.decide` and the decision helpers a machine uses. Change the import path; the functions are unchanged.
+
+- [#244](https://github.com/statelyai/agent/pull/244) [`b90750b`](https://github.com/statelyai/agent/commit/b90750b027d6115a708c27aa62f96833f557ae96) Thanks [@davidkpiano](https://github.com/davidkpiano)! - `runAgent` is the one blocking runner. `runToQuiescence` is no longer exported: replace `runToQuiescence(createAgentRuntime(machine, options), init)` with `runAgent(machine, { ...options, ...init })`, which runs the same loop. `createAgentRuntime` stays for hosts that drive the transition loop themselves. The docs, examples, and demo now use `runAgent`.
+
+- [#242](https://github.com/statelyai/agent/pull/242) [`fdc0a0f`](https://github.com/statelyai/agent/commit/fdc0a0f65266f53e89b691d51d90621dcbed4efa) Thanks [@davidkpiano](https://github.com/davidkpiano)! - The agent skills no longer ship in the package. `graph-engineering`, `loop-to-machine`, `build-machine`, `generate-machine`, `add-traces`, `add-evals`, and `improve-machine` moved to the `stately-agent` plugin in [statelyai/skills](https://github.com/statelyai/skills). Install them with `/plugin install stately-agent@stately` in Claude Code, or `npx skills add statelyai/skills`.
+
+- [#241](https://github.com/statelyai/agent/pull/241) [`ca81ebf`](https://github.com/statelyai/agent/commit/ca81ebfd783efed67f7ffd28e7cba4db5639fdbd) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Remove seven preset factories from `@statelyai/agent/machines`: `createToolLoopMachine`, `createSequentialMachine`, `createRouterMachine`, `createParallelMachine`, `createLoopMachine`, `createSupervisorMachine`, and `createHandoffMachine`, with `routeEventType`, `delegateEventType`, `transferEventType`, `FINISH_EVENT_TYPE`, and the `PresetEntry` types. `createApprovalBatchMachine` stays. For the other shapes, copy the matching example (`prompt-chaining`, `agent-supervisor`, `swarm-handoff`, `parallel-streams`, `map-reduce`).
+  
+  Remove `inspectTransitions` and its `InspectedActorRef` type; filter `@xstate.transition` events in your own `inspect` handler, or use `traceTransitions`. `getMachineStructuralHash` and `rebindActorSession` (from `@statelyai/agent/log`) are no longer exported; set `version` on the machine to pin snapshot identity.
+
+### Patch Changes
+
+- [#239](https://github.com/statelyai/agent/pull/239) [`2102b67`](https://github.com/statelyai/agent/commit/2102b67c4ffd59b03824bafb5728e40e8f60ba16) Thanks [@davidkpiano](https://github.com/davidkpiano)! - `explorePaths` and `canReach` deliver the completion of a child machine whose initial state is final, with the child's own output, as a live run does. Before, the parent stayed `idle` in every `children` mode.
+
+- [#240](https://github.com/statelyai/agent/pull/240) [`19c7390`](https://github.com/statelyai/agent/commit/19c73902b3424e0678bc7e2dd1c926a1fed0e075) Thanks [@davidkpiano](https://github.com/davidkpiano)! - `explorePaths` with `children: "coupled"` delivers a child machine's entry sends before its completion when the child is final at start, also when it is the only child.
+
+- [#230](https://github.com/statelyai/agent/pull/230) [`043642e`](https://github.com/statelyai/agent/commit/043642e9e2a77efd9dbd7e7ba6403f0e1dbd62a8) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Require XState 6.0.0-beta.2. Update the demo and host examples to use this beta and Stately SDK 0.47.0. Complete the demo's fallback statechart outlines and show the active state during streamed runs.
+
+- [#237](https://github.com/statelyai/agent/pull/237) [`c0ebe59`](https://github.com/statelyai/agent/commit/c0ebe59e9a971c738c7ed2a630357641c1566e22) Thanks [@davidkpiano](https://github.com/davidkpiano)! - `loop-to-machine` skill and strangler-fig docs: extract a mid-method phase at step 0 and call it from the carved actor, instead of copying its lines. Copying stays only for code you can't edit, pinned with a hash test.
+
+- [#236](https://github.com/statelyai/agent/pull/236) [`77d1fb9`](https://github.com/statelyai/agent/commit/77d1fb9eddad7d469425777a3939ccbf7ec47295) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Bind live objects per run:
+  
+  - `runAgent` and `createAgentRuntime` take `actions`, merged onto the machine like `actors`. Keys and params are checked against the actions declared in `setupAgent`.
+  - `setupAgent` keeps the declared action types, so `actions.name` in a transition is typed and a misspelled name is a type error.
+  - `checkParity` takes `setup: (scenario, side) => liveObject`, called once per side; its result is passed to `effects`, `before` and `after`.
+
+- [#238](https://github.com/statelyai/agent/pull/238) [`5de19d8`](https://github.com/statelyai/agent/commit/5de19d816b44b574af98dbb0026e7ca87425ab83) Thanks [@davidkpiano](https://github.com/davidkpiano)! - `explorePaths({ steps: true })` records every macrostep on each terminal, with the srcs each step started and settled. `canReach` takes an ordering target, `{ after, reach }`, to prove that something never happens after a trigger ("no turn starts after STOP"). The trigger is part of the `dedupeBy` key, so the proof stays sound.
+
+- [#246](https://github.com/statelyai/agent/pull/246) [`9956c61`](https://github.com/statelyai/agent/commit/9956c619b9e199447f94aa9a1acb9a2e199a07a6) Thanks [@davidkpiano](https://github.com/davidkpiano)! - The Evals docs now open the parity section with a table that picks `checkParity`, `createRecorder` with `compareRecordings`, or `compareRuns` by what the code you replace exposes, starting with `checkParity`.
+
+- [#233](https://github.com/statelyai/agent/pull/233) [`46aa2b2`](https://github.com/statelyai/agent/commit/46aa2b29ec091ad6d6ca1590a67ec701d8bfe15c) Thanks [@davidkpiano](https://github.com/davidkpiano)! - `recordLog` marks an entry `ignored: true` when the machine had no transition for an event sent to it, in the state the event arrived in. `xstate.*` events are never marked. A refused event can now be read from the log without a replay. `AgentLogEntry` gains the optional `ignored` field, and replay does not read it.
+
+- [#235](https://github.com/statelyai/agent/pull/235) [`5d09f67`](https://github.com/statelyai/agent/commit/5d09f67a069575445e928545c4c285764479599f) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Add `createGeneratorBridge` for carving a loop whose public surface is an async generator: an actor forwards each pass's values to the consumer one pull at a time, with `.throw()` and `.return()` forwarded back. `checkParity` and `wrapWorkflow().run` take `recordOptions` per effect (`serialize`, `revive`, `redact`).
+
+- [#234](https://github.com/statelyai/agent/pull/234) [`6f32118`](https://github.com/statelyai/agent/commit/6f3211865c3e97de8cb338ecf201838e5d8e3e99) Thanks [@davidkpiano](https://github.com/davidkpiano)! - - `StandardSchemaV1` accepts schemas whose `types` is `| undefined`, so zod 4 schemas keep their types under `exactOptionalPropertyTypes`.
+  - A recorded stream that fails replays its chunks, then the error, in `recorder.fn`, `recorder.client`, and the OpenAI seam. An OpenAI stream that fails midway now records the error.
+  - Recorded errors keep `cause` and an `AggregateError`'s `errors`; replay restores them. `createRecorder` and `checkParity` take `reviveError` to rebuild error classes for `instanceof` checks.
+  - Docs and the loop-to-machine skill cover async generator loops, class seams on both sides of parity, and host cancel registries with `runAgent`'s asynchronous start.
+
 ## 2.0.0-alpha.38
 
 ### Patch Changes

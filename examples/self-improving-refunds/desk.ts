@@ -39,17 +39,17 @@
 import { z } from "zod";
 import { createAsyncLogic, setup, type AnyActorSystem, type SnapshotFrom } from "xstate";
 import {
+  type AgentRunInit,
   AgentDecisionExhaustedError,
-  createAgentRuntime,
-  decideNext,
-  runToQuiescence,
   type AgentDecisionExecutor,
   type AgentEventLogStore,
   type AgentLogEntry,
   type AgentTraceEvent,
   type ChosenEvent,
   type DecisionAttempt,
+  runAgent,
 } from "@statelyai/agent";
+import { decideNext } from "@statelyai/agent/policy";
 import { createInMemoryEventLogStore, getDecisionAttempts } from "@statelyai/agent/log";
 import {
   APPROVAL_THRESHOLD,
@@ -216,7 +216,7 @@ function createToolActors(toolsFor: (system: AnyActorSystem) => DeskTools) {
   };
 }
 
-/** The three tool actors bound to one episode's world. Pass to `createAgentRuntime(machine, { actors })`. */
+/** The three tool actors bound to one episode's world. Pass to `runAgent(machine, { actors })`. */
 export function createWorldActors(world: World) {
   const tools: DeskTools = {
     verifyIdentity: ({ claim }) => world.verifyIdentity(claim),
@@ -957,11 +957,8 @@ export async function runDeskEpisode(
   const start = { ...(options.counters?.() ?? { modelCalls: 0, judgeCalls: 0 }) };
   const actors = createWorldActors(world);
   // Each pass resumes from the thread: the store is the run's memory.
-  const run = (init: Parameters<typeof runToQuiescence<typeof refundDeskMachine>>[1]) =>
-    runToQuiescence(
-      createAgentRuntime(refundDeskMachine, { actors, store, threadId, onTrace: options.onTrace }),
-      init,
-    );
+  const run = (init: AgentRunInit<typeof refundDeskMachine>) =>
+    runAgent(refundDeskMachine, { actors, store, threadId, onTrace: options.onTrace, ...init });
 
   let result = await run({ input: { ticket: scenario.ticket, customerId: scenario.customerId } });
   while (result.status === "idle") {

@@ -1,7 +1,9 @@
 /**
  * `@statelyai/agent/testing` — deterministic testing and evaluation of agent
  * machines: lint and reachability checks, scripted playthroughs with no
- * model, trajectory matching, and seam runs for evals.
+ * model, trajectory matching, seam runs, crash recovery, and parity with
+ * the code a machine replaces. Trace analytics live in
+ * `@statelyai/agent/evals`.
  *
  * Nothing here is needed to author or run an agent.
  * @module
@@ -62,44 +64,6 @@ export type {
   SeamSlice,
   SeamTurn,
 } from "../seam.js";
-export { foldTraces } from "../fold-traces.js";
-export { traceCoverage } from "../trace-coverage.js";
-export type {
-  CoverageReport,
-  HandlerCoverage,
-  HandlerRef,
-  StateCoverage,
-  TraceCoverageOptions,
-} from "../trace-coverage.js";
-export { firstDivergence } from "../first-divergence.js";
-export type { Divergence, FirstDivergenceOptions, TraceStep } from "../first-divergence.js";
-export type { FoldTracesOptions, StateStats } from "../fold-traces.js";
-export { proposeApprovalRules, proposeCaps } from "../propose-from-traces.js";
-export type {
-  ApprovalRuleProposal,
-  ApprovalVerdict,
-  CapProposal,
-  CapSpec,
-  ProposeApprovalRulesOptions,
-  ProposeCapsOptions,
-} from "../propose-from-traces.js";
-export { getDecisionRequests } from "../decision-requests.js";
-export type { GetDecisionRequestsOptions, TracedDecisionRequest } from "../decision-requests.js";
-export { repeatRuns, summarizeRepeats } from "../repeat-runs.js";
-export type {
-  RepeatGroup,
-  RepeatReport,
-  RepeatResult,
-  RepeatRun,
-  RepeatRunsOptions,
-} from "../repeat-runs.js";
-export { judgeAgreement } from "../judge-agreement.js";
-export type {
-  AgreementReport,
-  AgreementRow,
-  AgreementSummary,
-  JudgeAgreementOptions,
-} from "../judge-agreement.js";
 export { compareRuns } from "../compare-runs.js";
 export type {
   CompareRunsOptions,
@@ -111,10 +75,12 @@ export type {
 export {
   compareRecordings,
   createRecorder,
+  recordAiSdk,
   RecordingDivergenceError,
   sameModelCallShape,
 } from "../equivalence.js";
 export type {
+  AiSdkSeam,
   CompareRecordingsOptions,
   CreateRecorderOptions,
   EffectDivergence,
@@ -137,6 +103,19 @@ export type {
   Recorder,
   Recording,
 } from "../equivalence.js";
+export { checkConformance } from "../conformance.js";
+export type {
+  CheckConformanceOptions,
+  ConformanceActor,
+  ConformanceActorArgs,
+  ConformanceDeviation,
+  ConformanceDeviationReason,
+  ConformanceEvent,
+  ConformanceEventArgs,
+  ConformanceObservation,
+  ConformanceOutput,
+  ConformanceReport,
+} from "../conformance.js";
 export { checkParity } from "../check-parity.js";
 export type {
   CheckParityBaseOptions,

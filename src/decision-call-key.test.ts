@@ -5,10 +5,10 @@ import {
   createAgentSchemas,
   createDecisionLogic,
   createTextLogic,
-  runToQuiescence,
   setupAgent,
   type AgentDecisionExecutor,
 } from "./index.js";
+import { runToQuiescence } from "./run-agent.js";
 import { createInMemoryEventLogStore } from "./event-log-store.js";
 
 // Each PICK is one decision at the `pick` invoke site. With `stay`, the chosen

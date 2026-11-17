@@ -6,12 +6,8 @@
 import { describe, expect, test, vi } from "vitest";
 import { createMachine, initialTransition, type InspectionEvent } from "xstate";
 import { z } from "zod";
-import {
-  createAgentRuntime,
-  runToQuiescence,
-  setupAgent,
-  type AgentRequestExecutors,
-} from "./index.js";
+import { createAgentRuntime, setupAgent, type AgentRequestExecutors } from "./index.js";
+import { runToQuiescence } from "./run-agent.js";
 import { replay } from "./log/index.js";
 
 function deferred<T = void>(): { promise: Promise<T>; resolve: (value: T) => void } {
@@ -774,6 +770,74 @@ describe("abortWith", () => {
     expect(result.snapshot.value).toBe("aborted");
     expect(result.status === "done" ? result.output : undefined).toEqual({ cleaned: true });
     expect(result.events.map((entry) => entry.event.type)).toContain("CANCEL");
+  });
+
+  test("`event` as a function of the reason sends a different event per reason", async () => {
+    const paused = setupAgent({
+      context: z.object({}),
+      events: { PAUSE: z.object({}), STOP: z.object({}) },
+      requests: { work: text("work") },
+    }).createMachine({
+      context: {},
+      initial: "working",
+      states: {
+        working: {
+          invoke: { src: "work", input: {}, onDone: { target: "done" } },
+          on: { PAUSE: { target: "paused" }, STOP: { target: "stopped" } },
+        },
+        paused: { type: "final" },
+        stopped: { type: "final" },
+        done: { type: "final" },
+      },
+    });
+    const settleWith = async (reason: string) => {
+      const controller = new AbortController();
+      const settled = runToQuiescence(
+        createAgentRuntime(paused, {
+          signal: controller.signal,
+          abortWith: {
+            event: (cause) => ({
+              type: cause === "pause" ? ("PAUSE" as const) : ("STOP" as const),
+            }),
+          },
+          executors: hangingWork(),
+        }),
+      );
+      controller.abort(reason);
+      return (await settled).snapshot.value;
+    };
+    expect(await settleWith("pause")).toBe("paused");
+    expect(await settleWith("stop")).toBe("stopped");
+  });
+
+  test("an `event` function that throws settles the run aborted with its error", async () => {
+    const failure = new Error("cannot map reason");
+    const settleWith = async (preAborted: boolean) => {
+      const controller = new AbortController();
+      if (preAborted) controller.abort("pause");
+      const settled = runToQuiescence(
+        createAgentRuntime(worker, {
+          signal: controller.signal,
+          abortWith: {
+            event: () => {
+              throw failure;
+            },
+            timeout: 1000,
+          },
+          executors: hangingWork(),
+        }),
+      );
+      if (!preAborted) controller.abort("pause");
+      return settled;
+    };
+    for (const preAborted of [false, true]) {
+      const result = await settleWith(preAborted);
+      expect(result.status).toBe("error");
+      expect(result.status === "error" ? [result.cause, result.error] : []).toEqual([
+        "aborted",
+        failure,
+      ]);
+    }
   });
 
   test("an already-aborted signal delivers the event first", async () => {

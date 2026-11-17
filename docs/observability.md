@@ -66,14 +66,12 @@ try {
 ## Trace one run
 
 ```ts no-check
-await runToQuiescence(
-  createAgentRuntime(machine, {
-    executors,
-    inspect: (event) => xstateInspector.next(event),
-    onTrace: (event) => exporter.write(serializeTraceEvent(event)),
-  }),
-  { input },
-);
+await runAgent(machine, {
+  executors,
+  inspect: (event) => xstateInspector.next(event),
+  onTrace: (event) => exporter.write(serializeTraceEvent(event)),
+  input,
+});
 ```
 
 Agent trace kinds are `run.start`, `request.start`, `request.end`, `request.error`, `stream.chunk`, `machine.transition`, `emit`, `usage.dropped`, and `run.end`.

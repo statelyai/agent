@@ -4,7 +4,7 @@ Agent requests are independently executable, while the machine gives them meanin
 
 ## Testing without a provider
 
-A test runs the real machine through `runToQuiescence` and replaces only the model. `@statelyai/agent` ships no model mock. There are two ways to replace the model:
+A test runs the real machine through `runAgent` and replaces only the model. `@statelyai/agent` ships no model mock. There are two ways to replace the model:
 
 - Mock the provider with the AI SDK's `MockLanguageModelV3`. The call still runs through `createAiSdkExecutors`, so the test covers prompt rendering, structured output parsing, and decision tool calls.
 - Pass plain functions as executors. The test covers the machine only.
@@ -68,7 +68,7 @@ const machine = agent.createMachine({
 
 ```ts
 import { MockLanguageModelV3 } from "ai/test";
-import { runToQuiescence } from "@statelyai/agent";
+import { runAgent } from "@statelyai/agent";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
 function mockModel(text: string) {
@@ -88,10 +88,10 @@ function mockModel(text: string) {
 const writer = mockModel("Checkout now supports saved cards.");
 const judge = mockModel(JSON.stringify({ result: { score: 4 } }));
 
-const result = await runToQuiescence(
-  createAgentRuntime(machine, { executors: createAiSdkExecutors({ models: { writer, judge } }) }),
-  { input: { topic: "saved cards at checkout" } },
-);
+const result = await runAgent(machine, {
+  executors: createAiSdkExecutors({ models: { writer, judge } }),
+  input: { topic: "saved cards at checkout" },
+});
 
 if (result.status === "done") {
   console.log(result.output); // { draft: "Checkout now supports saved cards.", score: 4 }
@@ -112,28 +112,26 @@ The mock answers in the provider's format, not the request's:
 An executor is a function of the request. Route on `request.name` to answer each request, and return the output value as `result`.
 
 ```ts
-import { runToQuiescence } from "@statelyai/agent";
+import { runAgent } from "@statelyai/agent";
 
 const calls: string[] = [];
 
-const result = await runToQuiescence(
-  createAgentRuntime(machine, {
-    executors: {
-      generateText: async (request) => {
-        calls.push(request.name ?? "");
-        switch (request.name) {
-          case "draftEmail":
-            return { result: "Checkout now supports saved cards." };
-          case "scoreDraft":
-            return { result: { score: 4 } };
-          default:
-            throw new Error(`No answer for request "${request.name}"`);
-        }
-      },
+const result = await runAgent(machine, {
+  executors: {
+    generateText: async (request) => {
+      calls.push(request.name ?? "");
+      switch (request.name) {
+        case "draftEmail":
+          return { result: "Checkout now supports saved cards." };
+        case "scoreDraft":
+          return { result: { score: 4 } };
+        default:
+          throw new Error(`No answer for request "${request.name}"`);
+      }
     },
-  }),
-  { input: { topic: "saved cards at checkout" } },
-);
+  },
+  input: { topic: "saved cards at checkout" },
+});
 
 console.log(calls); // ["draftEmail", "scoreDraft"]
 ```
@@ -199,10 +197,10 @@ A queue that runs dry throws an `AgentError` with code `seam-script-exhausted`, 
 
 ## Per-state stats
 
-`foldTraces` (from `@statelyai/agent/testing`) folds many runs' traces into one row per state: how many runs visited it, how many of those failed, how many options the guards withheld at decisions made there, and how many events it ignored.
+`foldTraces` (from `@statelyai/agent/evals`) folds many runs' traces into one row per state: how many runs visited it, how many of those failed, how many options the guards withheld at decisions made there, and how many events it ignored.
 
 ```ts no-check
-import { foldTraces } from "@statelyai/agent/testing";
+import { foldTraces } from "@statelyai/agent/evals";
 
 // One AgentTraceEvent[] per run, collected with onTrace.
 const stats = foldTraces(traces, {
@@ -224,10 +222,10 @@ const stats = foldTraces(traces, {
 
 ## Decision requests from traces
 
-`getDecisionRequests` (from `@statelyai/agent/testing`) lists the decisions a run asked for, read from its trace: each decision's first `request.start`, and the states the run was in.
+`getDecisionRequests` (from `@statelyai/agent/evals`) lists the decisions a run asked for, read from its trace: each decision's first `request.start`, and the states the run was in.
 
 ```ts no-check
-import { getDecisionRequests } from "@statelyai/agent/testing";
+import { getDecisionRequests } from "@statelyai/agent/evals";
 
 for (const { states, request } of getDecisionRequests(trace, { name: "chooseResolution" })) {
   const { event } = await decide(request); // a candidate decider
@@ -244,6 +242,20 @@ for (const { states, request } of getDecisionRequests(trace, { name: "chooseReso
 - Use the requests as eval rows (a decider on each, compared with a label) or as probe inputs for a policy.
 
 ## Parity with the code you replace
+
+Start with `checkParity`. Pick a lower-level tool only when the old code does not route its side effects through one object.
+
+| The old code                                                    | Use                                                                                 | Compares                                           |
+| --------------------------------------------------------------- | ----------------------------------------------------------------------------------- | -------------------------------------------------- |
+| Sends every side effect through one `effects` object            | `checkParity`, see [Check parity](strangler-fig.md#check-parity)                    | Each effect's name, order, arguments, and result   |
+| Calls a model client or SDK directly                            | `createRecorder` and `compareRecordings`, see [Any model client](#any-model-client) | Each recorded call and the output                  |
+| Changes on purpose, or a live model makes calls differ each run | `compareRuns`, see [Outcome labels](#outcome-labels)                                | The terminal outcome, the effects, and rule breaks |
+
+`checkParity` records `before` with `createRecorder`, replays `after` against the recording, and compares the two with `compareRecordings`, in one call per scenario.
+
+`compareRuns` labels a difference `intended` only when the candidate fixes a rule the baseline broke, or only the candidate reaches the scenario's `expected` outcome. Any other difference is a `regression`, including an effect the candidate adds on purpose with the same outcome. See [Outcome labels](#outcome-labels).
+
+### Outcome labels
 
 `compareRuns` (from `@statelyai/agent/testing`) runs every scenario through the existing implementation and its replacement, and labels each difference. Use it when you port a loop to a machine and need to show where they behave the same and where the machine differs on purpose.
 
@@ -325,6 +337,7 @@ replay.output(await runPort(replay.client("anthropic", stand, { methods })));
 compareRecordings(recorder.recording, replay.recording); // { equivalent: true, divergences: [] }
 ```
 
+- `recorder.model` records each provider attempt as a `model` effect. A failed attempt followed by the same request, such as an AI SDK retry, has `retriedBy` set to the call that retried it.
 - Each call is a `call` effect named `<name>.<method>`, such as `anthropic.messages.create`, with its arguments and its result or error.
 - `recorder.fn(name, asyncFn, options?)` wraps one async function the same way, for a client that is a function.
 - Replay answers each call with the next unused recorded call of the same name, in order, whatever its arguments. A call past the recorded ones throws `RecordingDivergenceError`.
@@ -335,10 +348,11 @@ compareRecordings(recorder.recording, replay.recording); // { equivalent: true, 
 
 ## Suite coverage
 
-`traceCoverage` (from `@statelyai/agent/testing`) reports which states and handlers no trace exercised, so a suite can say how much of the machine it covers.
+`traceCoverage` (from `@statelyai/agent/evals`) reports which states and handlers no trace exercised, so a suite can say how much of the machine it covers.
 
 ```ts no-check
-import { explorePaths, traceCoverage } from "@statelyai/agent/testing";
+import { explorePaths } from "@statelyai/agent/testing";
+import { traceCoverage } from "@statelyai/agent/evals";
 
 const report = traceCoverage(machine, traces, {
   reachable: await explorePaths(machine, { input }),
@@ -362,10 +376,10 @@ report.handlers[0];
 
 ## Where failures start
 
-`firstDivergence` (from `@statelyai/agent/testing`) finds the first step where a run departs from a reference, and names the state the run was in.
+`firstDivergence` (from `@statelyai/agent/evals`) finds the first step where a run departs from a reference, and names the state the run was in.
 
 ```ts no-check
-import { firstDivergence, foldTraces } from "@statelyai/agent/testing";
+import { firstDivergence, foldTraces } from "@statelyai/agent/evals";
 
 firstDivergence(failingTrace, passingTrace);
 // { index: 0, state: "deciding", decision: "chooseResolution", actual: { event: "escalate", … }, expected: { event: "refund", … } }
@@ -391,10 +405,10 @@ const stats = foldTraces(traces, {
 
 ## Proposals from traces
 
-`proposeApprovalRules` and `proposeCaps` (from `@statelyai/agent/testing`) read many runs' traces and propose changes for a machine with no decision point: which approvals a rule could answer, and what each cap should be. They are proposals for a person. Nothing promotes them or edits the machine.
+`proposeApprovalRules` and `proposeCaps` (from `@statelyai/agent/evals`) read many runs' traces and propose changes for a machine with no decision point: which approvals a rule could answer, and what each cap should be. They are proposals for a person. Nothing promotes them or edits the machine.
 
 ```ts no-check
-import { proposeApprovalRules, proposeCaps } from "@statelyai/agent/testing";
+import { proposeApprovalRules, proposeCaps } from "@statelyai/agent/evals";
 
 const rules = proposeApprovalRules(traces, {
   approvalState: "awaitingApproval",
@@ -424,20 +438,21 @@ const caps = proposeCaps(traces, {
 
 ## Repeated runs
 
-`repeatRuns` (from `@statelyai/agent/testing`) runs every scenario `k` times and reports how reliably each one passes. With a live model, one run per scenario says little: τ-bench found the rate at which all `k` runs of a task pass (pass^k) falls well below the single-run rate.
+`repeatRuns` (from `@statelyai/agent/evals`) runs every scenario `k` times and reports how reliably each one passes. With a live model, one run per scenario says little: τ-bench found the rate at which all `k` runs of a task pass (pass^k) falls well below the single-run rate.
 
 ```ts no-check
-import { repeatRuns } from "@statelyai/agent/testing";
+import { repeatRuns } from "@statelyai/agent/evals";
 
 const report = await repeatRuns({
   scenarios, // [{ id, ...your fields }]
   k: 5,
   run: async (scenario, attempt) => {
     const trace: AgentTraceEvent[] = [];
-    const result = await runToQuiescence(
-      createAgentRuntime(machine, { executors, onTrace: (event) => trace.push(event) }),
-      { input: scenario.input },
-    );
+    const result = await runAgent(machine, {
+      executors,
+      onTrace: (event) => trace.push(event),
+      input: scenario.input,
+    });
     return { trace, outcome: String(result.snapshot.value) };
   },
   passed: (scenario, { outcome }) => outcome === scenario.expected,
@@ -459,7 +474,7 @@ report.passHat(5); // the chance 5 runs of a scenario all pass
 For runs collected elsewhere, such as CI shards or production replays, `summarizeRepeats` takes the runs per scenario and returns the same report. `repeatRuns` collects runs and calls it.
 
 ```ts no-check
-import { summarizeRepeats } from "@statelyai/agent/testing";
+import { summarizeRepeats } from "@statelyai/agent/evals";
 
 const report = summarizeRepeats([
   {
@@ -475,10 +490,10 @@ const report = summarizeRepeats([
 
 ## Judge agreement
 
-`judgeAgreement` (from `@statelyai/agent/testing`) measures how well a judge agrees with people on the same cases. Check it before a judge-graded eval gates anything.
+`judgeAgreement` (from `@statelyai/agent/evals`) measures how well a judge agrees with people on the same cases. Check it before a judge-graded eval gates anything.
 
 ```ts no-check
-import { judgeAgreement } from "@statelyai/agent/testing";
+import { judgeAgreement } from "@statelyai/agent/evals";
 
 const report = judgeAgreement(
   confirmed.map((row) => ({

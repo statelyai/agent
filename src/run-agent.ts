@@ -85,6 +85,7 @@ import {
   getRegisteredAgentExecutionOptions,
   isUnboundPlaceholder,
 } from "./internal/registry.js";
+import { resolveMachineInput } from "./internal/machine-input.js";
 import { AGENT_USAGE_EVENT_TYPE, type AgentUsageEvent } from "./usage.js";
 import {
   AgentMachineVersionMismatchError,
@@ -627,8 +628,14 @@ export interface AgentRuntimeOptions<TMachine extends AnyStateMachine> {
    * when the machine has no transition for `event`, when the loop never
    * applies it, when the machine settles still `active` after handling it,
    * or when `timeout` milliseconds pass while it is still working.
+   *
+   * `event` can be a function of `signal.reason`, so aborts with different
+   * reasons (a pause and a stop) send different events.
    */
-  abortWith?: { event: EventFromLogic<TMachine>; timeout?: number };
+  abortWith?: {
+    event: EventFromLogic<TMachine> | ((reason: unknown) => EventFromLogic<TMachine>);
+    timeout?: number;
+  };
   /** Where root `after` timers live. Default `"in-process"`. See {@link AgentTimerScheduler}. */
   timers?: AgentTimerScheduler;
 }
@@ -2147,32 +2154,6 @@ export type AgentInputFrom<TMachine extends AnyStateMachine> =
     : InputFrom<TMachine>;
 
 /**
- * Validates `input` against the machine's registered input schema, returning
- * the schema's output — so defaults are filled and transforms applied before
- * the value reaches `createActor` or the replayable event log.
- *
- * Standard Schema only (no validation library is referenced), so this works for
- * whatever the machine was declared with. Omitted input stays omitted rather
- * than being validated as `{}`: "started with no input" keeps meaning what it
- * has always meant, instead of newly failing schemas with required fields.
- */
-function resolveMachineInput(machine: AnyStateMachine, input: unknown): unknown {
-  if (input === undefined) return input;
-  const schema = getRegisteredAgentExecutionOptions(machine).schemas?.input;
-  if (!isStandardSchema(schema)) return input;
-  try {
-    return validateSchemaSync(schema, input);
-  } catch (error) {
-    throw new AgentError(
-      "invalid-machine-input",
-      `createAgentRuntime: machine input failed validation against the declared input ` +
-        `schema: ${error instanceof Error ? error.message : String(error)}`,
-      { cause: error },
-    );
-  }
-}
-
-/**
  * Recursively rebinds an invoked child machine's own agent sources with the
  * SAME host-backed wrappers the runtime applies to the top-level machine, so a
  * child's text/stream/decision requests inherit the runtime's executors and
@@ -2441,7 +2422,8 @@ export interface AgentRuntime<TMachine extends AnyStateMachine> {
   nextEvent(): Promise<EventFromLogic<TMachine> | undefined>;
   /**
    * Delivers a host event (a cancel, a user message, a host-owned timer) into
-   * the run's mailbox, behind whatever already arrived. Asynchronous: `send`
+   * the run, behind earlier host sends and ahead of completions not yet handed
+   * out. Asynchronous: `send`
    * only enqueues; the machine moves when the host loop's next `nextEvent()`
    * hands the event out (a parked `nextEvent()` resolves with it) and the loop
    * calls `transition`. A host that needs the event applied before it returns
@@ -2455,8 +2437,9 @@ export interface AgentRuntime<TMachine extends AnyStateMachine> {
    *
    * - Before `start`: queued; the first `nextEvent()` hands it out (after the
    *   init event a host delivers itself). Returns `true`.
-   * - While an effect, child or timer is in flight: queued in arrival order
-   *   with their completions. Returns `true`.
+   * - While an effect, child or timer is in flight: queued behind earlier
+   *   host sends, and handed out before any completion the run holds, so
+   *   actors that settle in microtasks cannot keep it waiting. Returns `true`.
    * - After the run stopped (cancelled, aborted, journal failure) or the
    *   machine left `active` (done, error): dropped. Returns `false`.
    * - After `finish`: throws {@link AgentError} `runtime-finished`.
@@ -2536,11 +2519,16 @@ export interface AgentRunOptions<TMachine extends AnyStateMachine>
    * A host that cannot block for the answer (a request handler, a durable
    * object) leaves this out, stores `result.persist()`, and calls
    * {@link runAgent} again later with `{ snapshot, event }`.
+   *
+   * `"inbox"`: each idle state waits for the next `inbox.send` (a resume
+   * after a pause), with no answer of its own. Needs `inbox`.
    */
-  onIdle?: (
-    snapshot: SnapshotFrom<TMachine>,
-    options: { signal: AbortSignal | undefined },
-  ) => Promise<EventFromLogic<TMachine> | AgentTimerEvent>;
+  onIdle?:
+    | ((
+        snapshot: SnapshotFrom<TMachine>,
+        options: { signal: AbortSignal | undefined },
+      ) => Promise<EventFromLogic<TMachine> | AgentTimerEvent>)
+    | "inbox";
   /**
    * A send handle for events pushed mid-run (a cancel, a user message), from
    * {@link createAgentInbox}. Each `inbox.send` goes to the current pass's
@@ -2550,7 +2538,8 @@ export interface AgentRunOptions<TMachine extends AnyStateMachine>
    * dropped). Without `onIdle`, the run returns at the first idle state
    * (an event that lands while that pass is finishing still resumes it), and
    * a `send` after `runAgent` returns gets `false`: a pause that waits for a
-   * resume needs `onIdle` as well. One inbox serves one `runAgent` call.
+   * resume needs `onIdle` as well (`onIdle: "inbox"` when only the inbox
+   * answers). One inbox serves one `runAgent` call.
    */
   inbox?: AgentInbox<EventFromLogic<TMachine>>;
 }
@@ -2664,7 +2653,7 @@ const ABORTED = Symbol("aborted");
 // `signal` fires first.
 async function nextIdleEvent<TMachine extends AnyStateMachine>(
   snapshot: SnapshotFrom<TMachine>,
-  onIdle: AgentRunOptions<TMachine>["onIdle"],
+  onIdle: Exclude<AgentRunOptions<TMachine>["onIdle"], "inbox">,
   inbox: InboxState | undefined,
   signal: AbortSignal | undefined,
 ): Promise<{ event: EventFromLogic<TMachine>; fromInbox: boolean } | typeof ABORTED | undefined> {
@@ -2686,7 +2675,7 @@ async function nextIdleEvent<TMachine extends AnyStateMachine>(
 
 async function waitForIdleAnswer<TMachine extends AnyStateMachine>(
   snapshot: SnapshotFrom<TMachine>,
-  onIdle: NonNullable<AgentRunOptions<TMachine>["onIdle"]>,
+  onIdle: Exclude<NonNullable<AgentRunOptions<TMachine>["onIdle"]>, "inbox">,
   inbox: InboxState | undefined,
   signal: AbortSignal | undefined,
   aborted: Promise<typeof ABORTED>,
@@ -2757,7 +2746,12 @@ export async function runAgent<TMachine extends AnyStateMachine>(
   machine: TMachine,
   options: AgentRunOptions<TMachine> = {},
 ): Promise<AgentRunResult<TMachine>> {
-  const { onIdle, inbox, ...rest } = options;
+  const { onIdle: idle, inbox, ...rest } = options;
+  if (idle === "inbox" && inbox === undefined) {
+    throw new AgentError("inbox-required", 'runAgent: `onIdle: "inbox"` needs an `inbox`.');
+  }
+  // Only the inbox answers: an idle state waits for its next send.
+  const onIdle = idle === "inbox" ? () => new Promise<EventFromLogic<TMachine>>(() => {}) : idle;
   const inboxState = inbox === undefined ? undefined : inboxStates.get(inbox);
   if (inbox !== undefined) {
     if (inboxState === undefined || inboxState.claimed) {
@@ -2782,7 +2776,7 @@ export async function runAgent<TMachine extends AnyStateMachine>(
 async function runAgentPasses<TMachine extends AnyStateMachine>(
   machine: TMachine,
   rest: Omit<AgentRunOptions<TMachine>, "onIdle" | "inbox">,
-  onIdle: AgentRunOptions<TMachine>["onIdle"],
+  onIdle: Exclude<AgentRunOptions<TMachine>["onIdle"], "inbox">,
   inbox: InboxState | undefined,
 ): Promise<AgentRunResult<TMachine>> {
   if (!onIdle && !inbox) {
@@ -3493,6 +3487,11 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
   // failures, child messages, root timers, the reserved usage event. Filled as
   // things happen (never batched), drained one event per transition.
   const mailbox: EventObject[] = [];
+  // The host's own sends (`send`, an inbox), handed out ahead of completions
+  // the execution already holds: actors that settle in microtasks complete
+  // inside the batch that starts them, and would otherwise keep a send
+  // waiting until the machine stops.
+  const hostQueue: EventObject[] = [];
   let wake: ((event: EventObject | typeof QUIESCENT) => void) | undefined;
   // Events the loop handed out, as opposed to events the host brought in
   // itself: only the host's own event can be reported as `ignored`.
@@ -3513,6 +3512,8 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
     if (waiting) {
       wake = undefined;
       waiting(event);
+    } else if (fromHost) {
+      hostQueue.push(event);
     } else {
       mailbox.push(event);
     }
@@ -3648,11 +3649,27 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
   let abortTimer: ReturnType<typeof setTimeout> | undefined;
   const onAbort = () => {
     const abortWith = options.abortWith;
-    if (abortWith === undefined || runtime.send(abortWith.event) === false) {
+    if (abortWith === undefined) {
       abortNow();
       return;
     }
-    pendingAbort = abortWith.event as EventObject;
+    let event: EventObject;
+    try {
+      event = (
+        typeof abortWith.event === "function"
+          ? (abortWith.event as (reason: unknown) => EventObject)(options.signal?.reason)
+          : abortWith.event
+      ) as EventObject;
+    } catch (error) {
+      // Called from the signal's listener: a throw would escape the run.
+      stopRun({ cause: "aborted", error });
+      return;
+    }
+    if (runtime.send(event as EventFromLogic<TMachine>) === false) {
+      abortNow();
+      return;
+    }
+    pendingAbort = event;
     if (abortWith.timeout !== undefined) {
       abortTimer = setTimeout(() => {
         if (current?.status === "active") abortNow();
@@ -3761,7 +3778,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       runtime: unknown,
     ) => action.exec(runtime),
     waitForEvent: () => {
-      const queued = mailbox.shift();
+      const queued = hostQueue.shift() ?? mailbox.shift();
       if (queued !== undefined) {
         return queued;
       }
@@ -3892,7 +3909,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       // Validated once, then used everywhere `input` would have been: the
       // start, the replayable init entry, and the `run.start` trace all see
       // the same post-defaults value, so a replay reproduces this run exactly.
-      const resolvedInput = resolveMachineInput(machine, init.input);
+      const resolvedInput = resolveMachineInput(machine, init.input, "createAgentRuntime");
       // A thread that has entries is resumed, which ignores `input`. Input
       // that differs from the thread's own means two runs share a thread id:
       // resuming would hand this caller another run's result. A thread that
@@ -4315,7 +4332,9 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
         if (finished || stopReason !== undefined || current?.status !== "active") {
           return undefined;
         }
-        const event = (await execution.waitForEvent()) as EventObject | typeof QUIESCENT;
+        const event = (hostQueue.shift() ?? (await execution.waitForEvent())) as
+          | EventObject
+          | typeof QUIESCENT;
         if ((event as unknown) === QUIESCENT || stopReason !== undefined) {
           return undefined;
         }
@@ -4482,37 +4501,6 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
   };
 
   return runtime;
-}
-
-/**
- * The actor handed to an {@link inspectTransitions} handler: an
- * {@link AnyActorRef} widened with the runtime `id`/`src` used to attribute a
- * transition to the root machine or a specific invoked child (xstate's static
- * `ActorRef` type omits them, but they are always present at runtime).
- */
-export type InspectedActorRef = AnyActorRef & { id: string; src?: string | AnyActorLogic };
-
-/**
- * Wraps a `(snapshot, actorRef) => void` handler into a function usable as
- * {@link AgentRuntimeOptions.inspect}: it filters the raw inspection stream to
- * `@xstate.transition` events and hands the handler the typed
- * {@link AnyMachineSnapshot} and the {@link InspectedActorRef} that
- * transitioned. Attribute a child actor via `actorRef.id`/`actorRef.src`. Saves
- * the manual `event.type === '@xstate.transition'` filtering and the snapshot/
- * actorRef casts.
- */
-export function inspectTransitions(
-  handler: (snapshot: AnyMachineSnapshot, actorRef: InspectedActorRef) => void,
-): (inspectionEvent: InspectionEvent) => void {
-  return (inspectionEvent: InspectionEvent) => {
-    if (inspectionEvent.type !== "@xstate.transition") {
-      return;
-    }
-    handler(
-      inspectionEvent.snapshot as AnyMachineSnapshot,
-      inspectionEvent.actorRef as unknown as InspectedActorRef,
-    );
-  };
 }
 
 /**

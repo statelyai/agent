@@ -1,5 +1,19 @@
 # @statelyai/example-next-host
 
+## 0.0.1-alpha.28
+
+### Patch Changes
+
+- Updated dependencies [[`1f63610`](https://github.com/statelyai/agent/commit/1f636103210aa368580676e8ae88cdaf821523b1), [`5f72ebd`](https://github.com/statelyai/agent/commit/5f72ebd8a657c7107ce941857977b59b0062d863), [`bb74c83`](https://github.com/statelyai/agent/commit/bb74c838e1d7140395be59b1f9e13f799dc8f3b2)]:
+  - @statelyai/agent@2.0.0-alpha.40
+
+## 0.0.1-alpha.27
+
+### Patch Changes
+
+- Updated dependencies [[`2102b67`](https://github.com/statelyai/agent/commit/2102b67c4ffd59b03824bafb5728e40e8f60ba16), [`19c7390`](https://github.com/statelyai/agent/commit/19c73902b3424e0678bc7e2dd1c926a1fed0e075), [`043642e`](https://github.com/statelyai/agent/commit/043642e9e2a77efd9dbd7e7ba6403f0e1dbd62a8), [`5690efd`](https://github.com/statelyai/agent/commit/5690efd0b8125e16a8107ec67710e7eb362f3a0c), [`c0ebe59`](https://github.com/statelyai/agent/commit/c0ebe59e9a971c738c7ed2a630357641c1566e22), [`77d1fb9`](https://github.com/statelyai/agent/commit/77d1fb9eddad7d469425777a3939ccbf7ec47295), [`5de19d8`](https://github.com/statelyai/agent/commit/5de19d816b44b574af98dbb0026e7ca87425ab83), [`9956c61`](https://github.com/statelyai/agent/commit/9956c619b9e199447f94aa9a1acb9a2e199a07a6), [`23edb29`](https://github.com/statelyai/agent/commit/23edb29b8e2eda9f1b645e994dad75969b2813b9), [`46aa2b2`](https://github.com/statelyai/agent/commit/46aa2b29ec091ad6d6ca1590a67ec701d8bfe15c), [`5d09f67`](https://github.com/statelyai/agent/commit/5d09f67a069575445e928545c4c285764479599f), [`6f32118`](https://github.com/statelyai/agent/commit/6f3211865c3e97de8cb338ecf201838e5d8e3e99), [`b90750b`](https://github.com/statelyai/agent/commit/b90750b027d6115a708c27aa62f96833f557ae96), [`fdc0a0f`](https://github.com/statelyai/agent/commit/fdc0a0f65266f53e89b691d51d90621dcbed4efa), [`ca81ebf`](https://github.com/statelyai/agent/commit/ca81ebfd783efed67f7ffd28e7cba4db5639fdbd)]:
+  - @statelyai/agent@2.0.0-alpha.39
+
 ## 0.0.1-alpha.26
 
 ### Patch Changes

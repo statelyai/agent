@@ -3,7 +3,7 @@
  * envelopes, no CLI, no network.
  */
 import { describe, expect, test } from "vitest";
-import { createAgentRuntime, runToQuiescence } from "@statelyai/agent";
+import { runAgent } from "@statelyai/agent";
 import { runEpisode } from "./bench.js";
 import { createClaudeCodeExecutors, parseEnvelope, type Spawn } from "./claude-code.js";
 import { codeReviewLoopMachine, createRunChecks } from "./environment.js";
@@ -100,15 +100,13 @@ describe("Claude Code executors", () => {
         : envelope({ result: reference("clamp") }),
     );
     const cli = createClaudeCodeExecutors({ spawn });
-    const result = await runToQuiescence(
-      createAgentRuntime(codeReviewLoopMachine, {
-        executors: withPolicy(cli, async () => ({
-          event: { type: "ESCALATE", reason: "repeated failures" },
-        })),
-        actors: { runChecks: createRunChecks(fakeRunner) },
-      }),
-      { input: { taskId: "clamp" } },
-    );
+    const result = await runAgent(codeReviewLoopMachine, {
+      executors: withPolicy(cli, async () => ({
+        event: { type: "ESCALATE", reason: "repeated failures" },
+      })),
+      actors: { runChecks: createRunChecks(fakeRunner) },
+      input: { taskId: "clamp" },
+    });
     // The review failed to parse, so it counts as no approval and goes to a person.
     expect(result.status).toBe("idle");
     expect(result.snapshot.context.review?.issues[0]?.note).toBe("the review failed to run");

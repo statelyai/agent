@@ -48,7 +48,7 @@ One async function in, one JSON-safe object out. Everything XState is inside it.
 
 ```ts no-check
 // packages/agent/src/index.ts
-import { createAgentRuntime, runToQuiescence } from "@statelyai/agent";
+import { runAgent } from "@statelyai/agent";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import { models, generationMachine } from "./machine.js";
 
@@ -72,13 +72,11 @@ export async function runGeneration(
   input: GenerationInput,
   deps: GenerationDeps,
 ): Promise<GenerationOutput> {
-  const result = await runToQuiescence(
-    createAgentRuntime(generationMachine(deps.lookup), {
-      executors: createAiSdkExecutors({ models }),
-      onTransition: (snapshot) => deps.onProgress?.(String(snapshot.value)),
-    }),
-    { input },
-  );
+  const result = await runAgent(generationMachine(deps.lookup), {
+    executors: createAiSdkExecutors({ models }),
+    onTransition: (snapshot) => deps.onProgress?.(String(snapshot.value)),
+    input,
+  });
   if (result.status !== "done") {
     throw new Error(`Generation did not complete: ${result.status}`);
   }
@@ -109,9 +107,9 @@ export async function POST(request: Request) {
 
 ## What can cross the boundary
 
-Persisted snapshots are JSON. `result.persist()` returns a plain JSON value, and `runToQuiescence(createAgentRuntime(machine, {}), { snapshot, event })` takes one back, so a paused run can be stored by the app, in its own database, and resumed by a later call into the package. Pair `snapshot` with the `event` that unblocks the idle state: a resume with `snapshot` alone starts the run back at the same wait.
+Persisted snapshots are JSON. `result.persist()` returns a plain JSON value, and `runAgent(machine, { snapshot, event })` takes one back, so a paused run can be stored by the app, in its own database, and resumed by a later call into the package. Pair `snapshot` with the `event` that unblocks the idle state: a resume with `snapshot` alone starts the run back at the same wait.
 
-<!-- runToQuiescence snapshot/event resume from src/run-agent.ts; exercised by src/docs-integration-recipes.test.ts -->
+<!-- runAgent snapshot/event resume from src/run-agent.ts; exercised by src/docs-integration-recipes.test.ts -->
 
 ```ts no-check
 // Inside the package: the app stores and returns the value, and never reads it.
@@ -121,12 +119,10 @@ export async function startGeneration(
   input: GenerationInput,
   deps: GenerationDeps,
 ): Promise<{ snapshot: unknown }> {
-  const result = await runToQuiescence(
-    createAgentRuntime(generationMachine(deps.lookup), {
-      executors: createAiSdkExecutors({ models }),
-    }),
-    { input },
-  );
+  const result = await runAgent(generationMachine(deps.lookup), {
+    executors: createAiSdkExecutors({ models }),
+    input,
+  });
   return { snapshot: result.status === "idle" ? result.persist() : null };
 }
 
@@ -135,16 +131,11 @@ export async function resumeGeneration(
   answer: string,
   deps: GenerationDeps,
 ): Promise<GenerationOutput> {
-  const result = await runToQuiescence(
-    createAgentRuntime(generationMachine(deps.lookup), {
-      executors: createAiSdkExecutors({ models }),
-    }),
-    {
-      // Opaque to the app, typed again here at the package boundary.
-      snapshot: snapshot as Snapshot<unknown>,
-      event: { type: "ANSWER", answer },
-    },
-  );
+  const result = await runAgent(generationMachine(deps.lookup), {
+    executors: createAiSdkExecutors({ models }), // Opaque to the app, typed again here at the package boundary.
+    snapshot: snapshot as Snapshot<unknown>,
+    event: { type: "ANSWER", answer },
+  });
   if (result.status !== "done") {
     throw new Error(`Generation did not complete: ${result.status}`);
   }

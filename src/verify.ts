@@ -40,6 +40,7 @@ import { isTextLogic, type AgentCallUsage, type AgentTextResult } from "./text-l
 import type { AgentMessage } from "./types.js";
 import { AGENT_USAGE_EVENT_TYPE, type AgentUsageEvent } from "./usage.js";
 import { executorBoundLogics, getRegisteredAgentExecutionOptions } from "./internal/registry.js";
+import { resolveMachineInput } from "./internal/machine-input.js";
 import {
   doneEvent,
   errorEvent,
@@ -598,6 +599,11 @@ export interface SimulationTrailEntry {
 
 /** Options for {@link simulateAgent}. */
 export interface SimulateAgentOptions {
+  /**
+   * The machine input. A machine with a declared input schema validates it as
+   * a run does: input the schema rejects throws `invalid-machine-input`, and
+   * the parsed value (defaults filled) seeds the search.
+   */
   input?: unknown;
   script: SimulationScript;
   /** Max steps before returning `'exhausted'`. Default 100. */
@@ -707,6 +713,7 @@ export async function simulateAgent(
   machine: AnyStateMachine,
   options: SimulateAgentOptions,
 ): Promise<SimulateAgentResult> {
+  options = withMachineInput(machine, options, "simulateAgent");
   const maxSteps = options.maxSteps ?? 100;
   const script: SimulationScript = {
     // Each queue is copied, not just the map: `takeFromQueue` shifts entries
@@ -1113,7 +1120,11 @@ export interface ExploreStep {
 export interface CanReachOrdering {
   /** The trigger: an event type, or a step predicate. */
   after: string | ((step: ExploreStep) => boolean);
-  /** Checked on every step after the first `after` step, not on that step itself. */
+  /**
+   * Checked on the first `after` step and every step after it. On the
+   * trigger's own step, `started`, `settled` and `state` are its effects;
+   * `event` is the trigger itself.
+   */
   reach: (step: ExploreStep) => boolean;
 }
 
@@ -1121,6 +1132,11 @@ export interface CanReachOrdering {
 export type CanReachTarget = string | ((snapshot: ExploreSnapshot) => boolean) | CanReachOrdering;
 
 export interface ExplorePathsOptions {
+  /**
+   * The machine input. A machine with a declared input schema validates it as
+   * a run does: input the schema rejects throws `invalid-machine-input`, and
+   * the parsed value (defaults filled) seeds the search.
+   */
   input?: unknown;
   /** Max branch points (decisions + external-event forks) along any path. Default 8. */
   maxDepth?: number;
@@ -1300,7 +1316,13 @@ export interface ExplorePathsOptions {
    * at a shallower depth), so payload and output branching that converges
    * stays tractable. Return everything a guard, choice, or output reads:
    * a key that drops a field the machine reads makes the search unsound.
-   * Without it, every path is explored in full.
+   * Without it, `explorePaths` explores every path in full, and `canReach`
+   * uses a default key: the state value, context, status, history, pending
+   * requests and their invoke inputs, children and their inputs, armed
+   * timers, and coupled children's states. A step whose context or inputs
+   * are not plain data (a `Map`, a class instance) is not deduplicated. The
+   * key holds structure, not identity: a guard that compares context with an
+   * object held outside the snapshot needs its own `dedupeBy`.
    */
   dedupeBy?: (snapshot: ExploreSnapshot) => string;
   /**
@@ -1450,6 +1472,96 @@ const FINITE_PAYLOAD_CAP = 64;
 
 // Default cap on branch points expanded per exploration.
 const DEFAULT_MAX_NODES = 100_000;
+
+// A lossless key for plain data: JSON values plus `undefined`, `-0`, null
+// prototypes, key order, and shared references within the key. Anything else
+// (a Map, a class instance, a function, a symbol, hidden, or accessor
+// property) throws, since JSON would collapse it and merge states that differ.
+// Identity against objects outside the snapshot is not keyed.
+// An own property holding a value, not a getter a guard could tell apart.
+function isDataProperty(target: object, key: PropertyKey): boolean {
+  const descriptor = Object.getOwnPropertyDescriptor(target, key);
+  return descriptor !== undefined && "value" in descriptor;
+}
+
+function strictKey(value: unknown, refs = new Map<object, number>()): string {
+  if (value === undefined) return "u";
+  if (value === null || typeof value === "boolean" || typeof value === "string") {
+    return JSON.stringify(value);
+  }
+  if (typeof value === "number") {
+    return Object.is(value, -0) ? "n-0" : `n${String(value)}`;
+  }
+  if (typeof value !== "object") {
+    throw new TypeError(`unkeyable ${typeof value}`);
+  }
+  // A second reference (or a cycle) points back at the first, so sharing is kept.
+  const ref = refs.get(value);
+  if (ref !== undefined) return `@${ref}`;
+  refs.set(value, refs.size);
+  const proto = Object.getPrototypeOf(value);
+  // A symbol or non-enumerable property would vanish from the key.
+  const own = Reflect.ownKeys(value).length;
+  if (Array.isArray(value)) {
+    if (proto !== Array.prototype) throw new TypeError("unkeyable array");
+    // Every index its own, and nothing besides them and `length`.
+    for (let index = 0; index < value.length; index++) {
+      if (!isDataProperty(value, index)) throw new TypeError("unkeyable sparse array");
+    }
+    if (own !== value.length + 1) throw new TypeError("unkeyable array");
+    return `[${value.map((item) => strictKey(item, refs)).join(",")}]`;
+  }
+  if (proto !== Object.prototype && proto !== null) throw new TypeError("unkeyable object");
+  const keys = Object.keys(value);
+  if (own !== keys.length || !keys.every((k) => isDataProperty(value, k))) {
+    throw new TypeError("unkeyable object");
+  }
+  // In enumeration order, which a guard can read.
+  return `${proto === null ? "N" : ""}{${keys
+    .map((k) => `${JSON.stringify(k)}:${strictKey((value as Record<string, unknown>)[k], refs)}`)
+    .join(",")}}`;
+}
+
+function tryKey(key: () => string): string | undefined {
+  try {
+    return key();
+  } catch {
+    return undefined;
+  }
+}
+
+// canReach's default `dedupeBy`: everything a settled step's future reads.
+// A pending invoke's input decides its request (a decision's candidates, a
+// child's start). Throws (no dedupe for that step) when a value is not plain data.
+function stepKeyParts(step: AgentStep): unknown[] {
+  const snapshot = step.snapshot as AnyMachineSnapshot & {
+    historyValue?: unknown;
+    timers?: readonly Record<string, unknown>[];
+  };
+  const children = (snapshot.children ?? {}) as Record<string, ChildRef | undefined>;
+  return [
+    snapshot.value,
+    snapshot.context,
+    snapshot.status,
+    snapshot.historyValue ?? null,
+    step.requests.map((request) => request.id),
+    pendingInvokes(step).map((invoke) => [invoke.id, invoke.src, invoke.input]),
+    Object.keys(children)
+      .sort()
+      .map((id) => [id, children[id]?.options?.input]),
+    (snapshot.timers ?? []).map((timer) => [
+      timer["id"],
+      timer["type"],
+      timer["delay"],
+      timer["event"],
+      timer["target"] === "self" ? "self" : (timer["target"] as { id?: string } | undefined)?.id,
+    ]),
+  ];
+}
+
+function defaultStepKey(step: AgentStep): string {
+  return strictKey(stepKeyParts(step));
+}
 
 // Cap on nested child-machine explorations (`children: "explore"`).
 const MAX_CHILD_NESTING = 4;
@@ -1968,6 +2080,22 @@ function stepsOf(log: StepLog | undefined): ExploreStep[] {
 // undelivered, and a live run delivers it. Pending invokes skip them.
 type FinishedChild = { id: string; output: unknown } | { id: string; error: unknown };
 
+// The finished children as invokes, for the coupled pump to register.
+function finishedInvokes(step: AgentStep): PendingInvoke[] {
+  const children = (step.snapshot.children ?? {}) as Record<string, ChildRef | undefined>;
+  return finishedChildren(step).map(({ id }) => {
+    const ref = children[id]!;
+    const own = ref as { src?: unknown; logic?: unknown };
+    return {
+      id,
+      src: typeof own.src === "string" ? own.src : id,
+      input: ref.options?.input,
+      logic: own.logic,
+      ref,
+    };
+  });
+}
+
 function finishedChildren(step: AgentStep): FinishedChild[] {
   const children = (step.snapshot.children ?? {}) as Record<string, ChildRef | undefined>;
   return Object.keys(children)
@@ -2007,6 +2135,11 @@ function explore(
   stepping = false,
   // canReach's ordering target: checked on the step log, not a snapshot.
   ordering?: CanReachOrdering,
+  // canReach's state target matches states passed through, so it is checked
+  // while coupled children are still starting; a predicate sees settled steps.
+  stateTarget = false,
+  // canReach without `dedupeBy`: dedupe on every field a step's future reads.
+  defaultDedupe = false,
 ): {
   report: AgentPathReport;
   witness?: ChosenEvent[];
@@ -2090,16 +2223,17 @@ function explore(
     if (!logging) return next;
     const before = prev && logs.get(prev);
     const step = exploreStep(prev, next, timerDelivers.get(event) ?? event);
-    const after = before?.after ?? false;
     const trigger = ordering?.after;
+    // The trigger's own step counts: what its transition starts comes after it.
+    const after =
+      (before?.after ?? false) ||
+      (trigger !== undefined &&
+        (typeof trigger === "string" ? step.event.type === trigger : trigger(step)));
     logs.set(next, {
       step,
       prev: before,
       length: (before?.length ?? 0) + 1,
-      after:
-        after ||
-        (trigger !== undefined &&
-          (typeof trigger === "string" ? step.event.type === trigger : trigger(step))),
+      after,
       violated: (before?.violated ?? false) || (after && ordering!.reach(step)),
     });
     return next;
@@ -2461,10 +2595,13 @@ function explore(
       return undefined;
     }
     const invokes = pendingInvokes(step);
-    if (!invokes.some(isExploredChild)) {
+    // Coupled: a finished child machine is stepped like the others, so
+    // `register` delivers its entry sends before its completion.
+    const finishedKids = coupled ? finishedInvokes(step).filter(isExploredChild) : [];
+    if (!invokes.some(isExploredChild) && finishedKids.length === 0) {
       return undefined;
     }
-    const kids = coupled ? invokes.filter(isExploredChild) : [];
+    const kids = coupled ? [...invokes.filter(isExploredChild), ...finishedKids] : [];
     const blocked: string[] = [];
     const asFork = (
       settle: ReturnType<typeof settleFor>,
@@ -2507,12 +2644,15 @@ function explore(
         .flatMap((invoke) =>
           asFork(settleFor(invoke.id, invoke.src, false, invoke), invoke.id, invoke.src, false),
         ),
-      // Coupled: `register` settles a finished child in id order with the rest.
-      ...(coupled ? [] : finishedChildren(step)).map((finished) =>
-        "error" in finished
-          ? { id: finished.id, errors: [finished.error], outputs: [] }
-          : { id: finished.id, errors: [], outputs: [finished.output] },
-      ),
+      // Coupled: `register` settles a finished child machine in id order with
+      // the rest; any other finished child settles as a fork.
+      ...finishedChildren(step)
+        .filter((finished) => !finishedKids.some((kid) => kid.id === finished.id))
+        .map((finished) =>
+          "error" in finished
+            ? { id: finished.id, errors: [finished.error], outputs: [] }
+            : { id: finished.id, errors: [], outputs: [finished.output] },
+        ),
     ];
     // Each pending decision's choices are branches of the same node; its
     // `errors` entry, if any, is a failing settlement like the others.
@@ -2640,9 +2780,6 @@ function explore(
       );
   if (initial) {
     recordState(initial, childRef?._initialEffects ?? initial.actions);
-    if (stops(initial)) {
-      witness = [];
-    }
   }
 
   // Advance a step deterministically through any non-branching text or scripted
@@ -2703,7 +2840,7 @@ function explore(
     for (let i = 0; i < MAX_ADVANCE_STEPS; i++) {
       // A step whose sends to coupled children are not delivered yet is not a
       // state the machines are in: they apply at once.
-      if (!awaitsKids(current, kids) && stops(current, kids)) {
+      if ((stateTarget || !awaitsKids(current, kids)) && stops(current, kids)) {
         return { step: current, hit: true };
       }
       if (current.done) {
@@ -3016,20 +3153,9 @@ function explore(
   // False when priming a child ran past the delivery cap.
   const register = (step: AgentStep, kids: Map<string, KidState>, queue: Delivery[]): boolean => {
     // A child machine that finished as it started is registered too: its
-    // completion is queued in id order with the other children's entry sends.
-    const children = (step.snapshot.children ?? {}) as Record<string, ChildRef | undefined>;
-    const finished = finishedChildren(step).map(({ id }): PendingInvoke => {
-      const ref = children[id]!;
-      const own = ref as { src?: unknown; logic?: unknown };
-      return {
-        id,
-        src: typeof own.src === "string" ? own.src : id,
-        input: ref.options?.input,
-        logic: own.logic,
-        ref,
-      };
-    });
-    const live = [...pendingInvokes(step), ...finished]
+    // entry sends, then its completion, are queued in id order with the
+    // other children's.
+    const live = [...pendingInvokes(step), ...finishedInvokes(step)]
       .filter(isExploredChild)
       .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
     const sessions = new Set(live.map((invoke) => childSession(invoke.id, invoke.ref)));
@@ -3103,7 +3229,7 @@ function explore(
     }
     const held = kids ?? new Map<string, KidState>();
     if (
-      pendingInvokes(step)
+      [...pendingInvokes(step), ...finishedInvokes(step)]
         .filter(isExploredChild)
         .some((invoke) => !held.has(childSession(invoke.id, invoke.ref)))
     ) {
@@ -3176,16 +3302,22 @@ function explore(
           `coupled: a child sent '${route.event.type}' to an actor the search does not model, at path [${pathTypes(link)}]`,
       );
     };
+    // What a newly registered child queued as it started (its entry sends, a
+    // finished child's completion): it applies at once, so no step is
+    // checked while any of it is still queued.
+    const starting = new WeakSet<Delivery>();
     const flush = (at: AgentStep): void => {
       if (pumped.has(at)) {
         return;
       }
       pumped.add(at);
+      const queued = queue.length;
       if (!register(at, kids, queue)) {
         overflow = true;
         endPath(link, at, { status: "max-depth", state: at.snapshot.value });
         return;
       }
+      for (const item of queue.slice(queued)) starting.add(item);
       for (const effect of Array.isArray(at.actions) ? at.actions : []) {
         if (
           !isRecord(effect) ||
@@ -3264,7 +3396,11 @@ function explore(
       recordState(step);
       outbound.push(...outboundOf(step.actions, outParent, step.snapshot.children));
       flush(step);
-      if (!overflow && stops(step, kids)) {
+      if (
+        !overflow &&
+        (stateTarget || !queue.some((queuedItem) => starting.has(queuedItem))) &&
+        stops(step, kids)
+      ) {
         witness = pathOf(link);
         break;
       }
@@ -3284,19 +3420,8 @@ function explore(
     return `\u0003${parts.sort().join("\u0003")}`;
   };
   const stateKey = (kid: KidState): string => {
-    const snapshot = kid.step.snapshot as AnyMachineSnapshot;
     try {
-      return (
-        JSON.stringify([
-          snapshot.value,
-          snapshot.context,
-          snapshot.status,
-          (snapshot as { historyValue?: unknown }).historyValue ?? null,
-          kid.step.requests.map((request) => request.id),
-          Object.keys(snapshot.children ?? {}),
-          pumped.has(kid.step),
-        ]) + kidsKey(kid.kids)
-      );
+      return strictKey([...stepKeyParts(kid.step), pumped.has(kid.step)]) + kidsKey(kid.kids);
     } catch {
       return `\u0002${unkeyable++}`;
     }
@@ -3374,9 +3499,14 @@ function explore(
     // below it. A shallower revisit explores again: it has more depth left
     // (the depth-first walk can reach a key deep before it reaches it
     // shallow).
-    if (options.dedupeBy) {
+    const base = options.dedupeBy
+      ? options.dedupeBy(withKidSnapshots(settled.snapshot as AnyMachineSnapshot, nodeKids))
+      : defaultDedupe
+        ? tryKey(() => defaultStepKey(settled))
+        : undefined;
+    if (base !== undefined) {
       const key =
-        options.dedupeBy(withKidSnapshots(settled.snapshot as AnyMachineSnapshot, nodeKids)) +
+        base +
         (delivered?.size ? `\u0001${[...delivered].sort().join("\u0001")}` : "") +
         kidsKey(nodeKids) +
         // An ordering target's trigger is history the snapshot does not hold.
@@ -3893,6 +4023,11 @@ function explore(
     };
   }
 
+  // Coupled children still starting apply their entry sends first; the pump
+  // checks the initial step once they have.
+  if (initial && (stateTarget || !awaitsKids(initial, undefined)) && stops(initial)) {
+    witness = [];
+  }
   const root: ExploreNode = { step: initial!, path: undefined, depth: 0 };
   if (witness === undefined && stopWhen) {
     // Breadth-first by path length, so the first witness found is a shortest
@@ -3958,6 +4093,21 @@ function explore(
 }
 
 /**
+ * Validates `options.input` against the machine's input schema, as a run
+ * would, and seeds the search with the parsed value (defaults filled). Input
+ * the machine would reject throws `invalid-machine-input` instead of giving a
+ * proof over a start state no run can reach.
+ */
+function withMachineInput<T extends { input?: unknown }>(
+  machine: AnyStateMachine,
+  options: T,
+  caller: string,
+): T {
+  if (options.input === undefined) return options;
+  return { ...options, input: resolveMachineInput(machine, options.input, caller) };
+}
+
+/**
  * Enumerates a machine's decision and external-event branches to a bounded
  * depth, model-free, and reports which states are reached and how each path
  * terminates. At each decision request it forks one branch per candidate event
@@ -3997,7 +4147,7 @@ export async function explorePaths(
   machine: AnyStateMachine,
   options: ExplorePathsOptions = {},
 ): Promise<AgentPathReport> {
-  return explore(machine, options).report;
+  return explore(machine, withMachineInput(machine, options, "explorePaths")).report;
 }
 
 /** The result of a {@link canReach} query. */
@@ -4083,6 +4233,7 @@ export async function canReach(
   target: CanReachTarget,
   options: ExplorePathsOptions = {},
 ): Promise<CanReachResult> {
+  options = withMachineInput(machine, options, "canReach");
   const resolvedTarget =
     typeof target === "string" ? resolveStateTarget(machine, target) : undefined;
   const ordering = typeof target === "object" ? target : undefined;
@@ -4106,6 +4257,8 @@ export async function canReach(
     undefined,
     false,
     ordering,
+    resolvedTarget !== undefined,
+    options.dedupeBy === undefined,
   );
   if (witness !== undefined) {
     return {

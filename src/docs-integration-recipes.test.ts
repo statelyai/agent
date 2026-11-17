@@ -1,7 +1,8 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
 import type { Snapshot } from "xstate";
-import { createAgentRuntime, runToQuiescence, setupAgent } from "./index.js";
+import { createAgentRuntime, setupAgent } from "./index.js";
+import { runToQuiescence } from "./run-agent.js";
 
 describe("documentation integration recipes", () => {
   test("an app can store an opaque snapshot and resume it with an event", async () => {

@@ -4,10 +4,12 @@ export default defineConfig({
   entry: {
     index: "src/index.ts",
     "ai-sdk": "src/ai-sdk/index.ts",
+    evals: "src/evals/index.ts",
     log: "src/log/index.ts",
     machines: "src/machines/index.ts",
     openai: "src/openai/index.ts",
     otel: "src/otel/index.ts",
+    policy: "src/policy/index.ts",
     "tanstack-ai": "src/tanstack-ai/index.ts",
     testing: "src/testing/index.ts",
     validate: "src/validate/index.ts",

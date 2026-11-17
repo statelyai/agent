@@ -6,12 +6,12 @@ import {
   createAgentSchemas,
   createTextLogic,
   runAgent,
-  runToQuiescence,
   setupAgent,
   type AgentTraceEvent,
   type AgentUsageEvent,
   type ChosenEvent,
 } from "./index.js";
+import { runToQuiescence } from "./run-agent.js";
 import { traceSteps } from "./internal/trace-states.js";
 
 // A loop of `step` requests that records each `@agent.usage` budget it sees.

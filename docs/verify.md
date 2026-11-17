@@ -45,7 +45,7 @@ assertAgentMachine(machine, { warnings: true });
 | `decide-without-events`     | error    | A state invokes `agent.decide` but neither it nor any ancestor handles any event, so the chosen event can never be delivered.                                                                                                                                   |
 | `decide-allows-human-event` | error    | A decision's literal `allowedEvents` names an event the state or an ancestor handles through a transition tagged `meta: { actor: "human" }`, so the model is never offered it. See [Events a person sends](decisions.md#events-a-person-sends).                 |
 | `invoke-without-on-error`   | warning  | An invoke declares no `onError`, and neither its state nor any ancestor handles an actor error, so a rejected request or actor lands the machine in an error state with no modeled recovery. Add `onError` targeting a `failed` final state or a bounded retry. |
-| `direct-object-src`         | warning  | An invoke `src` is a direct object or machine value that `runToQuiescence` cannot rebind, so it inherits no host executors.                                                                                                                                     |
+| `direct-object-src`         | warning  | An invoke `src` is a direct object or machine value that `runAgent` cannot rebind, so it inherits no host executors.                                                                                                                                            |
 
 ## Test assertions
 
@@ -75,7 +75,7 @@ test("happy path settles done", async () => {
 });
 ```
 
-Guards stay in force throughout. `canReach` and `simulateAgent` traverse the same machine transitions as `runToQuiescence`, so a graph path that a guard rejects never counts as reachable. These tests pin the machine's shape as prompts and models change.
+Guards stay in force throughout. `canReach` and `simulateAgent` traverse the same machine transitions as `runAgent`, so a graph path that a guard rejects never counts as reachable. These tests pin the machine's shape as prompts and models change.
 
 ## Deterministic executors
 
@@ -93,13 +93,13 @@ const machine = emailDrafter.provide({
 
 [examples/email-drafter/agent-logic.ts](https://github.com/statelyai/agent/blob/next/examples/email-drafter/agent-logic.ts) drives a full run this way, with fixed values and no model call.
 
-Use deterministic executors when the test should exercise the real `runToQuiescence` path with canned model output. Use [`simulateAgent`](#scripted-playthroughs) when a model-free transition playthrough is enough.
+Use deterministic executors when the test should exercise the real `runAgent` path with canned model output. Use [`simulateAgent`](#scripted-playthroughs) when a model-free transition playthrough is enough.
 
 ## Scripted playthroughs
 
 `simulateAgent(machine, { input, script, maxSteps? })` runs a deterministic, model-free transition playthrough. The `script` supplies responses as FIFO queues, so runs are reproducible.
 
-This script keys by invoke **src**, not by request name. Executors that run the real `runToQuiescence` path route by request name instead. See [Testing without a provider](evals.md#testing-without-a-provider).
+This script keys by invoke **src**, not by request name. Executors that run the real `runAgent` path route by request name instead. See [Testing without a provider](evals.md#testing-without-a-provider).
 
 - `decisions` holds the `ChosenEvent` to apply per decision, keyed by decision src, usually `agent.decide`.
 - `text` holds output values for text requests, keyed by request src.
@@ -173,6 +173,7 @@ settled?.resolvedRequest; // { kind: 'text', src: 'parse', id: 'parse', outcome:
 
 `explorePaths(machine, { input, maxDepth?, maxPaths?, maxNodes?, budget?, outputs?, errors?, payloads?, dedupeBy?, interleave?, children?, timers?, usage?, steps? })` enumerates decision and external-event branches without a model, and reports coverage.
 
+- `input` is validated against the machine's input schema, as `runAgent` does. Input the schema rejects throws `AgentError` with code `invalid-machine-input`, so a misspelled field fails loudly instead of proving a rule over a start state no run can reach. The parsed value, with defaults filled, seeds the search. `canReach` and `simulateAgent` validate `input` the same way.
 - At each decision, it forks one branch per candidate event. Guard-rejected candidates count in `prunedByGuard` and are not explored.
 - A decision with no candidate the snapshot takes, because its guards refuse every one or the closed choice offers nothing, exhausts as it does in a live run. That branch records `{ type: 'xstate.error.actor', actorId }` and takes the invoke's `onError`. With no `onError`, it ends in an `error` terminal.
 - At an idle wait, it forks one branch per externally accepted event and per armed timer. See [Timers](#timers).
@@ -258,6 +259,7 @@ By default, events are applied as `{ type }`. A guard that reads the payload, su
 - A text request's canned value is its `result`, with `messages: []`. Wrap it in `textOutput(result, { messages })` from `@statelyai/agent/testing` when the machine reads `output.messages`.
 - `dedupeBy` projects a settled snapshot to a key. Each key is explored once, or again when reached at a shallower depth. The key must include every field a guard, choice, or `onDone` reads, or the search misses paths. Include `snapshot.timers` when a delayed `enq.raise` outlives the state that scheduled it.
 - Under `dedupeBy`, `terminals` are representative paths, not every path: a revisited key is not explored again, so the paths below it appear once.
+- `canReach` without `dedupeBy` uses a default key: the state value, context, status, history, pending requests and their invoke inputs, children and their inputs, armed timers, and coupled children's states (their timers included). A step whose context or inputs hold anything but plain data (a `Map`, a class instance, a function) is not deduplicated. The key holds structure, not identity: a guard that compares context with an object held outside the snapshot, such as a module-level token, needs its own `dedupeBy`. `explorePaths` without `dedupeBy` explores every path in full.
 
 ```ts
 const amounts = [0, 1, 100, 100.01, 500];
@@ -386,7 +388,7 @@ const report = await explorePaths(parentMachine, {
 - What a child's move sends its own children, and their replies, happen in the same move. A child's send to a sibling is delivered to that sibling, entry sends included. A child's sends reach their targets in the order it made them, each run to quiescence before the next, as a live run does. A send to an actor the search does not model lists the event type in `unexpandedEvents`, so the report is not complete.
 - Child moves count against `maxDepth` like the parent's own branches. On a path they carry `actor` with the child's id (a grandchild's as `child.grandchild`): the host events it received, its choices, its settled work. The events it sends the parent appear as the parent receives them.
 - A target predicate and `dedupeBy` see each coupled child's explored state: `snapshot.children[id].getSnapshot()` returns the state the search stepped the child to, its own coupled children likewise. A parent's send and the child's receipt are one state, so a cross-actor invariant such as "every chunk the parent forwarded, a child received" can be a target.
-- With `dedupeBy`, each child's state joins the key. Without it, every interleaving is explored in full.
+- With `dedupeBy`, and in `canReach`'s default key, each child's state joins the key. `explorePaths` without `dedupeBy` explores every interleaving in full.
 - A coupled child's text requests deliver `@agent.usage` to the root, as a run does. See [Usage events](#usage-events).
 - A child that stops on `needs-output` or `max-depth` ends the parent branch the same way, so the parent report is not complete.
 
@@ -463,7 +465,7 @@ When `complete` is false, `unexplored` lists why, in the wording of the `explore
 
 Raise the caps, add `dedupeBy`, supply the missing outputs, or add `payloads` entries until it is true.
 
-A long-lived machine that never finishes, such as a chat loop, ends every path at `maxDepth`, so `complete` is never true. Its proofs are bounded:
+A long-lived machine that never finishes, such as a chat loop, ends every path at `maxDepth` unless its states repeat, so `complete` is false when its context keeps growing. Its proofs are bounded:
 
 - `reachable: false` whose only `unexplored` notes are `max-depth` notes means no path of up to `maxDepth` branch points reaches the target.
 - Any other note, such as `needs-output` or `unexpanded`, is a gap within that bound too.
@@ -505,13 +507,77 @@ const turnAfterStop = await canReach(
 ```
 
 - `after` and `reach` match [steps](#steps). `after` is an event type or a step predicate.
-- `reach` is checked on each step after the first step that matched `after`, not on that step itself.
+- `reach` is checked on the first step that matched `after` and every step after it. On the trigger's own step, `started`, `settled` and `state` are what the trigger's transition did, so a turn it starts is a violation. That step's `event` is the trigger itself: match its effects, not its event.
 - `after` and `reach` may read an event's payload, so an event with no schema is unexpanded until `payloads` lists its variants, even when no transition reads it. A timer's step carries the event the timer delivers.
 - The witness is the event sequence to the first violation.
 - A turn already running when STOP arrives started before it, so it is not a violation. Check that turn with `settled` if the rule covers it.
 - `dedupeBy` stays sound: the search adds "`after` has matched" to each key, so a snapshot reached before and after the trigger is explored both ways.
 - Test the rule with a mutant that breaks it (a loop that starts another turn after STOP), as with a loosened guard.
 - Don't match strings over `terminal.path` for an ordering rule: it lists branch points only and names actors by generated id.
+
+## Recorded runs against a model
+
+`checkConformance` from `@statelyai/agent/testing` checks a recorded run of existing code against a model of that code. [Verify in place](verify-in-place.md) walks through the whole track with a worked example. The code is not changed and does not run. Use it to verify a workflow in place before, or instead of, migrating it to a machine:
+
+1. Write the model: a machine whose actors stand for the code's work, with placeholder implementations.
+2. Prove the model's rules with `canReach` and `explorePaths`, as ordinary tests.
+3. Record runs of the code with `createRecorder`, and check each one against the model.
+
+```ts no-check
+import { checkConformance, createRecorder } from "@statelyai/agent/testing";
+import { traceCoverage } from "@statelyai/agent/evals";
+
+const recorder = createRecorder();
+await supportLoop({
+  assist: recorder.fn("assist", assist),
+  approve: recorder.fn("approve", approve),
+  send: recorder.fn("send", send),
+});
+
+const report = await checkConformance(supportModel, {
+  input: { maxSteps: 3 },
+  // One observation per recorded call the model can see.
+  observations: recording.effects.flatMap(toObservation),
+  actors: {
+    assist: {
+      observes: "assist",
+      matches: ({ input, observation }) => input.step === observation.step,
+      output: ({ observation }) => ({ done: observation.done, email: observation.email }),
+    },
+    send: { observes: "send" },
+  },
+  // Observations the model receives as events while it waits.
+  events: { approval: (o) => ({ type: o.approved ? "APPROVE" : "REJECT" }) },
+});
+
+report.conforms; // false: the code did something the model does not allow
+report.deviation; // { reason: "extra-observations", expected: "idle, waiting for an event", observed: { kind: "send" }, state: "awaitingApproval" }
+traceCoverage(supportModel, reports.map((r) => r.trace)); // states and handlers no recorded run reached
+```
+
+- The model runs with `runAgent`. Each actor in `actors` is answered from the observations instead of running. An actor with `observes` consumes the next observation, which must be of that kind.
+- `output` builds the actor's output from the observation. When the output carries state the recording does not show, such as a queue the code keeps internally, build it from the model's own `input` and the observation. Rebuilding it from the code's logic would make the check prove nothing.
+- `matches` returns `false` when the actor's input does not fit the observation. `error` returns a value to reject the actor, for work that failed in the recording.
+- An actor without `observes` consumes nothing. It is listed in `report.unobserved`, because the recording cannot check what it did. A run whose history or streaming was off cannot see those effects, so a bug in them goes unnoticed.
+- `events` maps observation kinds to events. When the model settles idle and the next observation has one of those kinds, it is sent and the run resumes. An entry `{ event, matches }` also compares the observation with the model's `context` and `state` before sending it, such as the draft a person approved against the draft the model holds.
+- `output: { observes, matches }` checks the code's return value. Map the recording's `output` effect to an observation of kind `observes`. The model must finish there, and `matches` compares its output with that observation. Without `output`, a recorded return value is an `extra-observations` deviation.
+- The first deviation stops the run and is reported with its `reason`:
+  - `unexpected-observation`: the next observation is of another kind.
+  - `missing-observation`: the recording had ended, or the model finished with `output` set and the code never returned.
+  - `input-mismatch`: an actor's or event's `matches` returned `false`.
+  - `output-mismatch`: the model finished, and `output.matches` returned `false`.
+  - `extra-observations`: the model finished or settled idle, and the recording continues.
+  - `ignored-event`: the model was idle, and it does not handle the event the next observation maps to.
+  - `unmapped-actor`: the model invoked a src with no entry in `actors`.
+
+  `expected` is what the model did next, `observed` is the recording's next observation, and `state` is the model's state value.
+- An `actors` key the model does not declare throws `AgentError` with code `unknown-actor-source`.
+- Every actor the model invokes must be declared by name in `setupAgent({ actors })` and invoked by `src`. An invoke that names its logic inline would run that logic for real, so `checkConformance` throws `inline-actor-source` before the run starts.
+- Code that builds its AI SDK model inline or passes module-level tools to `generateText` is recorded with `recordAiSdk`. See [Verify in place](verify-in-place.md#ai-sdk-code).
+- A callback in `actors`, `events`, or `output` that throws ends the check with `AgentError` code `conformance-callback-error`. It is not counted as the actor failing, so a bug in the mapping cannot pass as a conforming run.
+- Concurrent actors consume observations in the order they start, so a model that runs observed actors in parallel needs observations in that order.
+
+What a conforming run shows: the code behaved as the model allows on that run, and the model's rules are proved. It does not show that the code can never break a rule; a run you did not record still can. After a migration with [`loop-to-machine`](https://github.com/statelyai/skills/blob/main/plugins/stately-agent/skills/loop-to-machine/SKILL.md) and `checkParity`, the machine enforces the rules at runtime, and the same model and proofs carry over.
 
 ## CI checks
 
@@ -532,7 +598,7 @@ For machines authored as data, validate the config with `validateAgentConfig(con
 - [Crash testing](persistence.md#crash-testing): `checkCrashRecovery` kills a run at every log append and in-flight effect, and checks each resume.
 - [Debugging](debugging.md): scripted reproduction and the diagnostic codes in context.
 - [Evals](evals.md): scoring runs on output, trajectory, and budget.
-- [Quickstart](quickstart.md#define-and-run-one-artifact): a plain-function executor for `runToQuiescence`.
+- [Quickstart](quickstart.md#define-and-run-one-artifact): a plain-function executor for `runAgent`.
 - [Machines as data](machines-as-data.md): verifying a machine lowered from a config.
 - [Migrating from a hand-rolled loop](from-a-loop.md): pinning behavior across a refactor.
 - [examples/verification](https://github.com/statelyai/agent/blob/next/examples/verification/index.ts): every API on this page run over one refund-approval machine, with no API key, including `canReach` proving that an over-limit payout without human approval is unreachable.

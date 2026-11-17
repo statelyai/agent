@@ -5,6 +5,7 @@
     "index",
     "quickstart",
     "thinking-in-state-machines",
+    "verify-in-place",
     "from-a-loop",
     "strangler-fig",
     "scope",

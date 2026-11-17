@@ -9,7 +9,7 @@
  * Run with a built dist present: `pnpm build && pnpm check:dts`.
  */
 import { z } from "zod";
-import { createAgentRuntime, runToQuiescence, setupAgent } from "@statelyai/agent";
+import { setupAgent, runAgent } from "@statelyai/agent";
 
 // Something from every entry — proves each entry's public types resolve
 // from the shipped package, not just source. The root block also asserts the
@@ -28,7 +28,10 @@ export {
 } from "@statelyai/agent";
 export { createAiSdkExecutors, parseModelRef } from "@statelyai/agent/ai-sdk";
 export { createTanStackAiExecutors } from "@statelyai/agent/tanstack-ai";
-export { createToolLoopMachine, type CreateRouterMachineConfig } from "@statelyai/agent/machines";
+export {
+  createApprovalBatchMachine,
+  type CreateApprovalBatchMachineConfig,
+} from "@statelyai/agent/machines";
 export {
   createOtelTraceHandler,
   type OtelTraceHandler,
@@ -87,7 +90,7 @@ export const machine = setup.createMachine({
 });
 
 export async function run() {
-  return runToQuiescence(createAgentRuntime(machine), {
+  return runAgent(machine, {
     input: { topic: "state machines" },
   });
 }

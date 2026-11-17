@@ -10,7 +10,7 @@
  *     every place that names a lane — chunks, completion order, the summary,
  *     failures — uses them.
  *   - the runtime's `onChunk(chunk, { request })` option
- *     (`createAgentRuntime(machine, { onChunk })`): because both streams land
+ *     (`runAgent(machine, { onChunk })`): because both streams land
  *     on the same callback, `request.id` (the invoke id) tells you which lane
  *     a chunk belongs to.
  *   - the completion ORDER of the two regions, recorded in context as each one
@@ -27,11 +27,10 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import {
-  createAgentRuntime,
-  runToQuiescence,
   setupAgent,
   type AgentRuntimeOptions,
   type AgentRunInit,
+  runAgent,
 } from "@statelyai/agent";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
@@ -186,21 +185,16 @@ export async function runParallelStreamsExample(
   const startedAt = Date.now();
   const lastChunkAt: Record<string, number> = {};
 
-  const result = await runToQuiescence(
-    createAgentRuntime(parallelStreamsMachine, {
-      executors: createAiSdkExecutors(parallelStreamsMachine),
-      ...options,
-      onChunk: (chunk, { request }) => {
-        buffers[request.id] = (buffers[request.id] ?? "") + chunk;
-        lastChunkAt[request.id] = Date.now() - startedAt;
-      },
-      onTransition: observe,
-    }),
-    {
-      input: { topic: "state machines" },
-      ...options,
+  const result = await runAgent(parallelStreamsMachine, {
+    executors: createAiSdkExecutors(parallelStreamsMachine),
+    input: { topic: "state machines" },
+    ...options,
+    onChunk: (chunk, { request }) => {
+      buffers[request.id] = (buffers[request.id] ?? "") + chunk;
+      lastChunkAt[request.id] = Date.now() - startedAt;
     },
-  );
+    onTransition: observe,
+  });
 
   if (result.status !== "done") {
     throw new Error(`Parallel streams example did not complete: ${result.status}`);

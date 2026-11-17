@@ -33,7 +33,6 @@ import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
-  createAgentRuntime,
   describeMachine,
   getAcceptedEvents,
   getAgentSchemas,
@@ -41,10 +40,10 @@ import {
   getJsonSchemaSync,
   interactionMetaSchema,
   parseAgentEvent,
-  runToQuiescence,
   setupAgent,
   type AgentRunResult,
   type EventOf,
+  runAgent,
 } from "@statelyai/agent";
 
 const agentSetup = setupAgent({
@@ -211,7 +210,7 @@ function deliver(runId: string, event: BugfixEvent): Promise<RunStatus> {
   const delivery = (deliveries.get(runId) ?? Promise.resolve())
     .catch(() => {})
     .then(async () => {
-      const result = await runToQuiescence(createAgentRuntime(bugfixMachine), {
+      const result = await runAgent(bugfixMachine, {
         snapshot: load(runId).persisted as never,
         event,
       });
@@ -228,7 +227,7 @@ function deliver(runId: string, event: BugfixEvent): Promise<RunStatus> {
 
 /** Opens a run for an issue. */
 export async function start(issue: string): Promise<RunStatus> {
-  const result = await runToQuiescence(createAgentRuntime(bugfixMachine), { input: { issue } });
+  const result = await runAgent(bugfixMachine, { input: { issue } });
   return save(randomUUID(), result);
 }
 

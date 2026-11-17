@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { createAsyncLogic, type AnyStateMachine } from "xstate";
-import { createAgentRuntime, getInteraction, runToQuiescence } from "../index.js";
+import { createAgentRuntime, getInteraction } from "../index.js";
+import { runToQuiescence } from "../run-agent.js";
 import { canReach, explorePaths, lintAgentMachine } from "../testing/index.js";
 import { isExplorationComplete } from "../verify.js";
 import { createApprovalBatchMachine, type ApprovalDecision, type ProposedCall } from "./index.js";

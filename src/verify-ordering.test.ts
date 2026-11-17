@@ -95,7 +95,7 @@ describe("canReach — ordering target", () => {
     expect(stopFirst.steps!.slice(2).some((step) => step.started.includes("turn"))).toBe(true);
   });
 
-  test("`reach` is not checked on the `after` step itself", async () => {
+  test("`reach` is checked on the `after` step: what the trigger starts comes after it", async () => {
     const agent = setupAgent({
       context: z.object({}),
       actors: { cleanup: createAsyncLogic<null>({ run: async () => null }) },
@@ -115,8 +115,8 @@ describe("canReach — ordering target", () => {
     };
     const opts = { outputs: { cleanup: [null] }, payloads: () => ({ STOP: [{}] }) };
     expect(await canReach(machine, ordering, opts)).toMatchObject({
-      reachable: false,
-      complete: true,
+      reachable: true,
+      witness: [{ type: "STOP" }],
     });
     expect(
       await canReach(

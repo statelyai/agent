@@ -370,3 +370,5 @@ export {
   bookingCompensationMachine,
   runBookingCompensationExample,
 } from "./booking-compensation/index.js";
+export { refundModel } from "./verify-in-place/model.js";
+export { runVerifyInPlaceExample } from "./verify-in-place/index.js";

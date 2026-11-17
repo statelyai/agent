@@ -27,7 +27,8 @@ import {
   toAiSdkTools,
   toDecisionMessages,
 } from "./mappers.js";
-import { AgentTruncatedError, createAgentRuntime, runToQuiescence, setupAgent } from "../index.js";
+import { AgentTruncatedError, createAgentRuntime, setupAgent } from "../index.js";
+import { runToQuiescence } from "../run-agent.js";
 import type { AiSdkExecutors, AiSdkModelMap } from "./index.js";
 
 describe("createAiSdkExecutors with core runAgent", () => {

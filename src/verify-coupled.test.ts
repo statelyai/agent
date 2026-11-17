@@ -1031,4 +1031,189 @@ describe("coupled child usage", () => {
     expect(startFirst.complete).toBe(true);
     expect(startFirst.terminals.map((terminal) => terminal.state)).toEqual(["sawStart"]);
   });
+
+  test("'coupled' delivers a finished child's entry sends before its completion", async () => {
+    const ready = createMachine({
+      initial: "finished",
+      states: { finished: { type: "final", entry: tell("READY") } },
+    } as never) as AnyStateMachine;
+    const agent = setupAgent({
+      context: z.object({ ready: z.boolean() }),
+      events: { READY: z.object({}) },
+    });
+    const parent = agent.createMachine({
+      context: { ready: false },
+      initial: "waiting",
+      states: {
+        waiting: {
+          invoke: {
+            id: "ready",
+            src: ready,
+            onDone: ({ context }: { context: { ready: boolean } }) => ({
+              target: context.ready ? "done" : "early",
+            }),
+          },
+          on: { READY: ({ context }) => ({ context: { ...context, ready: true } }) },
+        },
+        done: { type: "final" },
+        early: { type: "final" },
+      },
+    });
+    const report = await explorePaths(parent, { children: "coupled", hostEvents: [] });
+    expect(report.complete).toBe(true);
+    expect(report.terminals.map((terminal) => terminal.state)).toEqual(["done"]);
+    // Entered later (START): the snapshot before its entry send applies is not
+    // a state the machines are in.
+    const gated = setupAgent({
+      context: z.object({ ready: z.boolean() }),
+      events: { READY: z.object({}), START: z.object({}) },
+    }).createMachine({
+      context: { ready: false },
+      initial: "idle",
+      states: {
+        idle: { on: { START: { target: "waiting" } } },
+        waiting: {
+          invoke: {
+            id: "ready",
+            src: ready,
+            onDone: ({ context }: { context: { ready: boolean } }) => ({
+              target: context.ready ? "done" : "early",
+            }),
+          },
+          on: { READY: ({ context }) => ({ context: { ...context, ready: true } }) },
+        },
+        done: { type: "final" },
+        early: { type: "final" },
+      },
+    });
+    const stale = await canReach(
+      gated,
+      (snapshot) => snapshot.matches("waiting") && !snapshot.context.ready,
+      { children: "coupled", hostEvents: ["START"] },
+    );
+    expect(stale).toMatchObject({ reachable: false, complete: true });
+  });
+
+  test("'coupled' carries a nested finished child's completion up to the root", async () => {
+    const leaf = createMachine({
+      initial: "finished",
+      states: { finished: { type: "final" } },
+    } as never) as AnyStateMachine;
+    const middle = createMachine({
+      initial: "waiting",
+      states: {
+        waiting: { invoke: { id: "leaf", src: leaf, onDone: { target: "finished" } } },
+        finished: { type: "final" },
+      },
+    } as never) as AnyStateMachine;
+    const root = createMachine({
+      initial: "waiting",
+      states: {
+        waiting: { invoke: { id: "middle", src: middle, onDone: { target: "done" } } },
+        done: { type: "final" },
+      },
+    } as never) as AnyStateMachine;
+    const report = await explorePaths(root, { children: "coupled", hostEvents: [] });
+    expect(report.complete).toBe(true);
+    expect(report.terminals.map((terminal) => [terminal.status, terminal.state])).toEqual([
+      ["done", "done"],
+    ]);
+  });
+
+  test("'coupled' applies a chained child's entry sends before checking a step", async () => {
+    const opener = createMachine({
+      initial: "finished",
+      states: { finished: { type: "final", entry: tell("OPEN") } },
+    } as never) as AnyStateMachine;
+    const ready = createMachine({
+      initial: "finished",
+      states: { finished: { type: "final", entry: tell("READY") } },
+    } as never) as AnyStateMachine;
+    const parent = setupAgent({
+      context: z.object({ ready: z.boolean() }),
+      events: { START: z.object({}), OPEN: z.object({}), READY: z.object({}) },
+    }).createMachine({
+      context: { ready: false },
+      initial: "idle",
+      states: {
+        idle: { on: { START: { target: "opening" } } },
+        // OPEN, from the first child's entry, starts the second child.
+        opening: { invoke: { id: "opener", src: opener }, on: { OPEN: { target: "waiting" } } },
+        waiting: {
+          invoke: { id: "ready", src: ready, onDone: { target: "done" } },
+          on: { READY: ({ context }) => ({ context: { ...context, ready: true } }) },
+        },
+        done: { type: "final" },
+      },
+    });
+    const stale = await canReach(
+      parent,
+      (snapshot) => snapshot.matches("waiting") && !snapshot.context.ready,
+      { children: "coupled", hostEvents: ["START"] },
+    );
+    expect(stale).toMatchObject({ reachable: false, complete: true });
+  });
+
+  test("'coupled' applies entry sends before checking the initial snapshot", async () => {
+    const announcer = createMachine({
+      initial: "running",
+      states: { running: { entry: tell("READY") } },
+    } as never) as AnyStateMachine;
+    const silent = createMachine({
+      initial: "running",
+      states: { running: {} },
+    } as never) as AnyStateMachine;
+    const parentWith = (child: AnyStateMachine) =>
+      createMachine({
+        initial: "waiting",
+        states: {
+          waiting: { invoke: { id: "child", src: child }, on: { READY: { target: "ready" } } },
+          ready: {},
+        },
+      } as never) as AnyStateMachine;
+    const options = { children: "coupled" as const, hostEvents: [] };
+    // READY applies as the child starts: `waiting` is passed through, never settled.
+    expect(
+      await canReach(parentWith(announcer), (snapshot) => snapshot.matches("waiting"), options),
+    ).toMatchObject({ reachable: false, complete: true });
+    expect(await canReach(parentWith(announcer), "waiting", options)).toMatchObject({
+      reachable: true,
+      witness: [],
+    });
+    expect(await canReach(parentWith(announcer), "ready", options)).toMatchObject({
+      reachable: true,
+      witness: [{ type: "READY" }],
+    });
+    // A child that sends nothing leaves the parent in `waiting`.
+    expect(await canReach(parentWith(silent), "waiting", options)).toMatchObject({
+      reachable: true,
+      witness: [],
+    });
+  });
+
+  test("'coupled' state targets match a state a finished child's entry send passes through", async () => {
+    const ready = createMachine({
+      initial: "finished",
+      states: { finished: { type: "final", entry: tell("READY") } },
+    } as never) as AnyStateMachine;
+    const parent = createMachine({
+      initial: "running",
+      states: {
+        running: {
+          invoke: { id: "ready", src: ready, onDone: { target: "done" } },
+          initial: "waiting",
+          states: { waiting: { on: { READY: { target: "ready" } } }, ready: {} },
+        },
+        done: { type: "final" },
+      },
+    } as never) as AnyStateMachine;
+    const options = { children: "coupled" as const, hostEvents: [] };
+    const report = await explorePaths(parent, options);
+    expect(report.reachedStates).toContainEqual({ running: "ready" });
+    expect(await canReach(parent, "running.ready", options)).toMatchObject({ reachable: true });
+    // A predicate sees settled snapshots only: the completion follows at once.
+    expect(
+      await canReach(parent, (snapshot) => snapshot.matches({ running: "ready" }), options),
+    ).toMatchObject({ reachable: false, complete: true });
+  });
 });

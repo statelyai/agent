@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import type { AgentMessage, AgentRequestExecutor } from "@statelyai/agent";
-import { getInteraction, createAgentRuntime, runToQuiescence } from "@statelyai/agent";
+import { getInteraction, runAgent } from "@statelyai/agent";
 import {
   contextCompactionMachine,
   idlePrompt,
@@ -169,28 +169,20 @@ describe("context-compaction", () => {
     const { generateText } = createModel();
 
     await expect(
-      runToQuiescence(
-        createAgentRuntime(contextCompactionMachine, {
-          executors: { generateText },
-        }),
-        {
-          input: { maxMessages: 4, keepRecent: 0 },
-        },
-      ),
+      runAgent(contextCompactionMachine, {
+        executors: { generateText },
+        input: { maxMessages: 4, keepRecent: 0 },
+      }),
     ).rejects.toThrow();
   });
 
   test("settles idle in awaitingUser with interaction meta a host can drive", async () => {
     const { generateText } = createModel();
 
-    const first = await runToQuiescence(
-      createAgentRuntime(contextCompactionMachine, {
-        executors: { generateText },
-      }),
-      {
-        input: { maxMessages: 4, keepRecent: 2 },
-      },
-    );
+    const first = await runAgent(contextCompactionMachine, {
+      executors: { generateText },
+      input: { maxMessages: 4, keepRecent: 2 },
+    });
 
     // No invoke on `awaitingUser`, so the run settles idle there.
     expect(first.status).toBe("idle");
@@ -203,15 +195,11 @@ describe("context-compaction", () => {
     expect(idlePrompt(first.snapshot)).toContain("turn 0");
 
     // Resuming from `result.persist()` with the text event advances one turn.
-    const second = await runToQuiescence(
-      createAgentRuntime(contextCompactionMachine, {
-        executors: { generateText },
-      }),
-      {
-        snapshot: first.persist(),
-        event: { type: "USER_MESSAGE", text: "hello" },
-      },
-    );
+    const second = await runAgent(contextCompactionMachine, {
+      executors: { generateText },
+      snapshot: first.persist(),
+      event: { type: "USER_MESSAGE", text: "hello" },
+    });
 
     expect(second.status).toBe("idle");
     if (second.status !== "idle") return;
@@ -225,28 +213,20 @@ describe("context-compaction", () => {
     const { generateText } = createModel();
 
     // maxMessages=4, keepRecent=2: turn 3 overflows the window and compacts.
-    const start = await runToQuiescence(
-      createAgentRuntime(contextCompactionMachine, {
-        executors: { generateText },
-      }),
-      {
-        input: { maxMessages: 4, keepRecent: 2 },
-      },
-    );
+    const start = await runAgent(contextCompactionMachine, {
+      executors: { generateText },
+      input: { maxMessages: 4, keepRecent: 2 },
+    });
     expect(start.status).toBe("idle");
     if (start.status !== "idle") return;
     let snapshot = start.persist();
 
     for (const turn of [1, 2, 3]) {
-      const result = await runToQuiescence(
-        createAgentRuntime(contextCompactionMachine, {
-          executors: { generateText },
-        }),
-        {
-          snapshot,
-          event: { type: "USER_MESSAGE", text: `q${turn}` },
-        },
-      );
+      const result = await runAgent(contextCompactionMachine, {
+        executors: { generateText },
+        snapshot,
+        event: { type: "USER_MESSAGE", text: `q${turn}` },
+      });
       expect(result.status).toBe("idle");
       if (result.status !== "idle") return;
       expect(latestReply(result.snapshot)).toBe(`reply ${turn}`);
@@ -254,15 +234,11 @@ describe("context-compaction", () => {
     }
 
     // Turn 3 compacted (history capped at keepRecent) yet the reply survives.
-    const final = await runToQuiescence(
-      createAgentRuntime(contextCompactionMachine, {
-        executors: { generateText },
-      }),
-      {
-        snapshot,
-        event: { type: "USER_MESSAGE", text: "exit" },
-      },
-    );
+    const final = await runAgent(contextCompactionMachine, {
+      executors: { generateText },
+      snapshot,
+      event: { type: "USER_MESSAGE", text: "exit" },
+    });
     expect(final.status).toBe("done");
     if (final.status !== "done") return;
     expect(final.output.summary).toBe("SUMMARY: prior facts folded in.");

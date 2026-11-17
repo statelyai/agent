@@ -14,7 +14,8 @@ import {
 import type { AgentEventDescriptor } from "../events.js";
 import type { AgentTextRequest } from "../text-logic.js";
 import type { AgentTools } from "../types.js";
-import { AgentTruncatedError, createAgentRuntime, runToQuiescence, setupAgent } from "../index.js";
+import { AgentTruncatedError, createAgentRuntime, setupAgent } from "../index.js";
+import { runToQuiescence } from "../run-agent.js";
 import {
   createTanStackAiExecutors,
   toDecisionMessages,

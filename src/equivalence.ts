@@ -68,6 +68,12 @@ export interface RecordedModelCall {
   /** The stream's parts or chunks, in order. */
   stream?: unknown[];
   error?: RecordedError;
+  /**
+   * This call failed, and model call `retriedBy` sent the same request after
+   * it: a retry, by the AI SDK (`maxRetries`) or by the code. A mapping that
+   * reads one observation per call the code made skips effects with it set.
+   */
+  retriedBy?: number;
   /** In replay, the recorded call (its `call`) whose answer served this one. */
   replayed?: number;
   /** In replay, `translate` adapted the recorded answer to this call. */
@@ -314,6 +320,69 @@ export interface Recorder {
   output(value: unknown): void;
   /** What this run did so far. */
   readonly recording: Recording;
+}
+
+/** What {@link recordAiSdk} routes an AI SDK call through. */
+export interface AiSdkSeam {
+  recorder: Recorder;
+  /**
+   * Replaces the model the code passes, such as `openai("gpt-…")` built inline.
+   * Pass `recorder.model(standIn)`, so the stand-in's calls are recorded.
+   */
+  model?: unknown;
+}
+
+type AiSdkCall = (options: { model?: unknown; tools?: object }) => unknown;
+
+/**
+ * Records AI SDK code that builds its model inline or passes module-level
+ * tools to `generateText`: there is nothing to inject, so the test mocks `"ai"`
+ * and routes each call through the recorder. Every `generateText` and
+ * `streamText` call runs on the real AI SDK with `seam.model` in place of the
+ * code's model and its `tools` wrapped with `recorder.tools`. Everything else
+ * in `"ai"` stays real, so the code's own tool loop runs.
+ *
+ * `current` returns the seam of the run being recorded. A call while it returns
+ * `undefined` throws, so no test reaches a real provider.
+ *
+ * @example
+ * ```ts
+ * vi.mock("ai", async (importOriginal) => {
+ *   const ai = await importOriginal<typeof import("ai")>();
+ *   const { currentSeam } = await import("./seam"); // { recorder, model: recorder.model(standIn) }
+ *   return { ...ai, ...recordAiSdk(ai, currentSeam) };
+ * });
+ * ```
+ */
+export function recordAiSdk<TAi extends { generateText: AnyFunction; streamText?: AnyFunction }>(
+  ai: TAi,
+  current: () => AiSdkSeam | undefined,
+): Pick<TAi, "generateText" | "streamText"> {
+  const wrap =
+    (name: string, call: AiSdkCall): AiSdkCall =>
+    (options) => {
+      const seam = current();
+      if (!seam) {
+        throw new Error(
+          `recordAiSdk: ${name} was called while no run is recording. Return { recorder } from current() while the code runs.`,
+        );
+      }
+      return call({
+        ...options,
+        ...(seam.model !== undefined ? { model: seam.model } : {}),
+        ...(options.tools
+          ? {
+              tools: seam.recorder.tools(
+                options.tools as Record<string, { execute?: AnyFunction }>,
+              ),
+            }
+          : {}),
+      });
+    };
+  return {
+    generateText: wrap("generateText", ai.generateText as AiSdkCall),
+    ...(ai.streamText ? { streamText: wrap("streamText", ai.streamText as AiSdkCall) } : {}),
+  } as Pick<TAi, "generateText" | "streamText">;
 }
 
 /**
@@ -588,6 +657,16 @@ export function createRecorder(options: CreateRecorderOptions = {}): Recorder {
       call: modelCalls++,
       request: toJson(omit(request, ["abortSignal", "headers", "signal"])),
     };
+    // A retry resends the request of the model call just before it, which failed.
+    const previous = [...effects].reverse().find((earlier) => earlier.kind === "model");
+    if (
+      previous?.kind === "model" &&
+      previous.error &&
+      previous.method === method &&
+      stableStringify(previous.request) === stableStringify(effect.request)
+    ) {
+      previous.retriedBy = effect.call;
+    }
     effects.push(effect);
     if (replay) {
       const replayed = nextReplayedModel(effect);
