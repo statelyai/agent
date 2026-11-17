@@ -1316,7 +1316,13 @@ export interface ExplorePathsOptions {
    * at a shallower depth), so payload and output branching that converges
    * stays tractable. Return everything a guard, choice, or output reads:
    * a key that drops a field the machine reads makes the search unsound.
-   * Without it, every path is explored in full.
+   * Without it, `explorePaths` explores every path in full, and `canReach`
+   * uses a default key: the state value, context, status, history, pending
+   * requests and their invoke inputs, children and their inputs, armed
+   * timers, and coupled children's states. A step whose context or inputs
+   * are not plain data (a `Map`, a class instance) is not deduplicated. The
+   * key holds structure, not identity: a guard that compares context with an
+   * object held outside the snapshot needs its own `dedupeBy`.
    */
   dedupeBy?: (snapshot: ExploreSnapshot) => string;
   /**
@@ -1466,6 +1472,96 @@ const FINITE_PAYLOAD_CAP = 64;
 
 // Default cap on branch points expanded per exploration.
 const DEFAULT_MAX_NODES = 100_000;
+
+// A lossless key for plain data: JSON values plus `undefined`, `-0`, null
+// prototypes, key order, and shared references within the key. Anything else
+// (a Map, a class instance, a function, a symbol, hidden, or accessor
+// property) throws, since JSON would collapse it and merge states that differ.
+// Identity against objects outside the snapshot is not keyed.
+// An own property holding a value, not a getter a guard could tell apart.
+function isDataProperty(target: object, key: PropertyKey): boolean {
+  const descriptor = Object.getOwnPropertyDescriptor(target, key);
+  return descriptor !== undefined && "value" in descriptor;
+}
+
+function strictKey(value: unknown, refs = new Map<object, number>()): string {
+  if (value === undefined) return "u";
+  if (value === null || typeof value === "boolean" || typeof value === "string") {
+    return JSON.stringify(value);
+  }
+  if (typeof value === "number") {
+    return Object.is(value, -0) ? "n-0" : `n${String(value)}`;
+  }
+  if (typeof value !== "object") {
+    throw new TypeError(`unkeyable ${typeof value}`);
+  }
+  // A second reference (or a cycle) points back at the first, so sharing is kept.
+  const ref = refs.get(value);
+  if (ref !== undefined) return `@${ref}`;
+  refs.set(value, refs.size);
+  const proto = Object.getPrototypeOf(value);
+  // A symbol or non-enumerable property would vanish from the key.
+  const own = Reflect.ownKeys(value).length;
+  if (Array.isArray(value)) {
+    if (proto !== Array.prototype) throw new TypeError("unkeyable array");
+    // Every index its own, and nothing besides them and `length`.
+    for (let index = 0; index < value.length; index++) {
+      if (!isDataProperty(value, index)) throw new TypeError("unkeyable sparse array");
+    }
+    if (own !== value.length + 1) throw new TypeError("unkeyable array");
+    return `[${value.map((item) => strictKey(item, refs)).join(",")}]`;
+  }
+  if (proto !== Object.prototype && proto !== null) throw new TypeError("unkeyable object");
+  const keys = Object.keys(value);
+  if (own !== keys.length || !keys.every((k) => isDataProperty(value, k))) {
+    throw new TypeError("unkeyable object");
+  }
+  // In enumeration order, which a guard can read.
+  return `${proto === null ? "N" : ""}{${keys
+    .map((k) => `${JSON.stringify(k)}:${strictKey((value as Record<string, unknown>)[k], refs)}`)
+    .join(",")}}`;
+}
+
+function tryKey(key: () => string): string | undefined {
+  try {
+    return key();
+  } catch {
+    return undefined;
+  }
+}
+
+// canReach's default `dedupeBy`: everything a settled step's future reads.
+// A pending invoke's input decides its request (a decision's candidates, a
+// child's start). Throws (no dedupe for that step) when a value is not plain data.
+function stepKeyParts(step: AgentStep): unknown[] {
+  const snapshot = step.snapshot as AnyMachineSnapshot & {
+    historyValue?: unknown;
+    timers?: readonly Record<string, unknown>[];
+  };
+  const children = (snapshot.children ?? {}) as Record<string, ChildRef | undefined>;
+  return [
+    snapshot.value,
+    snapshot.context,
+    snapshot.status,
+    snapshot.historyValue ?? null,
+    step.requests.map((request) => request.id),
+    pendingInvokes(step).map((invoke) => [invoke.id, invoke.src, invoke.input]),
+    Object.keys(children)
+      .sort()
+      .map((id) => [id, children[id]?.options?.input]),
+    (snapshot.timers ?? []).map((timer) => [
+      timer["id"],
+      timer["type"],
+      timer["delay"],
+      timer["event"],
+      timer["target"] === "self" ? "self" : (timer["target"] as { id?: string } | undefined)?.id,
+    ]),
+  ];
+}
+
+function defaultStepKey(step: AgentStep): string {
+  return strictKey(stepKeyParts(step));
+}
 
 // Cap on nested child-machine explorations (`children: "explore"`).
 const MAX_CHILD_NESTING = 4;
@@ -2042,6 +2138,8 @@ function explore(
   // canReach's state target matches states passed through, so it is checked
   // while coupled children are still starting; a predicate sees settled steps.
   stateTarget = false,
+  // canReach without `dedupeBy`: dedupe on every field a step's future reads.
+  defaultDedupe = false,
 ): {
   report: AgentPathReport;
   witness?: ChosenEvent[];
@@ -3322,19 +3420,8 @@ function explore(
     return `\u0003${parts.sort().join("\u0003")}`;
   };
   const stateKey = (kid: KidState): string => {
-    const snapshot = kid.step.snapshot as AnyMachineSnapshot;
     try {
-      return (
-        JSON.stringify([
-          snapshot.value,
-          snapshot.context,
-          snapshot.status,
-          (snapshot as { historyValue?: unknown }).historyValue ?? null,
-          kid.step.requests.map((request) => request.id),
-          Object.keys(snapshot.children ?? {}),
-          pumped.has(kid.step),
-        ]) + kidsKey(kid.kids)
-      );
+      return strictKey([...stepKeyParts(kid.step), pumped.has(kid.step)]) + kidsKey(kid.kids);
     } catch {
       return `\u0002${unkeyable++}`;
     }
@@ -3412,9 +3499,14 @@ function explore(
     // below it. A shallower revisit explores again: it has more depth left
     // (the depth-first walk can reach a key deep before it reaches it
     // shallow).
-    if (options.dedupeBy) {
+    const base = options.dedupeBy
+      ? options.dedupeBy(withKidSnapshots(settled.snapshot as AnyMachineSnapshot, nodeKids))
+      : defaultDedupe
+        ? tryKey(() => defaultStepKey(settled))
+        : undefined;
+    if (base !== undefined) {
       const key =
-        options.dedupeBy(withKidSnapshots(settled.snapshot as AnyMachineSnapshot, nodeKids)) +
+        base +
         (delivered?.size ? `\u0001${[...delivered].sort().join("\u0001")}` : "") +
         kidsKey(nodeKids) +
         // An ordering target's trigger is history the snapshot does not hold.
@@ -4166,6 +4258,7 @@ export async function canReach(
     false,
     ordering,
     resolvedTarget !== undefined,
+    options.dedupeBy === undefined,
   );
   if (witness !== undefined) {
     return {
