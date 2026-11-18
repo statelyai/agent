@@ -80,10 +80,16 @@ vi.mock("ai", async (importOriginal) => {
 - Each `generateText` and `streamText` call runs on the real AI SDK with the seam's `model` in place of the code's, and its `tools` wrapped with `recorder.tools`. The code's own tool loop runs.
 - A call made while `currentSeam()` returns `undefined` throws, so no test reaches a real provider.
 - A tool that has `execute` runs inside the `generateText` call. A check the code makes after the call returns comes after the tool already ran: model the order the calls happen in.
-- `recorder.model` records each provider attempt, and `effect.call` counts attempts. A failed call followed by the same request has `retriedBy` set to the call that resent it, whether the AI SDK resent it (`maxRetries`, retryable errors only) or the code did:
-  - Code with no retry of its own: skip `retriedBy` effects in the mapping, and count the code's calls yourself.
-  - Code with its own retry: skip only effects whose `error.data.isRetryable` is `true` (the SDK's attempts) and keep the rest, so the model checks the code's retry path and its call limit. Script those scenarios with errors the SDK does not retry (`isRetryable: false`).
-  - The `isRetryable` rule misreads two cases: the code passes `maxRetries: 0` and resends after a retryable error, or the code resends after the SDK's last attempt. `retriedBy` cannot tell who resent the call there. Script the code's retry scenarios as above, and list the retry path as unchecked in recordings of real runs.
+- `recorder.model` records each provider attempt, and `effect.call` counts attempts. `recordAiSdk` stamps each attempt with `aiSdkCall`, the `generateText` or `streamText` call it belongs to: attempts with the same `aiSdkCall` are one call the code made, its tool-loop steps and the SDK's retries.
+- A failed attempt followed by the same request has `retriedBy` set to the attempt that resent it. When that attempt has the same `aiSdkCall`, the SDK retried it (`maxRetries`): skip it in the mapping. When it has a different `aiSdkCall`, the code resent it: keep it, so the model checks the code's retry path and its call limit.
+
+  ```ts no-check
+  const sdkRetried = (effect: RecordedModelCall, effects: RecordedEffect[]) =>
+    effect.retriedBy !== undefined &&
+    effects.some(
+      (e) => e.kind === "model" && e.call === effect.retriedBy && e.aiSdkCall === effect.aiSdkCall,
+    );
+  ```
 
 ## Step 1: the model file
 
@@ -242,7 +248,7 @@ const report = await checkConformance(refundModel, {
 - An actor with `observes` consumes the next observation, which must be of that kind. `output` builds the actor's output from it.
 - `matches` compares the actor's input with the observation. Here, the refund the code issued must be for the order and amount the model would refund.
 - `events` sends an observation to the model as an event while the model waits, here the person's approval. Its `matches` compares the observation with the model's context: the person approved the amount the model is waiting to refund.
-- `output` checks the code's return value. The model must finish where the code returned, and `matches` compares the model's output with the recorded one. Pass it for runs where the code threw too: record the throw as the outcome (`recorder.output({ threw: error.message })` in a `catch`) and model each failure the code throws as a final state whose output `matches` compares. A model that errors instead of finishing leaves that outcome unconsumed, which deviates. A thrown run checked without `output` conforms with its outcome unchecked.
+- `output` checks the code's return value. The model must finish where the code returned, and `matches` compares the model's output with the recorded one. Pass it for runs where the code threw too: record the throw as the outcome (`recorder.output({ threw: error.message })` in a `catch`) and model each failure the code throws as a final state whose output `matches` compares. A model that errors instead of finishing leaves that outcome unconsumed, which deviates. Without `output`, a recorded throw is an `extra-observations` deviation, like a return value. Leaving the throw out of the observations leaves the outcome unchecked.
 - An actor the recording cannot see takes no `observes`. It runs unchecked and is listed in `report.unobserved`.
 - When an actor's output carries state the recording does not show, build it in `output` from the model's own `input` plus the observation.
 

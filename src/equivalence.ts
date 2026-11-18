@@ -70,12 +70,18 @@ export interface RecordedModelCall {
   error?: RecordedError;
   /**
    * This call failed, and model call `retriedBy` sent the same request after
-   * it: a retry, by the AI SDK (`maxRetries`, retryable errors only) or by
-   * the code. To read one observation per call the code made, skip effects
-   * with it set; when the code retries on its own, skip only those whose
-   * `error.data.isRetryable` is `true`.
+   * it: a retry, by the AI SDK (`maxRetries`) or by the code. Compare
+   * {@link RecordedModelCall.aiSdkCall} to tell which.
    */
   retriedBy?: number;
+  /**
+   * The 0-based `generateText` or `streamText` call this attempt belongs to,
+   * when {@link recordAiSdk} routed that call. Attempts with the same value
+   * are one call the code made: its tool-loop steps and the SDK's retries. A
+   * failed attempt whose `retriedBy` attempt has the same `aiSdkCall` was
+   * retried by the SDK; one with a different `aiSdkCall` was resent by the code.
+   */
+  aiSdkCall?: number;
   /** In replay, the recorded call (its `call`) whose answer served this one. */
   replayed?: number;
   /** In replay, `translate` adapted the recorded answer to this call. */
@@ -324,6 +330,13 @@ export interface Recorder {
   readonly recording: Recording;
 }
 
+/**
+ * Per recorder: the AI SDK call `recordAiSdk` is invoking a model method for.
+ * Set around the synchronous start of `doGenerate`/`doStream`, where the
+ * recorder creates the attempt's effect, so concurrent calls stay apart.
+ */
+const aiSdkCalls = new WeakMap<Recorder, { count: number; current?: number }>();
+
 /** What {@link recordAiSdk} routes an AI SDK call through. */
 export interface AiSdkSeam {
   recorder: Recorder;
@@ -369,9 +382,31 @@ export function recordAiSdk<TAi extends { generateText: AnyFunction; streamText?
           `recordAiSdk: ${name} was called while no run is recording. Return { recorder } from current() while the code runs.`,
         );
       }
+      let calls = aiSdkCalls.get(seam.recorder);
+      if (!calls) aiSdkCalls.set(seam.recorder, (calls = { count: 0 }));
+      const index = calls.count++;
+      const state = calls;
+      const model = (seam.model ?? options.model) as Record<string, unknown> | undefined;
+      const tagged =
+        model && typeof model === "object"
+          ? (Object.create(model) as Record<string, unknown>)
+          : model;
+      if (tagged && model) {
+        for (const method of ["doGenerate", "doStream"]) {
+          if (typeof model[method] !== "function") continue;
+          tagged[method] = (callOptions: unknown) => {
+            state.current = index;
+            try {
+              return (model[method] as (o: unknown) => unknown).call(model, callOptions);
+            } finally {
+              state.current = undefined;
+            }
+          };
+        }
+      }
       return call({
         ...options,
-        ...(seam.model !== undefined ? { model: seam.model } : {}),
+        ...(tagged !== undefined ? { model: tagged } : {}),
         ...(options.tools
           ? {
               tools: seam.recorder.tools(
@@ -659,16 +694,23 @@ export function createRecorder(options: CreateRecorderOptions = {}): Recorder {
       call: modelCalls++,
       request: toJson(omit(request, ["abortSignal", "headers", "signal"])),
     };
-    // A retry resends the request of the model call just before it, which failed.
-    const previous = [...effects].reverse().find((earlier) => earlier.kind === "model");
-    if (
-      previous?.kind === "model" &&
-      previous.error &&
-      previous.method === method &&
-      stableStringify(previous.request) === stableStringify(effect.request)
-    ) {
-      previous.retriedBy = effect.call;
-    }
+    const aiSdkCall = aiSdkCalls.get(recorder)?.current;
+    if (aiSdkCall !== undefined) effect.aiSdkCall = aiSdkCall;
+    // A retry resends the request of a model call that failed: the last
+    // attempt in the same AI SDK call when there is one (so a concurrent call
+    // in between does not hide it), otherwise the last model call.
+    const models = effects.filter((earlier) => earlier.kind === "model").reverse();
+    const resent = (earlier: RecordedModelCall | undefined) =>
+      earlier?.error !== undefined &&
+      earlier.retriedBy === undefined &&
+      earlier.method === method &&
+      stableStringify(earlier.request) === stableStringify(effect.request);
+    const sameCall =
+      aiSdkCall === undefined
+        ? undefined
+        : models.find((earlier) => earlier.aiSdkCall === aiSdkCall);
+    const previous = resent(sameCall) ? sameCall : models[0];
+    if (previous && resent(previous)) previous.retriedBy = effect.call;
     effects.push(effect);
     if (replay) {
       const replayed = nextReplayedModel(effect);
@@ -944,7 +986,7 @@ export function createRecorder(options: CreateRecorderOptions = {}): Recorder {
     return result;
   }
 
-  return {
+  const recorder: Recorder = {
     model(model) {
       const base = model as unknown as Record<string, unknown>;
       const stand = options.fallback?.model as Record<string, unknown> | undefined;
@@ -1099,6 +1141,7 @@ export function createRecorder(options: CreateRecorderOptions = {}): Recorder {
       return { version: 1 as const, effects: toJson(effects) as RecordedEffect[] };
     },
   };
+  return recorder;
 }
 
 /** Why two effects differ. */
