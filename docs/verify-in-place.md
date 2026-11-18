@@ -196,7 +196,8 @@ function toObservations(recording: Recording): Observation[] {
     if (effect.kind !== "call") return [];
     switch (effect.name) {
       case "lookupOrder":
-        return [{ kind: "lookup", order: effect.result as Order }];
+        // A call that threw carries its error, so the actor can fail with it.
+        return [{ kind: "lookup", order: effect.result as Order, error: effect.error }];
       case "decide":
         return [{ kind: "decision", decision: effect.result as Decision }];
       case "requestApproval": {
@@ -225,7 +226,11 @@ const report = await checkConformance(refundModel, {
   input: { orderId: scenario.order.orderId },
   observations: toObservations(recording),
   actors: {
-    lookupOrder: { observes: "lookup", output: ({ observation }) => observation.order },
+    lookupOrder: {
+      observes: "lookup",
+      output: ({ observation }) => observation.order,
+      error: ({ observation }) => observation.error,
+    },
     decide: { observes: "decision", output: ({ observation }) => observation.decision },
     issueRefund: {
       observes: "refund",

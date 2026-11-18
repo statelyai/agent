@@ -20,6 +20,7 @@ import {
   checkConformance,
   createRecorder,
   type ConformanceReport,
+  type RecordedError,
   type Recording,
 } from "@statelyai/agent/testing";
 import { handleRefundRequest, type Decision, type Order, type RefundEffects } from "./before.js";
@@ -110,7 +111,7 @@ export async function recordRun(
 // --- 2. Map recorded calls to observations. ---
 
 export type Observation =
-  | { kind: "lookup"; order: Order }
+  | { kind: "lookup"; order: Order; error?: RecordedError }
   | { kind: "decision"; decision: Decision }
   | { kind: "approval"; approved: boolean; amount: number }
   | { kind: "refund"; orderId: string; amount: number }
@@ -122,7 +123,14 @@ export function toObservations(recording: Recording): Observation[] {
     if (effect.kind !== "call") return [];
     switch (effect.name) {
       case "lookupOrder":
-        return [{ kind: "lookup", order: effect.result as Order }];
+        // A call that threw carries its error, so the actor can fail with it.
+        return [
+          {
+            kind: "lookup",
+            order: effect.result as Order,
+            ...(effect.error ? { error: effect.error } : {}),
+          },
+        ];
       case "decide":
         return [{ kind: "decision", decision: effect.result as Decision }];
       case "requestApproval":
@@ -155,6 +163,8 @@ export function checkRun(
         observes: "lookup",
         output: ({ observation }) =>
           (observation as Extract<Observation, { kind: "lookup" }>).order,
+        // A lookup that failed in the recording fails here too.
+        error: ({ observation }) => (observation as Extract<Observation, { kind: "lookup" }>).error,
       },
       decide: {
         observes: "decision",
