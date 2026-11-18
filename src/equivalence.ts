@@ -70,8 +70,10 @@ export interface RecordedModelCall {
   error?: RecordedError;
   /**
    * This call failed, and model call `retriedBy` sent the same request after
-   * it: a retry, by the AI SDK (`maxRetries`) or by the code. A mapping that
-   * reads one observation per call the code made skips effects with it set.
+   * it: a retry, by the AI SDK (`maxRetries`, retryable errors only) or by
+   * the code. To read one observation per call the code made, skip effects
+   * with it set; when the code retries on its own, skip only those whose
+   * `error.data.isRetryable` is `true`.
    */
   retriedBy?: number;
   /** In replay, the recorded call (its `call`) whose answer served this one. */
