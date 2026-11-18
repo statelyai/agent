@@ -370,8 +370,10 @@ type AiSdkCall = (options: {
  * `tools` wrapped with `recorder.tools`. Everything else in `"ai"` stays real,
  * so the code's own tool loop runs.
  *
- * Each model attempt a recorded model makes during the call carries the
- * call's index as {@link RecordedModelCall.aiSdkCall}.
+ * Each model attempt made during the call carries the call's index as
+ * {@link RecordedModelCall.aiSdkCall} when its model is a `recorder.model`
+ * wrapper passed as is and the recorder came from `createRecorder`. Other
+ * attempts carry no index, and who resent them is unknown.
  *
  * `current` returns the seam of the run being recorded. A call while it returns
  * `undefined` throws, so no test reaches a real provider.
