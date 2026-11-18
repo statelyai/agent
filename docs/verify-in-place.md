@@ -195,18 +195,29 @@ function toObservations(recording: Recording): Observation[] {
     if (effect.kind === "output") return [{ kind: "returned", outcome: effect.value }];
     if (effect.kind !== "call") return [];
     switch (effect.name) {
+      // A call that threw carries its error, so its actor fails with it.
       case "lookupOrder":
-        // A call that threw carries its error, so the actor can fail with it.
-        return [{ kind: "lookup", order: effect.result as Order, error: effect.error }];
+        return [
+          {
+            kind: "lookup",
+            orderId: (effect.args as [string])[0],
+            order: effect.result as Order,
+            error: effect.error,
+          },
+        ];
       case "decide":
-        return [{ kind: "decision", decision: effect.result as Decision }];
+        return [{ kind: "decision", decision: effect.result as Decision, error: effect.error }];
       case "requestApproval": {
         const [{ amount }] = effect.args as [{ amount: number }];
         return [{ kind: "approval", approved: effect.result as boolean, amount }];
       }
       case "issueRefund":
         return [
-          { kind: "refund", ...(effect.args as [{ orderId: string; amount: number }])[0] },
+          {
+            kind: "refund",
+            ...(effect.args as [{ orderId: string; amount: number }])[0],
+            error: effect.error,
+          },
         ];
       default:
         return [];
@@ -228,14 +239,20 @@ const report = await checkConformance(refundModel, {
   actors: {
     lookupOrder: {
       observes: "lookup",
+      matches: ({ input, observation }) => input === observation.orderId,
       output: ({ observation }) => observation.order,
       error: ({ observation }) => observation.error,
     },
-    decide: { observes: "decision", output: ({ observation }) => observation.decision },
+    decide: {
+      observes: "decision",
+      output: ({ observation }) => observation.decision,
+      error: ({ observation }) => observation.error,
+    },
     issueRefund: {
       observes: "refund",
       matches: ({ input, observation }) =>
         input.orderId === observation.orderId && input.amount === observation.amount,
+      error: ({ observation }) => observation.error,
     },
   },
   events: {

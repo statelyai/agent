@@ -333,6 +333,10 @@ export interface Recorder {
   readonly recording: Recording;
 }
 
+const MODEL_METADATA = ["specificationVersion", "provider", "modelId", "supportedUrls"];
+const MODEL_METHODS = ["doGenerate", "doStream", "doDecide", "doEvaluate"];
+const MODEL_KEYS = [...MODEL_METADATA, ...MODEL_METHODS];
+
 /**
  * Per recorder, what `recordAiSdk` needs from it: the model a `recorder.model`
  * wrapper wraps, a way to wrap it again for one AI SDK call, and how many AI
@@ -422,10 +426,18 @@ export function recordAiSdk<TAi extends { generateText: AnyFunction; streamText?
                 if (step?.model === undefined) return step;
                 const model = tag(seam.model ?? step.model);
                 // Only `model` changes: every other read (a `messages` getter)
-                // goes to the code's own result.
-                return new Proxy(step, {
-                  get: (target, key) =>
-                    key === "model" ? model : Reflect.get(target, key, target),
+                // goes to the code's own result. The target is a fresh object,
+                // so a frozen result's `model` does not bind the trap.
+                const own = (key: string | symbol) =>
+                  key === "model" ? model : Reflect.get(step, key, step);
+                return new Proxy({} as object, {
+                  get: (_target, key) => own(key),
+                  has: (_target, key) => key === "model" || key in step,
+                  ownKeys: () => [...new Set([...Reflect.ownKeys(step), "model"])],
+                  getOwnPropertyDescriptor: (_target, key) =>
+                    key === "model" || Object.prototype.hasOwnProperty.call(step, key)
+                      ? { value: own(key), enumerable: true, configurable: true, writable: true }
+                      : undefined,
                 });
               },
             }
@@ -1026,7 +1038,10 @@ export function createRecorder(options: CreateRecorderOptions = {}): Recorder {
   }
 
   // Each wrapper `recorder.model` made: the model it wraps, and its methods as made.
-  const wrappedModels = new WeakMap<object, { base: object; methods: Map<string, unknown> }>();
+  const wrappedModels = new WeakMap<
+    object,
+    { base: object; made: Map<string, PropertyDescriptor | undefined> }
+  >();
   function wrapModel(model: object, aiSdkCall?: number): object {
     const base = model as Record<string, unknown>;
     const stand = options.fallback?.model as Record<string, unknown> | undefined;
@@ -1034,7 +1049,7 @@ export function createRecorder(options: CreateRecorderOptions = {}): Recorder {
     // assigned over, and metadata getters read the model itself, so a getter
     // over a private field still works.
     const wrapped = Object.create(base) as Record<string, unknown>;
-    for (const key of ["specificationVersion", "provider", "modelId", "supportedUrls"]) {
+    for (const key of MODEL_METADATA) {
       if (!(key in base)) continue;
       Object.defineProperty(wrapped, key, {
         get: () => Reflect.get(base, key, base),
@@ -1044,7 +1059,7 @@ export function createRecorder(options: CreateRecorderOptions = {}): Recorder {
     }
     // Only the methods the model has: the AI SDK tells a decision model
     // (`doDecide`, or the deprecated `doEvaluate`) by which ones exist.
-    for (const method of ["doGenerate", "doStream", "doDecide", "doEvaluate"]) {
+    for (const method of MODEL_METHODS) {
       if (typeof base[method] !== "function") continue;
       const invoke = (target: Record<string, unknown>, callOptions: unknown) =>
         (target[method] as (o: unknown) => Promise<unknown>).call(target, callOptions);
@@ -1068,23 +1083,22 @@ export function createRecorder(options: CreateRecorderOptions = {}): Recorder {
     }
     wrappedModels.set(wrapped, {
       base,
-      methods: new Map(
-        ["doGenerate", "doStream", "doDecide", "doEvaluate"].map((method) => [
-          method,
-          wrapped[method],
-        ]),
+      made: new Map(
+        [...MODEL_KEYS].map((key) => [key, Object.getOwnPropertyDescriptor(wrapped, key)]),
       ),
     });
     return wrapped;
   }
 
-  // The model a wrapper wraps, unless the caller replaced one of its methods:
-  // re-wrapping that would skip the caller's method.
+  // The model a wrapper wraps, unless the caller replaced one of its methods
+  // or metadata: re-wrapping that would drop the caller's change.
   function unwrapModel(model: object): object | undefined {
     const entry = wrappedModels.get(model);
     if (!entry) return undefined;
-    const record = model as Record<string, unknown>;
-    for (const [method, made] of entry.methods) if (record[method] !== made) return undefined;
+    for (const [key, made] of entry.made) {
+      const now = Object.getOwnPropertyDescriptor(model, key);
+      if (now?.value !== made?.value || now?.get !== made?.get) return undefined;
+    }
     return entry.base;
   }
 

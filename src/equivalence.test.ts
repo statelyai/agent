@@ -1547,6 +1547,46 @@ describe("AI SDK seams", () => {
       expect((recorder.recording.effects[0] as RecordedModelCall).aiSdkCall).toBeUndefined();
     });
 
+    test("a wrapper whose metadata the caller redefined keeps it, with no aiSdkCall", async () => {
+      const recorder = createRecorder();
+      const recorded = recorder.model(
+        new MockLanguageModelV3({ doGenerate: async () => answer("ok") }),
+      );
+      Object.defineProperty(recorded, "modelId", { value: "custom-id" });
+      const seam = { recorder, model: recorded };
+      const result = await recordAiSdk({ generateText }, () => seam).generateText({
+        model: new MockLanguageModelV3(),
+        prompt: "hi",
+      });
+      expect(result.response.modelId).toBe("custom-id");
+      expect((recorder.recording.effects[0] as RecordedModelCall).aiSdkCall).toBeUndefined();
+    });
+
+    test("a frozen prepareStep result has its model replaced without a proxy error", async () => {
+      const recorder = createRecorder();
+      const seam = { recorder, model: recorder.model(scriptedModel()) };
+      const other = new MockLanguageModelV3({
+        doGenerate: async () => {
+          throw new Error("the prepareStep model was called");
+        },
+      });
+      const getWeather = tool({
+        inputSchema: z.object({ city: z.string() }),
+        execute: async ({ city }) => ({ city, sky: "sunny" }),
+      });
+      await recordAiSdk({ generateText }, () => seam).generateText({
+        model: new MockLanguageModelV3(),
+        tools: { getWeather },
+        prompt: "weather in Paris?",
+        stopWhen: stepCountIs(3),
+        prepareStep: ({ stepNumber }) =>
+          stepNumber > 0 ? Object.freeze({ model: other, system: "frozen system" }) : undefined,
+      });
+      const models = recorder.recording.effects.filter((e) => e.kind === "model");
+      expect(models.map((e) => e.aiSdkCall)).toEqual([0, 0]);
+      expect(JSON.stringify(models[1]!.request)).toContain("frozen system");
+    });
+
     test("a recorder createRecorder did not make still swaps the model and records tools", async () => {
       const recorder = createRecorder();
       const forwarding: Recorder = {

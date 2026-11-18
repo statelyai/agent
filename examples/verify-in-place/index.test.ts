@@ -153,8 +153,16 @@ describe("verify in place: a seeded regression", () => {
     const lookupOrder = recorder.fn("lookupOrder", async (_orderId: string): Promise<never> => {
       throw new Error("order not found");
     });
-    await lookupOrder("A-404").catch(() => {});
+    await lookupOrder("A-1").catch(() => {});
     const report = await checkRun(SCENARIOS[0]!, recorder.recording);
     expect(report).toMatchObject({ conforms: true, status: "error", consumed: 1 });
+
+    // A lookup of another order is a mismatch, failed or not.
+    const other = createRecorder();
+    await other.fn("lookupOrder", async (_orderId: string) => SCENARIOS[0]!.order)("A-404");
+    expect((await checkRun(SCENARIOS[0]!, other.recording)).deviation).toMatchObject({
+      reason: "input-mismatch",
+      expected: "lookupOrder",
+    });
   });
 });
