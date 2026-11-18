@@ -1461,14 +1461,97 @@ describe("AI SDK seams", () => {
       expect(effects).toHaveLength(3);
     });
 
+    const promptOf = (effect: RecordedModelCall) =>
+      JSON.stringify(effect.request).includes('"text":"a"') ? "a" : "b";
+
     test("concurrent calls keep their own index", async () => {
-      const effects = await record([], (ai) =>
-        Promise.all([
-          ai.generateText({ model, prompt: "a" }),
-          ai.generateText({ model, prompt: "b" }),
-        ]),
+      const recorder = createRecorder();
+      const seam = { recorder, model: recorder.model(flaky([])) };
+      const ai = recordAiSdk({ generateText }, () => seam);
+      await Promise.all([
+        ai.generateText({ model, prompt: "a" }),
+        ai.generateText({ model, prompt: "b" }),
+      ]);
+      const effects = recorder.recording.effects as RecordedModelCall[];
+      expect(Object.fromEntries(effects.map((e) => [promptOf(e), e.aiSdkCall]))).toEqual({
+        a: 0,
+        b: 1,
+      });
+    });
+
+    test("an SDK retry reclaims its attempt from a concurrent call that resent the same request", async () => {
+      const recorder = createRecorder();
+      const seam = { recorder, model: recorder.model(flaky([0])) };
+      const ai = recordAiSdk({ generateText }, () => seam);
+      const first = ai.generateText({ model, prompt: "a" });
+      // Starts while the first call waits to retry, with the same request.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      await ai.generateText({ model, prompt: "a" });
+      await first;
+      const effects = recorder.recording.effects as RecordedModelCall[];
+      expect(effects.map((e) => [e.call, e.aiSdkCall, e.retriedBy])).toEqual([
+        [0, 0, 2],
+        [1, 1, undefined],
+        [2, 0, undefined],
+      ]);
+    });
+  });
+
+  describe("recordAiSdk's model wrapper", () => {
+    test("works for a frozen model and for a getter over a private field", async () => {
+      class PrivateModel {
+        readonly specificationVersion = "v3" as const;
+        readonly modelId = "private";
+        readonly supportedUrls = {};
+        #provider = "private-provider";
+        get provider() {
+          return this.#provider;
+        }
+        async doGenerate() {
+          return answer(`from ${this.#provider}`);
+        }
+        async doStream(): Promise<never> {
+          throw new Error("not streamed");
+        }
+      }
+      const frozen = Object.freeze(
+        new MockLanguageModelV3({ doGenerate: async () => answer("ok") }),
       );
-      expect(effects.map((e) => e.aiSdkCall).sort()).toEqual([0, 1]);
+      for (const standIn of [frozen, new PrivateModel()]) {
+        const recorder = createRecorder();
+        const seam = { recorder, model: recorder.model(standIn as never) };
+        const result = await recordAiSdk({ generateText }, () => seam).generateText({
+          model: new MockLanguageModelV3(),
+          prompt: "hi",
+        });
+        expect(result.text).toMatch(/ok|from private-provider/);
+        expect(recorder.recording.effects).toMatchObject([{ kind: "model", aiSdkCall: 0 }]);
+      }
+    });
+
+    test("a model prepareStep returns is replaced by the seam's, tagged with the call", async () => {
+      const recorder = createRecorder();
+      const seam = { recorder, model: recorder.model(scriptedModel()) };
+      const other = new MockLanguageModelV3({
+        doGenerate: async () => {
+          throw new Error("the prepareStep model was called");
+        },
+      });
+      const getWeather = tool({
+        inputSchema: z.object({ city: z.string() }),
+        execute: async ({ city }) => ({ city, sky: "sunny" }),
+      });
+      await recordAiSdk({ generateText }, () => seam).generateText({
+        model: new MockLanguageModelV3(),
+        tools: { getWeather },
+        prompt: "weather in Paris?",
+        stopWhen: stepCountIs(3),
+        prepareStep: ({ stepNumber }) => (stepNumber > 0 ? { model: other } : undefined),
+      });
+      expect(other.doGenerateCalls).toHaveLength(0);
+      expect(
+        recorder.recording.effects.flatMap((e) => (e.kind === "model" ? [e.aiSdkCall] : [])),
+      ).toEqual([0, 0]);
     });
   });
 });
