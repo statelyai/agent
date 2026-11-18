@@ -1487,6 +1487,8 @@ describe("AI SDK seams", () => {
       // Starts while the first call waits to retry, with the same request.
       await new Promise((resolve) => setTimeout(resolve, 50));
       await ai.generateText({ model, prompt: "a" });
+      // The second call resent the first call's failed request: linked for now.
+      expect((recorder.recording.effects[0] as RecordedModelCall).retriedBy).toBe(1);
       await first;
       const effects = recorder.recording.effects as RecordedModelCall[];
       expect(effects.map((e) => [e.call, e.aiSdkCall, e.retriedBy])).toEqual([
@@ -1527,6 +1529,77 @@ describe("AI SDK seams", () => {
         expect(result.text).toMatch(/ok|from private-provider/);
         expect(recorder.recording.effects).toMatchObject([{ kind: "model", aiSdkCall: 0 }]);
       }
+    });
+
+    test("a wrapper whose method the caller replaced runs as given, with no aiSdkCall", async () => {
+      const recorder = createRecorder();
+      const recorded = recorder.model(
+        new MockLanguageModelV3({ doGenerate: async () => answer("plain") }),
+      ) as unknown as { doGenerate: (o: unknown) => Promise<ReturnType<typeof answer>> };
+      const original = recorded.doGenerate;
+      recorded.doGenerate = async (o) => ({ ...(await original(o)), ...answer("decorated") });
+      const seam = { recorder, model: recorded };
+      const result = await recordAiSdk({ generateText }, () => seam).generateText({
+        model: new MockLanguageModelV3(),
+        prompt: "hi",
+      });
+      expect(result.text).toBe("decorated");
+      expect((recorder.recording.effects[0] as RecordedModelCall).aiSdkCall).toBeUndefined();
+    });
+
+    test("a recorder createRecorder did not make still swaps the model and records tools", async () => {
+      const recorder = createRecorder();
+      const forwarding: Recorder = {
+        model: (m) => recorder.model(m),
+        openai: (c) => recorder.openai(c),
+        tool: (name, fn) => recorder.tool(name, fn),
+        tools: (t) => recorder.tools(t),
+        fn: (name, fn, o) => recorder.fn(name, fn, o),
+        client: (name, c, o) => recorder.client(name, c, o),
+        output: (v) => recorder.output(v),
+        get recording() {
+          return recorder.recording;
+        },
+      };
+      const seam = { recorder: forwarding, model: forwarding.model(scriptedModel()) };
+      const getWeather = tool({
+        inputSchema: z.object({ city: z.string() }),
+        execute: async ({ city }) => ({ city, sky: "sunny" }),
+      });
+      await recordAiSdk({ generateText }, () => seam).generateText({
+        model: new MockLanguageModelV3(),
+        tools: { getWeather },
+        prompt: "weather in Paris?",
+        stopWhen: stepCountIs(3),
+      });
+      const effects = recorder.recording.effects;
+      expect(effects.map((e) => e.kind)).toEqual(["model", "tool", "model"]);
+      expect(effects.some((e) => e.kind === "model" && e.aiSdkCall !== undefined)).toBe(false);
+    });
+
+    test("prepareStep's other settings, getters included, reach the SDK", async () => {
+      class Step {
+        constructor(readonly model: unknown) {}
+        get system() {
+          return "short system";
+        }
+      }
+      const recorder = createRecorder();
+      const seam = { recorder, model: recorder.model(scriptedModel()) };
+      const getWeather = tool({
+        inputSchema: z.object({ city: z.string() }),
+        execute: async ({ city }) => ({ city, sky: "sunny" }),
+      });
+      await recordAiSdk({ generateText }, () => seam).generateText({
+        model: new MockLanguageModelV3(),
+        tools: { getWeather },
+        prompt: "weather in Paris?",
+        stopWhen: stepCountIs(3),
+        prepareStep: ({ stepNumber }) =>
+          stepNumber > 0 ? (new Step(new MockLanguageModelV3()) as never) : undefined,
+      });
+      const second = recorder.recording.effects.filter((e) => e.kind === "model")[1]!;
+      expect(JSON.stringify(second.request)).toContain("short system");
     });
 
     test("a model prepareStep returns is replaced by the seam's, tagged with the call", async () => {

@@ -80,8 +80,9 @@ export interface RecordedModelCall {
    * are one call the code made: its tool-loop steps and the SDK's retries. A
    * failed attempt whose `retriedBy` attempt has the same `aiSdkCall` was
    * retried by the SDK; one with a different `aiSdkCall` was resent by the code.
-   * Absent when the attempt was not routed through `recordAiSdk`: who resent
-   * it is then unknown.
+   * Absent when the attempt was not routed through `recordAiSdk`, or its model
+   * was not a `recorder.model` wrapper passed as is (a proxy around one, one
+   * with a replaced method): who resent it is then unknown.
    */
   aiSdkCall?: number;
   /** In replay, the recorded call (its `call`) whose answer served this one. */
@@ -397,12 +398,15 @@ export function recordAiSdk<TAi extends { generateText: AnyFunction; streamText?
           `recordAiSdk: ${name} was called while no run is recording. Return { recorder } from current() while the code runs.`,
         );
       }
-      const internals = aiSdkInternals.get(seam.recorder)!;
-      const index = internals.calls++;
-      // Only a model this recorder wraps is re-wrapped: any other model runs as given.
+      // A recorder `createRecorder` did not make has no internals: its
+      // attempts carry no `aiSdkCall`.
+      const internals = aiSdkInternals.get(seam.recorder);
+      const index = internals ? internals.calls++ : 0;
+      // Only a model `recorder.model` returned, unchanged, is re-wrapped with
+      // the index. Any other model (a proxy, a decorated wrapper) runs as given.
       const tag = (model: unknown) => {
-        const base = internals.unwrap(model);
-        return base ? internals.wrap(base, index) : model;
+        const base = internals?.unwrap(model);
+        return base ? internals!.wrap(base, index) : model;
       };
       const model = seam.model ?? options.model;
       const prepareStep = options.prepareStep as ((...args: unknown[]) => unknown) | undefined;
@@ -413,9 +417,14 @@ export function recordAiSdk<TAi extends { generateText: AnyFunction; streamText?
           ? {
               prepareStep: async (...args: unknown[]) => {
                 const step = (await prepareStep(...args)) as { model?: unknown } | undefined;
-                return step?.model === undefined
-                  ? step
-                  : { ...step, model: tag(seam.model ?? step.model) };
+                if (step?.model === undefined) return step;
+                const model = tag(seam.model ?? step.model);
+                // Only `model` changes: every other read (a `messages` getter)
+                // goes to the code's own result.
+                return new Proxy(step, {
+                  get: (target, key) =>
+                    key === "model" ? model : Reflect.get(target, key, target),
+                });
               },
             }
           : {}),
@@ -1014,7 +1023,8 @@ export function createRecorder(options: CreateRecorderOptions = {}): Recorder {
     return result;
   }
 
-  const wrappedModels = new WeakMap<object, object>();
+  // Each wrapper `recorder.model` made: the model it wraps, and its methods as made.
+  const wrappedModels = new WeakMap<object, { base: object; methods: Map<string, unknown> }>();
   function wrapModel(model: object, aiSdkCall?: number): object {
     const base = model as Record<string, unknown>;
     const stand = options.fallback?.model as Record<string, unknown> | undefined;
@@ -1054,8 +1064,26 @@ export function createRecorder(options: CreateRecorderOptions = {}): Recorder {
         configurable: true,
       });
     }
-    wrappedModels.set(wrapped, base);
+    wrappedModels.set(wrapped, {
+      base,
+      methods: new Map(
+        ["doGenerate", "doStream", "doDecide", "doEvaluate"].map((method) => [
+          method,
+          wrapped[method],
+        ]),
+      ),
+    });
     return wrapped;
+  }
+
+  // The model a wrapper wraps, unless the caller replaced one of its methods:
+  // re-wrapping that would skip the caller's method.
+  function unwrapModel(model: object): object | undefined {
+    const entry = wrappedModels.get(model);
+    if (!entry) return undefined;
+    const record = model as Record<string, unknown>;
+    for (const [method, made] of entry.methods) if (record[method] !== made) return undefined;
+    return entry.base;
   }
 
   const recorder: Recorder = {
@@ -1195,7 +1223,7 @@ export function createRecorder(options: CreateRecorderOptions = {}): Recorder {
   aiSdkInternals.set(recorder, {
     unwrap: (model) =>
       model !== null && (typeof model === "object" || typeof model === "function")
-        ? wrappedModels.get(model)
+        ? unwrapModel(model)
         : undefined,
     wrap: wrapModel,
     calls: 0,
