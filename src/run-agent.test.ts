@@ -3262,6 +3262,88 @@ describe("restore semantics: pending requests and events-only resume", () => {
   });
 });
 
+describe("restore semantics: a snapshot without its log is checked", () => {
+  // A payout desk: review waits for APPROVE, paying invokes the payment.
+  const buildDesk = () => {
+    const paid: unknown[] = [];
+    const agent = setupAgent({
+      context: z.object({ payout: z.number().nullable() }),
+      input: z.object({}),
+      events: { APPROVE: {} },
+      states: { paying: { schemas: { context: z.object({ payout: z.number() }) } } },
+      actors: {
+        pay: createAsyncLogic({
+          run: async ({ input }: { input: { payout: unknown } }) => void paid.push(input.payout),
+        }),
+      },
+    });
+    const machine = agent.createMachine({
+      context: { payout: 10 },
+      initial: "review",
+      states: {
+        review: {
+          on: {
+            APPROVE: ({ context }) => ({
+              target: "paying",
+              context: { payout: context.payout ?? 0 },
+            }),
+          },
+        },
+        paying: {
+          invoke: {
+            src: "pay",
+            input: ({ context }) => ({ payout: context.payout }),
+            onDone: { target: "paid" },
+          },
+        },
+        paid: { type: "final" },
+      },
+    });
+    return { machine, paid };
+  };
+  const persistedReview = async (machine: ReturnType<typeof buildDesk>["machine"]) => {
+    const first = await runAgent(machine, { input: {} });
+    expect(first.snapshot.value).toBe("review");
+    return JSON.parse(JSON.stringify(first.persist())) as Record<string, any>;
+  };
+
+  test("a restored context that breaks the context schema fails the run", async () => {
+    const { machine, paid } = buildDesk();
+    const persisted = await persistedReview(machine);
+    const snapshot = { ...persisted, context: { payout: "lots" } };
+
+    await expect(
+      runAgent(machine, { snapshot: snapshot as never, event: { type: "APPROVE" } }),
+    ).rejects.toMatchObject({ name: "AgentSnapshotInvalidError", code: "snapshot-invalid" });
+    expect(paid).toEqual([]);
+  });
+
+  test("a restored context that breaks an active state's context schema fails the run", async () => {
+    const { machine, paid } = buildDesk();
+    const persisted = await persistedReview(machine);
+    // `payout: null` is valid for the machine, not for `paying`.
+    const snapshot = { ...persisted, value: "paying", context: { payout: null } };
+
+    await expect(runAgent(machine, { snapshot: snapshot as never })).rejects.toMatchObject({
+      name: "AgentSnapshotInvalidError",
+      code: "snapshot-invalid",
+      stateNodeId: expect.stringContaining("paying"),
+    });
+    expect(paid).toEqual([]);
+  });
+
+  test("a valid snapshot still resumes", async () => {
+    const { machine, paid } = buildDesk();
+    const persisted = await persistedReview(machine);
+    const result = await runAgent(machine, {
+      snapshot: persisted as never,
+      event: { type: "APPROVE" },
+    });
+    expect(result.status).toBe("done");
+    expect(paid).toEqual([10]);
+  });
+});
+
 describe("machine version prop (createMachine({ version }))", () => {
   const buildVersioned = (
     version: string,

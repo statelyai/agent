@@ -114,6 +114,7 @@ export type { AgentEventLogStore } from "./event-log-store.js";
 export {
   AgentMaxModelCallsExceededError,
   AgentSnapshotDivergedError,
+  AgentSnapshotInvalidError,
   createAgentInbox,
   createAgentRuntime,
   isAgentIdle,

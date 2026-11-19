@@ -141,6 +141,66 @@ export class AgentSnapshotDivergedError extends AgentError {
 }
 
 /**
+ * Thrown by {@link AgentRuntime.start} when the context of the snapshot a run
+ * resumes from breaks the machine's `context` schema or an active state's
+ * `schemas.context`. A live run never produces such a snapshot, so it was
+ * edited or built out of band. `stateNodeId` names the state whose schema
+ * failed, when it was a state's.
+ */
+export class AgentSnapshotInvalidError extends AgentError {
+  readonly stateNodeId?: string;
+
+  constructor(message: string, options: { stateNodeId?: string; cause?: unknown } = {}) {
+    super("snapshot-invalid", `createAgentRuntime: ${message}`, { cause: options.cause });
+    this.name = "AgentSnapshotInvalidError";
+    if (options.stateNodeId !== undefined) {
+      this.stateNodeId = options.stateNodeId;
+    }
+  }
+}
+
+// Checks a resume snapshot's context against the machine's and the active
+// states' context schemas: XState restores a snapshot as given, so a context
+// outside them would otherwise run on. A snapshot XState cannot restore at all
+// is left to the restore itself, which fails the run.
+function assertRestorableSnapshot(machine: AnyStateMachine, persisted: unknown): void {
+  let snapshot: AnyMachineSnapshot;
+  try {
+    snapshot = restoreMachineSnapshot(machine, persisted);
+  } catch {
+    return;
+  }
+  if (snapshot.status !== "active") {
+    return;
+  }
+  const checks: Array<{ schema: StandardSchemaV1 | undefined; stateNodeId?: string }> = [
+    { schema: machine.schemas?.context as StandardSchemaV1 | undefined },
+    ...snapshot.nodes
+      .filter((node) => node !== machine.root)
+      .map((node) => ({
+        schema: node.schemas?.context as StandardSchemaV1 | undefined,
+        stateNodeId: node.id,
+      })),
+  ];
+  for (const { schema, stateNodeId } of checks) {
+    if (schema === undefined) continue;
+    const result = schema["~standard"].validate(snapshot.context);
+    // An async schema cannot be checked before the run starts. Its rejection
+    // is handled so it never surfaces as an unhandled rejection.
+    if (result instanceof Promise) {
+      result.catch(() => {});
+      continue;
+    }
+    if (!result.issues) continue;
+    const where = stateNodeId === undefined ? "the machine's" : `state '${stateNodeId}''s`;
+    throw new AgentSnapshotInvalidError(
+      `the resume snapshot's context does not match ${where} context schema: ${result.issues.map((issue: { message: string }) => issue.message).join(", ")}`,
+      { ...(stateNodeId !== undefined ? { stateNodeId } : {}), cause: result.issues },
+    );
+  }
+}
+
+/**
  * The stamp {@link AgentRunResult.persist} writes onto the persisted snapshot:
  * the machine identity that produced it plus the position in the event log it
  * caches. Read back by the next resume to decide whether the snapshot can be
@@ -4129,6 +4189,10 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
             ...initMetadata,
             executionId: logExecutionId!,
           });
+      }
+
+      if (effectiveSnapshot !== undefined) {
+        assertRestorableSnapshot(logMachine, effectiveSnapshot);
       }
 
       // ─── Per-call idempotency keys (`info.callKey`) ───

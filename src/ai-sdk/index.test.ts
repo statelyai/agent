@@ -9,7 +9,7 @@ type MockStreamResult = Extract<MockDoStream, { stream: unknown }>;
 type LanguageModelStreamPart = MockStreamResult extends { stream: ReadableStream<infer P> }
   ? P
   : never;
-import { tool, type Experimental_DecisionModel } from "ai";
+import { APICallError, tool, type Experimental_DecisionModel } from "ai";
 import {
   AgentDecisionExhaustedError,
   resolveDecision,
@@ -27,7 +27,12 @@ import {
   toAiSdkTools,
   toDecisionMessages,
 } from "./mappers.js";
-import { AgentTruncatedError, createAgentRuntime, setupAgent } from "../index.js";
+import {
+  AgentTruncatedError,
+  createAgentRuntime,
+  setupAgent,
+  type AgentTextRequest,
+} from "../index.js";
 import { runToQuiescence } from "../run-agent.js";
 import type { AiSdkExecutors, AiSdkModelMap } from "./index.js";
 
@@ -1854,5 +1859,160 @@ describe("createAiSdkExecutors — decideMode", () => {
     );
     expect(result.event).toBeUndefined();
     expect(result.rejected?.reason).toContain("2 tools were called");
+  });
+});
+
+describe("createAiSdkExecutors — provider retries", () => {
+  // A retryable provider failure with a zero retry delay, so an SDK retry
+  // happens at once instead of after the SDK's exponential backoff.
+  const overloaded = () =>
+    new APICallError({
+      message: "overloaded",
+      url: "https://provider.test",
+      requestBodyValues: {},
+      statusCode: 529,
+      responseHeaders: { "retry-after-ms": "0" },
+      isRetryable: true,
+    });
+  const failing = () =>
+    new MockLanguageModelV3({
+      doGenerate: async () => {
+        throw overloaded();
+      },
+      doStream: async () => {
+        throw overloaded();
+      },
+    });
+  const calls = (model: MockLanguageModelV3) =>
+    model.doGenerateCalls.length + model.doStreamCalls.length;
+  const text = { kind: "text", id: "t1", model: "m", prompt: "hi", tools: {} } as const;
+  const structured = { ...text, outputSchema: z.object({ answer: z.string() }) };
+  const decision: AgentDecisionRequest = {
+    kind: "decision",
+    id: "d1",
+    model: "m",
+    prompt: "choose",
+    events: [{ type: "deny", toolName: "send_event_deny" }],
+    attempts: [],
+  };
+  const paths: Array<[string, (executors: AiSdkExecutors) => Promise<unknown>]> = [
+    ["generateText", (executors) => executors.generateText(text)],
+    ["structured generateText", (executors) => executors.generateText(structured)],
+    ["streamText", (executors) => executors.streamText(text)],
+    ["object-mode decide", (executors) => executors.decide(decision)],
+    ["tool-mode decide", (executors) => executors.decide({ ...decision, name: "tool" })],
+  ];
+  const decideMode = (request: AgentTextRequest | AgentDecisionRequest) =>
+    request.name === "tool" ? ("tool" as const) : ("object" as const);
+
+  test.each(paths)("%s makes one provider request by default", async (_, run) => {
+    const model = failing();
+    await expect(run(createAiSdkExecutors({ models: { m: model }, decideMode }))).rejects.toThrow();
+    expect(calls(model)).toBe(1);
+  });
+
+  test.each(paths)("%s lets the SDK retry when settings set maxRetries", async (_, run) => {
+    const model = failing();
+    await expect(
+      run(createAiSdkExecutors({ models: { m: model }, decideMode, settings: { maxRetries: 2 } })),
+    ).rejects.toThrow();
+    expect(calls(model)).toBe(3);
+  });
+
+  test.each(paths)(
+    "%s keeps the default when settings leave maxRetries undefined",
+    async (_, run) => {
+      const model = failing();
+      await expect(
+        run(
+          createAiSdkExecutors({
+            models: { m: model },
+            decideMode,
+            settings: { maxRetries: undefined },
+          }),
+        ),
+      ).rejects.toThrow();
+      expect(calls(model)).toBe(1);
+    },
+  );
+
+  // `streamText` reports every transport attempt to `onLanguageModelCallStart`;
+  // `generateText` reports none for a request that fails.
+  test("a failed request's modelCalls with SDK retries", async () => {
+    const counts: Record<string, unknown> = {};
+    for (const [name, run] of paths.slice(0, 3)) {
+      const error = await run(
+        createAiSdkExecutors({ models: { m: failing() }, decideMode, settings: { maxRetries: 2 } }),
+      ).catch((caught: unknown) => caught);
+      counts[name] = (error as { modelCalls?: number }).modelCalls;
+    }
+    expect(counts).toEqual({
+      generateText: undefined,
+      "structured generateText": undefined,
+      streamText: 3,
+    });
+  });
+
+  test("a model entry's own maxRetries wins over the default", async () => {
+    const model = failing();
+    const { generateText } = createAiSdkExecutors({
+      models: { m: { model, settings: { maxRetries: 1 } } },
+    });
+    await expect(generateText(text)).rejects.toThrow();
+    expect(calls(model)).toBe(2);
+  });
+
+  test("a decision model makes one provider request by default", async () => {
+    let requests = 0;
+    const judge: Extract<Experimental_DecisionModel, { doDecide: unknown }> = {
+      specificationVersion: "v4",
+      provider: "test",
+      modelId: "test-judge",
+      supportedQuestionTypes: ["choice"],
+      doDecide: async () => {
+        requests++;
+        throw overloaded();
+      },
+    };
+    const { decide } = createAiSdkExecutors({ models: { m: judge } });
+    await expect(decide({ ...decision, options: [{ event: { type: "deny" } }] })).rejects.toThrow();
+    expect(requests).toBe(1);
+  });
+
+  test("a machine that caps a step at 3 attempts makes 3 provider requests", async () => {
+    const model = failing();
+    const agent = setupAgent({
+      context: z.object({ attempts: z.number() }),
+      input: z.object({}),
+      models: { m: model },
+    });
+    const machine = agent.createMachine({
+      context: { attempts: 1 },
+      initial: "writing",
+      states: {
+        writing: {
+          invoke: {
+            src: "agent.generateText",
+            input: { model: "m", prompt: "hi" },
+            onDone: { target: "done" },
+            onError: ({ context }) =>
+              context.attempts < 3
+                ? { target: "writing", reenter: true, context: { attempts: context.attempts + 1 } }
+                : { target: "failed" },
+          },
+        },
+        done: { type: "final" },
+        failed: { type: "final" },
+      },
+    });
+
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, { executors: createAiSdkExecutors({ models: { m: model } }) }),
+      { input: {} },
+    );
+
+    expect(result.snapshot.value).toBe("failed");
+    expect(calls(model)).toBe(3);
+    expect(result.usage.modelCalls).toBe(3);
   });
 });
