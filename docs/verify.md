@@ -12,7 +12,7 @@ This page covers the APIs that check an agent machine before it runs. None of th
 - `simulateAgent` drives a deterministic scripted playthrough to a known outcome.
 - `explorePaths` and `canReach` enumerate decision branches and check that a target state is reachable.
 
-Use these APIs to check that an LLM-generated machine is legal before you run it. See [authoring from scratch](quickstart.md). You can also use them to confirm that a refactor preserved behavior, so a machine converted [from a loop](from-a-loop.md) is safe to ship.
+Use these APIs to check that an LLM-generated machine is legal before you run it. See [Generating machines with an LLM](generate-machines.md), and [Agent machines](machines.md) for authoring a machine by hand. You can also use them to confirm that a refactor preserved behavior, so a machine converted [from a loop](from-a-loop.md) is safe to ship.
 
 > **Note:** Everything on this page runs on `machine.config` and deterministic transition traversal, with no provider, no network, and no keys. These checks work as ordinary unit tests in any test runner, such as vitest or jest, and as CI checks.
 
@@ -591,7 +591,7 @@ import { machine } from "./machine";
 assertAgentMachine(machine); // throws AgentLintError on error-severity findings
 ```
 
-For machines authored as data, validate the config with `validateAgentConfig(config)` from `@statelyai/agent/validate` first, then compile it and lint the machine: `assertAgentMachine(setupAgent.fromConfig(config, { compileSchema }).machine)`. See [Machines as data](machines-as-data.md). Every check applies, including reachability. The lowering keeps the config's transition targets, so `unreachable-state` reads the real graph even where the JSON layer folds a target into a resolver function. `verifyAgentConfig` runs validation, lowering, lint, and exploration in one call. See [Generating machines with an LLM](generate-machines.md).
+For machines authored as data, validate the config with `validateAgentConfig(config)` from `@statelyai/agent/validate` first, then compile it and lint the machine: `assertAgentMachine(setupAgent.fromConfig(config, { compileSchema }).machine)`. See [Machines as data](machines-as-data.md). Every lint check applies. Lint does not check reachability: use `explorePaths` or `canReach` for that. `verifyAgentConfig` runs validation, lowering, and lint in one call, and exploration when `options.explore` is set. See [Generating machines with an LLM](generate-machines.md).
 
 ## Related
 

@@ -193,7 +193,8 @@ An observation is one thing the run did, in the model's terms. Map the recording
 function toObservations(recording: Recording): Observation[] {
   return recording.effects.flatMap((effect): Observation[] => {
     if (effect.kind === "output") return [{ kind: "returned", outcome: effect.value }];
-    if (effect.kind !== "call") return [];
+    // An effect the mapping does not know is kept, so the check reports it.
+    if (effect.kind !== "call") return [{ kind: `unmapped:${effect.kind}` }];
     switch (effect.name) {
       // A call that threw carries its error, so its actor fails with it.
       case "lookupOrder":
@@ -220,11 +221,13 @@ function toObservations(recording: Recording): Observation[] {
           },
         ];
       default:
-        return [];
+        return [{ kind: `unmapped:${effect.name}`, args: effect.args }];
     }
   });
 }
 ```
+
+Never drop an effect the mapping does not know. Map it to an `unmapped:<name>` observation instead. No actor or event observes that kind, so `checkConformance` reports it as a deviation (`unexpected-observation` or `extra-observations`), and a call the code added after the mapping was written cannot pass unchecked.
 
 Keep the mapping to what the call shows. Do not decide in the mapping what the code should have done next: that is the model's job, and a mapping that repeats the code's logic makes the check pass for any run.
 
@@ -288,6 +291,8 @@ coverage.unvisitedHandlers; // transitions no recorded run took
 ```
 
 An unvisited state or handler is a part of the model no recorded run exercised. Add a scenario that reaches it, or confirm that it cannot happen in production.
+
+A choice state (a `type: "choice"` state, or one that leaves only through eventless `always` transitions) is listed in `coverage.unobservable` as `{ state, event: "always" }`, not in `unvisitedHandlers`. A trace records one step per macrostep, so it does not show which branch a run took. The branches inside a choice state are not covered: a branch no run took is not reported. To check that each branch is reachable, prove it with `canReach` in step 2, with a target only that branch reaches: a state or context value the branch sets. Reaching the branch's target state proves nothing when another branch or route also leads there.
 
 ## A regression, caught
 

@@ -115,7 +115,8 @@ export type Observation =
   | { kind: "decision"; decision: Decision; error?: RecordedError }
   | { kind: "approval"; approved: boolean; amount: number }
   | { kind: "refund"; orderId: string; amount: number; error?: RecordedError }
-  | { kind: "returned"; outcome: unknown };
+  | { kind: "returned"; outcome: unknown }
+  | { kind: `unmapped:${string}`; args?: unknown };
 
 export function toObservations(recording: Recording): Observation[] {
   // A call that threw carries its error, so its actor fails with it.
@@ -123,7 +124,8 @@ export function toObservations(recording: Recording): Observation[] {
     effect.error ? { error: effect.error } : {};
   return recording.effects.flatMap((effect): Observation[] => {
     if (effect.kind === "output") return [{ kind: "returned", outcome: effect.value }];
-    if (effect.kind !== "call") return [];
+    // An effect the mapping does not know is kept, so the check reports it.
+    if (effect.kind !== "call") return [{ kind: `unmapped:${effect.kind}` }];
     switch (effect.name) {
       case "lookupOrder":
         return [
@@ -153,7 +155,7 @@ export function toObservations(recording: Recording): Observation[] {
           },
         ];
       default:
-        return [];
+        return [{ kind: `unmapped:${effect.name}`, args: effect.args }];
     }
   });
 }
