@@ -1,5 +1,26 @@
 # @statelyai/agent
 
+## 2.0.0-alpha.41
+
+### Minor Changes
+
+- [#252](https://github.com/statelyai/agent/pull/252) [`4a3a10b`](https://github.com/statelyai/agent/commit/4a3a10b192a895b569c4cc1f2346dd14b6279082) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Add `checkConformance` to `@statelyai/agent/testing`. It checks a recorded run of existing code against a model of that code. The model runs with each actor answered from the recording's observations, and the report names the first deviation (`unexpected-observation`, `missing-observation`, `input-mismatch`, `extra-observations`, `ignored-event`, or `unmapped-actor`) with the model's state, plus the actors the recording could not observe. Pass the reports' `trace` to `traceCoverage` for the states no recorded run reached.
+  
+  - `output: { observes, matches }` checks the code's recorded return value against the model's output (`output-mismatch`).
+  - An `events` entry can be `{ event, matches }`, which compares the observation with the model's context before sending it, such as the draft a person approved.
+  - `recordAiSdk(ai, current)` records AI SDK code that builds its model inline or passes module-level tools to `generateText`: mock `"ai"` with it, and each `generateText` and `streamText` call uses the seam's model and records its tools.
+  - A model effect from `recorder.model` that failed and was retried with the same request has `retriedBy`, so a mapping can read one observation per call the code made.
+  
+  The new [Verify in place](https://github.com/statelyai/agent/blob/next/docs/verify-in-place.md) guide and `examples/verify-in-place` walk through the track: a model of an unchanged refund loop, proofs, recorded runs checked against the model, coverage, and a seeded regression caught.
+
+- [#255](https://github.com/statelyai/agent/pull/255) [`7ef9389`](https://github.com/statelyai/agent/commit/7ef9389f726920462d9f769666ee561a092dbf16) Thanks [@davidkpiano](https://github.com/davidkpiano)! - `recordAiSdk` stamps each recorded model attempt with `aiSdkCall`, the index of the `generateText` or `streamText` call it belongs to. Attempts with the same `aiSdkCall` are one call the code made (its tool-loop steps and the SDK's retries), so a mapping can tell a retry by the SDK (the `retriedBy` attempt has the same `aiSdkCall`) from a resend by the code (a different one), including with `maxRetries: 0` and after the SDK's last attempt. Steps that use a model from `prepareStep` run on the seam's model and carry the same `aiSdkCall`. `recorder.model` now wraps frozen models, and reads metadata getters such as `provider` on the model itself.
+  
+  The Verify in place guide now checks a run where the code threw with `output`, by recording the throw as the outcome, instead of leaving its outcome unchecked.
+
+### Patch Changes
+
+- [#253](https://github.com/statelyai/agent/pull/253) [`d9101a0`](https://github.com/statelyai/agent/commit/d9101a08e5d9b019561fbbeeadbde2bfab634655) Thanks [@davidkpiano](https://github.com/davidkpiano)! - `canReach` without `dedupeBy` now deduplicates on a default key (state value, context, status, history, pending requests and invoke inputs, children and their inputs, armed timers, coupled children's states). An `interleave: "pending"` search that explored every interleaving now finishes, and a loop over finitely many states is a complete search. A step whose context is not plain data is not deduplicated. `explorePaths` is unchanged.
+
 ## 2.0.0-alpha.40
 
 ### Patch Changes
