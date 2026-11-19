@@ -251,11 +251,10 @@ function isModelWithSettings(
   return typeof entry === "object" && entry !== null && "model" in entry;
 }
 
-// Every SDK call starts from `maxRetries: 0`, under the host's settings: a
-// retry belongs to the machine, where it is counted in `modelCalls` and
-// covered by proofs. A host that sets `maxRetries` lets the SDK retry, and
-// those requests are not counted.
-const noProviderRetries = { maxRetries: 0 } as const;
+// Every SDK call gets `maxRetries: 0` unless the host sets a number: a retry
+// belongs to the machine, where it is counted in `modelCalls` and covered by
+// proofs. A host that sets `maxRetries` lets the SDK retry, and those requests
+// are not counted. An undefined host value keeps the 0.
 
 // Wraps an AI SDK Output spec so a parse failure retries once against the
 // repaired text (first complete JSON value) before surfacing the original
@@ -418,8 +417,8 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
     const common = {
       model,
       abortSignal: info?.signal,
-      ...noProviderRetries,
       ...settings,
+      maxRetries: settings.maxRetries ?? 0,
       onLanguageModelCallStart: (event: LanguageModelCallStartEvent) => {
         calls++;
         return settings.onLanguageModelCallStart?.(event);
@@ -507,8 +506,8 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
     const result = aiStreamText({
       model,
       abortSignal: info?.signal,
-      ...noProviderRetries,
       ...settings,
+      maxRetries: settings.maxRetries ?? 0,
       onLanguageModelCallStart: (event) => {
         calls++;
         return settings.onLanguageModelCallStart?.(event);
@@ -566,8 +565,8 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
     const result = await aiGenerateText({
       model,
       abortSignal: info?.signal,
-      ...noProviderRetries,
       ...settings,
+      maxRetries: settings.maxRetries ?? 0,
       providerOptions: withParallelToolCallsOff(settings.providerOptions),
       onLanguageModelCallEnd: (event) => {
         callEnd = event;
@@ -659,8 +658,8 @@ async function decideWithObject(
   const result = await aiGenerateText({
     model,
     abortSignal: info?.signal,
-    ...noProviderRetries,
     ...settings,
+    maxRetries: settings.maxRetries ?? 0,
     // `@ai-sdk/openai` sends schemas strict by default, and strict mode rejects
     // the decision schema's open payload branches. Host keys still win.
     providerOptions: {

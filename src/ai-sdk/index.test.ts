@@ -1919,6 +1919,20 @@ describe("createAiSdkExecutors — provider retries", () => {
     expect(calls(model)).toBe(3);
   });
 
+  test.each(paths)("%s keeps the default when settings leave maxRetries undefined", async (_, run) => {
+    const model = failing();
+    await expect(
+      run(
+        createAiSdkExecutors({
+          models: { m: model },
+          decideMode,
+          settings: { maxRetries: undefined },
+        }),
+      ),
+    ).rejects.toThrow();
+    expect(calls(model)).toBe(1);
+  });
+
   test("a model entry's own maxRetries wins over the default", async () => {
     const model = failing();
     const { generateText } = createAiSdkExecutors({
