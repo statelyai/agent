@@ -228,19 +228,6 @@ function resolveLanguageModel<TModels extends AiSdkModelMap>(
   return { model, ...(settings ? { settings } : {}) };
 }
 
-/**
- * The `LanguageModel` inside a map entry, whichever form it takes. `AiSdkModelMap`
- * widens its return to {@link AiSdkModelMap}, so reading an entry out of the map
- * to hand to a raw AI SDK call needs this to get past the union. Throws for a
- * decision model.
- */
-export function toLanguageModel(entry: AiSdkModelEntry): LanguageModel {
-  if (isDecisionModel(entry)) {
-    throw new TypeError("toLanguageModel: the entry is a decision model, not a language model.");
-  }
-  return isModelWithSettings(entry) ? entry.model : entry;
-}
-
 // A `{ model, settings }` pair, as opposed to a bare `LanguageModel`. In v7 a
 // `LanguageModel` is a provider model-id string or a `LanguageModelV2`/`V3`/`V4`
 // object, and none of those carries a `model` property of its own, so the key's

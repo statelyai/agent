@@ -9,15 +9,14 @@ import {
   type DecisionAttempt,
 } from "./decision.js";
 import {
-  AGENT_EVENT_SCHEMA_VERSION,
   AgentEventLogError,
   assertAgentLogEntry,
   createInMemoryEventLogStore,
   getDecisionAttempts,
-  getSnapshotStateHash,
   replay,
   type AgentLogEntry,
 } from "./log/index.js";
+import { AGENT_EVENT_SCHEMA_VERSION, getSnapshotStateHash } from "./event-log.js";
 import { createAgentRuntime, runToQuiescence } from "./run-agent.js";
 import { createAgentSchemas, setupAgent } from "./setup-agent.js";
 import type { ChosenEvent } from "./types.js";
