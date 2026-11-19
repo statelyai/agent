@@ -288,8 +288,8 @@ export async function main() {
     refundMachine,
     (snapshot) =>
       snapshot.matches("issued") &&
-      (snapshot.context as { amount: number; approved: boolean }).amount > APPROVAL_THRESHOLD &&
-      !(snapshot.context as { amount: number; approved: boolean }).approved,
+      snapshot.context.amount > APPROVAL_THRESHOLD &&
+      !snapshot.context.approved,
     { input: LARGE },
   );
   console.log(

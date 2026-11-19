@@ -461,7 +461,7 @@ async function checkExplore(
     }
     if (report.hitPathCap) {
       problems.add(
-        `${at}a cap (maxPaths ${options.maxPaths ?? 200} or maxNodes ${options.maxNodes ?? 100_000}) cut exploration short; the workflow branches too much to verify`,
+        `${at}a cap (maxPaths ${options.maxPaths ?? 10_000} or maxNodes ${options.maxNodes ?? 100_000}) cut exploration short; the workflow branches too much to verify`,
       );
     }
     for (const note of report.unexplored) {

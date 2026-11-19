@@ -251,7 +251,7 @@ describe("verifyAgentConfig", () => {
     );
     expect(result.gates.at(-1)).toMatchObject({ name: "explore", ok: false });
     expect(result.gates.at(-1)!.detail).toContain(
-      "a cap (maxPaths 200 or maxNodes 1) cut exploration short",
+      "a cap (maxPaths 10000 or maxNodes 1) cut exploration short",
     );
   });
 

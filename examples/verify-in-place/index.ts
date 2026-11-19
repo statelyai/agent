@@ -173,50 +173,38 @@ export function checkRun(
       lookupOrder: {
         observes: "lookup",
         // The code looked up the order the model looks up.
-        matches: ({ input, observation }) =>
-          input === (observation as Extract<Observation, { kind: "lookup" }>).orderId,
-        output: ({ observation }) =>
-          (observation as Extract<Observation, { kind: "lookup" }>).order,
+        matches: ({ input, observation }) => input === observation.orderId,
+        output: ({ observation }) => observation.order,
         // A lookup that failed in the recording fails here too.
-        error: ({ observation }) => (observation as Extract<Observation, { kind: "lookup" }>).error,
+        error: ({ observation }) => observation.error,
       },
       decide: {
         observes: "decision",
-        output: ({ observation }) =>
-          (observation as Extract<Observation, { kind: "decision" }>).decision,
-        error: ({ observation }) =>
-          (observation as Extract<Observation, { kind: "decision" }>).error,
+        output: ({ observation }) => observation.decision,
+        error: ({ observation }) => observation.error,
       },
       issueRefund: {
         observes: "refund",
         // The refund the code issued must be the one the model would issue.
         matches: ({ input, observation }) => {
-          const refund = observation as Extract<Observation, { kind: "refund" }>;
           const expected = input as { orderId: string; amount: number };
-          return expected.orderId === refund.orderId && expected.amount === refund.amount;
+          return expected.orderId === observation.orderId && expected.amount === observation.amount;
         },
-        error: ({ observation }) => (observation as Extract<Observation, { kind: "refund" }>).error,
+        error: ({ observation }) => observation.error,
       },
     },
     events: {
       approval: {
-        event: (observation) => ({
-          type: (observation as Extract<Observation, { kind: "approval" }>).approved
-            ? "APPROVE"
-            : "REJECT",
-        }),
+        event: (observation) => ({ type: observation.approved ? "APPROVE" : "REJECT" }),
         // The person approved the amount the model is waiting to refund.
-        matches: ({ observation, context }) =>
-          (observation as Extract<Observation, { kind: "approval" }>).amount ===
-          (context as { amount: number }).amount,
+        matches: ({ observation, context }) => observation.amount === context.amount,
       },
     },
     // The outcome the code returned is the one the model ends with.
     output: {
       observes: "returned",
       matches: ({ output, observation }) =>
-        (output as { outcome: string }).outcome ===
-        (observation as Extract<Observation, { kind: "returned" }>).outcome,
+        (output as { outcome: string }).outcome === observation.outcome,
     },
   });
 }

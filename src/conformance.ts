@@ -11,12 +11,20 @@ import {
   createAsyncLogic,
   type AnyActorLogic,
   type AnyStateMachine,
+  type ContextFrom,
   type EventObject,
+  type InputFrom,
+  type OutputFrom,
   type StateValue,
 } from "xstate";
 import { AgentError } from "./errors.js";
+import { parseAgentEvent } from "./events.js";
+import { isRecord } from "./internal/is-record.js";
 import { getRegisteredAgentExecutionOptions } from "./internal/registry.js";
 import { runAgent, type AgentRunOptions, type AgentTraceEvent } from "./run-agent.js";
+import { isTextLogic } from "./text-logic.js";
+import type { StandardSchemaV1 } from "./types.js";
+import { isStandardSchema, validateSchemaSync } from "./utils.js";
 
 /** One thing a recorded run did, as the model reads it. `kind` names what it is. */
 export interface ConformanceObservation {
@@ -24,44 +32,77 @@ export interface ConformanceObservation {
 }
 
 /** What a {@link ConformanceActor} callback receives. */
-export interface ConformanceActorArgs<TObservation extends ConformanceObservation> {
-  /** The actor's input, as the model computed it. */
-  input: unknown;
-  /** The observation this actor consumed, or `undefined` for an actor with no `observes`. */
-  observation: TObservation | undefined;
+export interface ConformanceActorArgs<
+  TObservation extends ConformanceObservation,
+  TInput = unknown,
+  TConsumed = TObservation | undefined,
+> {
+  /** The actor's input, as the model computed it. Typed from the actor's input schema. */
+  input: TInput;
+  /**
+   * The observation this actor consumed, of its `observes` kind, or
+   * `undefined` for an actor with no `observes`.
+   */
+  observation: TConsumed;
   /** Every observation of the run, in order. */
   observations: readonly TObservation[];
   /** The index of the next observation not yet consumed. */
   index: number;
 }
 
-/** How one of the model's actors is answered from the recording. */
-export interface ConformanceActor<TObservation extends ConformanceObservation> {
-  /**
-   * The observation kind this actor consumes. When the model starts the actor,
-   * the next observation must be of this kind, or the run deviates. Omit it for
-   * work the recording cannot see: the actor then consumes nothing and is
-   * listed in {@link ConformanceReport.unobserved}.
-   */
-  observes?: string;
+/** The observations of one kind. A union whose members do not narrow by `kind` is kept whole. */
+export type ConformanceObservationOfKind<
+  TObservation extends ConformanceObservation,
+  TKind extends string,
+> = [Extract<TObservation, { kind: TKind }>] extends [never]
+  ? TObservation
+  : Extract<TObservation, { kind: TKind }>;
+
+interface ConformanceActorCallbacks<
+  TObservation extends ConformanceObservation,
+  TInput,
+  TConsumed,
+> {
   /** Return `false` when the actor's input does not fit the observation: an `input-mismatch` deviation. */
-  matches?: (args: ConformanceActorArgs<TObservation>) => boolean;
+  matches?: (args: ConformanceActorArgs<TObservation, TInput, TConsumed>) => boolean;
   /**
    * The actor's output, which the model's `onDone` reads. Build it from the
    * observation, and from the model's own `input` for state the recording does
-   * not show. Default: `undefined`.
+   * not show. A value the actor's output schema rejects is an `invalid-output`
+   * deviation. Default: `undefined`.
    */
-  output?: (args: ConformanceActorArgs<TObservation>) => unknown;
+  output?: (args: ConformanceActorArgs<TObservation, TInput, TConsumed>) => unknown;
   /** Return a value to reject the actor with it, for work that failed in the recording. */
-  error?: (args: ConformanceActorArgs<TObservation>) => unknown;
+  error?: (args: ConformanceActorArgs<TObservation, TInput, TConsumed>) => unknown;
 }
 
+/**
+ * How one of the model's actors is answered from the recording. `observes`
+ * is the observation kind this actor consumes: when the model starts the
+ * actor, the next observation must be of this kind, or the run deviates, and
+ * the callbacks receive it narrowed to that kind. Omit it for work the
+ * recording cannot see: the actor then consumes nothing and is listed in
+ * {@link ConformanceReport.unobserved}.
+ */
+export type ConformanceActor<TObservation extends ConformanceObservation, TInput = unknown> =
+  | {
+      [TKind in TObservation["kind"]]: { observes: TKind } & ConformanceActorCallbacks<
+        TObservation,
+        TInput,
+        ConformanceObservationOfKind<TObservation, TKind>
+      >;
+    }[TObservation["kind"]]
+  | ({ observes?: undefined } & ConformanceActorCallbacks<TObservation, TInput, undefined>);
+
 /** What a {@link ConformanceEvent} `matches` receives. */
-export interface ConformanceEventArgs<TObservation extends ConformanceObservation> {
+export interface ConformanceEventArgs<
+  TObservation extends ConformanceObservation,
+  TContext = unknown,
+> {
   /** The observation the event comes from. */
   observation: TObservation;
   /** The model's context while it waited for the event. */
-  context: unknown;
+  context: TContext;
   /** The model's state value while it waited for the event. */
   state: StateValue;
 }
@@ -71,22 +112,45 @@ export interface ConformanceEventArgs<TObservation extends ConformanceObservatio
  * the `event` alone. Add `matches` to compare the observation with what the
  * model holds, such as the draft a person approved against the draft in context.
  */
-export type ConformanceEvent<TObservation extends ConformanceObservation> =
+export type ConformanceEvent<TObservation extends ConformanceObservation, TContext = unknown> =
   | ((observation: TObservation) => EventObject)
   | {
       event: (observation: TObservation) => EventObject;
       /** Return `false` when the observation does not fit the model's state: an `input-mismatch` deviation. */
-      matches?: (args: ConformanceEventArgs<TObservation>) => boolean;
+      matches?: (args: ConformanceEventArgs<TObservation, TContext>) => boolean;
     };
 
-/** How the code's recorded return value is checked against the model's output. */
-export interface ConformanceOutput<TObservation extends ConformanceObservation> {
-  /**
-   * The observation kind of the code's return value. When the model finishes,
-   * the next observation must be of this kind, or the run deviates.
-   */
+/**
+ * How the code's recorded return value is checked against the model's output.
+ * `observes` is the observation kind of the code's return value: when the
+ * model finishes, the next observation must be of this kind, or the run
+ * deviates.
+ */
+export type ConformanceOutput<TObservation extends ConformanceObservation, TOutput = unknown> = {
+  [TKind in TObservation["kind"]]: {
+    observes: TKind;
+    /** Return `false` when the model's output does not fit the recorded one: an `output-mismatch` deviation. */
+    matches?: (args: {
+      output: TOutput;
+      observation: ConformanceObservationOfKind<TObservation, TKind>;
+    }) => boolean;
+  };
+}[TObservation["kind"]];
+
+// The actor logic a machine declares per src; any src for an untyped machine.
+type ActorMapOf<TMachine> = TMachine extends { _actorMap: infer TActorMap }
+  ? TActorMap
+  : Record<string, unknown>;
+
+// The options as the check reads them, before narrowing by kind.
+interface LooseActor<TObservation extends ConformanceObservation> {
+  observes?: string;
+  matches?: (args: ConformanceActorArgs<TObservation>) => boolean;
+  output?: (args: ConformanceActorArgs<TObservation>) => unknown;
+  error?: (args: ConformanceActorArgs<TObservation>) => unknown;
+}
+interface LooseOutput<TObservation extends ConformanceObservation> {
   observes: string;
-  /** Return `false` when the model's output does not fit the recorded one: an `output-mismatch` deviation. */
   matches?: (args: { output: unknown; observation: TObservation }) => boolean;
 }
 
@@ -103,20 +167,31 @@ export interface CheckConformanceOptions<
    * One entry per actor source the model invokes, keyed by `src`. An invoked
    * src with no entry is an `unmapped-actor` deviation.
    */
-  actors: Record<string, ConformanceActor<TObservation>>;
+  actors: NoInfer<{
+    [TSrc in keyof ActorMapOf<TMachine> & string]?: ConformanceActor<
+      TObservation,
+      InputFrom<ActorMapOf<TMachine>[TSrc]>
+    >;
+  }>;
   /**
    * Observations the model receives as events, keyed by kind. When the model
    * settles idle and the next observation has one of these kinds, it is
-   * consumed and sent, and the run resumes.
+   * consumed and sent, and the run resumes. An event whose payload the
+   * machine's event schema rejects is an `invalid-event` deviation.
    */
-  events?: Record<string, ConformanceEvent<TObservation>>;
+  events?: NoInfer<{
+    [TKind in TObservation["kind"]]?: ConformanceEvent<
+      ConformanceObservationOfKind<TObservation, TKind>,
+      ContextFrom<TMachine>
+    >;
+  }>;
   /**
    * Checks the code's return value. Map the recording's `output` effect to an
    * observation of kind `observes`: the model must finish there, and `matches`
    * compares its output with that observation. Without it, a recorded return
    * value is an `extra-observations` deviation like any other.
    */
-  output?: ConformanceOutput<TObservation>;
+  output?: NoInfer<ConformanceOutput<TObservation, OutputFrom<TMachine>>>;
 }
 
 /** Why a run deviated from the model. */
@@ -127,6 +202,10 @@ export type ConformanceDeviationReason =
   | "missing-observation"
   /** An actor's or event's `matches` returned `false` for the observation. */
   | "input-mismatch"
+  /** An actor's `output` returned a value its declared output schema rejects. */
+  | "invalid-output"
+  /** An event built from an observation has a payload the machine's event schema rejects. */
+  | "invalid-event"
   /** The model finished, and `output.matches` returned `false` for the recorded return value. */
   | "output-mismatch"
   /** The model finished or settled idle, and the recording continues. */
@@ -149,6 +228,8 @@ export interface ConformanceDeviation<TObservation extends ConformanceObservatio
   state: StateValue;
   /** The actor's input, for an actor deviation. */
   actorInput?: unknown;
+  /** The schema's error message, for an `invalid-output` or `invalid-event` deviation. */
+  schemaError?: string;
 }
 
 /** The result of {@link checkConformance}. */
@@ -189,12 +270,54 @@ function inlineInvokeStates(machine: AnyStateMachine): string[] {
   return found.sort();
 }
 
+// The actor logic a run binds per src: the machine's own (post-provide)
+// sources, as the runtime resolves them, over the setup pack's actors.
+function actorLogics(machine: AnyStateMachine): Record<string, unknown> {
+  return {
+    ...(getRegisteredAgentExecutionOptions(machine).actors as Record<string, unknown> | undefined),
+    ...(machine as { sources?: { actors?: Record<string, unknown> } }).sources?.actors,
+  };
+}
+
 function actorSources(machine: AnyStateMachine): string[] {
-  const actors =
-    (getRegisteredAgentExecutionOptions(machine).actors as Record<string, unknown> | undefined) ??
-    (machine as { sources?: { actors?: Record<string, unknown> } }).sources?.actors ??
-    {};
-  return Object.keys(actors);
+  return Object.keys(actorLogics(machine));
+}
+
+// The schema error for an actor output, or `undefined` when it fits. Async
+// logic declares `schemas.output` for the whole output; text logic declares it
+// for the `result` of its `{ result, messages }` output.
+function outputSchemaError(logic: unknown, output: unknown): string | undefined {
+  const check = (schema: unknown, value: unknown): string | undefined => {
+    if (!isStandardSchema(schema)) return undefined;
+    try {
+      validateSchemaSync(schema as StandardSchemaV1, value);
+      return undefined;
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
+    }
+  };
+  if (isTextLogic(logic)) {
+    return isRecord(output) && "result" in output
+      ? check(logic.schemas.output, output.result)
+      : "expected text logic output { result, messages }";
+  }
+  return check(
+    (logic as { config?: { schemas?: { output?: unknown } } }).config?.schemas?.output,
+    output,
+  );
+}
+
+// The event schemas a machine declares: the pack `setupAgent` registered, else
+// a plain machine's own `schemas.events`.
+function eventSchemasOf(machine: AnyStateMachine): Record<string, StandardSchemaV1> | undefined {
+  return ((
+    getRegisteredAgentExecutionOptions(machine).schemas as
+      | { events?: Record<string, StandardSchemaV1> }
+      | undefined
+  )?.events ??
+    (machine.schemas as { events?: Record<string, StandardSchemaV1> } | undefined)?.events) as
+    | Record<string, StandardSchemaV1>
+    | undefined;
 }
 
 /**
@@ -237,7 +360,12 @@ export async function checkConformance<
   machine: TMachine,
   options: CheckConformanceOptions<TMachine, TObservation>,
 ): Promise<ConformanceReport<TObservation>> {
-  const { observations, actors: specs, events = {} } = options;
+  const { observations } = options;
+  const specs = options.actors as Record<string, LooseActor<TObservation> | undefined>;
+  const events = (options.events ?? {}) as Record<
+    string,
+    ConformanceEvent<TObservation> | undefined
+  >;
   const inline = inlineInvokeStates(machine);
   if (inline.length > 0) {
     throw new AgentError(
@@ -283,6 +411,7 @@ export async function checkConformance<
     reason: ConformanceDeviationReason,
     expected: string,
     actorInput?: unknown,
+    schemaError?: string,
   ): Promise<never> => {
     deviation ??= {
       reason,
@@ -291,12 +420,14 @@ export async function checkConformance<
       observed: observations[index],
       state,
       ...(actorInput !== undefined ? { actorInput } : {}),
+      ...(schemaError !== undefined ? { schemaError } : {}),
     };
     controller.abort();
     return NEVER;
   };
 
-  const answer = (src: string, spec: ConformanceActor<TObservation> | undefined): AnyActorLogic =>
+  const logics = actorLogics(machine);
+  const answer = (src: string, spec: LooseActor<TObservation> | undefined): AnyActorLogic =>
     createAsyncLogic({
       run: async ({ input }: { input: unknown }) => {
         if (deviation || callbackError) return NEVER;
@@ -332,7 +463,14 @@ export async function checkConformance<
         const error = call("error", () => spec.error?.(args));
         if (error === NEVER) return NEVER;
         if (error !== undefined) throw error;
-        return call("output", () => spec.output?.(args));
+        const output = call("output", () => spec.output?.(args));
+        if (output === NEVER) return NEVER;
+        const schemaError = outputSchemaError(logics[src], output);
+        if (schemaError !== undefined) {
+          index -= observation ? 1 : 0;
+          return deviate("invalid-output", src, input, schemaError);
+        }
+        return output;
       },
     });
 
@@ -376,7 +514,23 @@ export async function checkConformance<
       };
       break;
     }
-    const event = callback(`events.${next.kind}`, () => toEvent(next));
+    const mapped = callback(`events.${next.kind}`, () => toEvent(next));
+    let event: unknown;
+    try {
+      // Parsed as a host parses at the boundary: the model gets the event
+      // with its schema's defaults and transforms applied.
+      event = parseAgentEvent(machine, mapped, { events: eventSchemasOf(machine) });
+    } catch (error) {
+      deviation = {
+        reason: "invalid-event",
+        index,
+        expected: `event ${next.kind}`,
+        observed: next,
+        state,
+        schemaError: error instanceof Error ? error.message : String(error),
+      };
+      break;
+    }
     // Consumed before the run: actors the event starts read the next observation.
     index += 1;
     result = await runAgent(machine, {
@@ -398,7 +552,7 @@ export async function checkConformance<
   }
 
   if (callbackError) throw callbackError;
-  const outputSpec = options.output;
+  const outputSpec = options.output as LooseOutput<TObservation> | undefined;
   const last = observations[index];
   if (!deviation && outputSpec && result.status === "done" && last === undefined) {
     deviation = {

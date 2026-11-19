@@ -201,7 +201,7 @@ const report = await explorePaths(refundMachine, {
 Exploration is bounded by three limits per search, plus a [budget](#budgets) for the whole call:
 
 - `maxDepth`: branch points along any path. Default 8.
-- `maxPaths`: terminals in the report. Default 200.
+- `maxPaths`: terminals in the report. Default 10,000.
 - `maxNodes`: branch points expanded in total. Default 100,000. It bounds work and memory on a loopy machine, which expands many nodes per terminal.
 
 `report.hitPathCap` is true when `maxPaths` or `maxNodes` cut exploration short. `report.partial` is true when any cap or the budget did, and `report.complete` is true only when the report covers every path.
@@ -440,7 +440,7 @@ Set `budget.ms` under the test runner's timeout, so a long search fails its asse
 `canReach(machine, target, opts)` wraps `explorePaths` to answer whether a target is reachable, with a witness path when it is. The target (`CanReachTarget`) is one of:
 
 - A state path or state-node ID.
-- A snapshot predicate, `(snapshot) => boolean`, for a property no single state names: a context invariant, a tag, a state plus context.
+- A snapshot predicate, `(snapshot) => boolean`, for a property no single state names: a context invariant, a tag, a state plus context. `snapshot` is the machine's own snapshot type, so `snapshot.context` is typed. `payloads` and `dedupeBy` receive the same type, except where a child search also calls them with a child's snapshot: `payloads` under `children: "explore"` or `"coupled"`, and `dedupeBy` under `children: "explore"`. There they receive `TSnapshot | ExploreSnapshot`. Tell the two apart with `snapshot.machine.id`.
 - An ordering, `{ after, reach }`, for a rule about order: "no turn starts after STOP". See [Ordering targets](#ordering-targets).
 
 ```ts no-check
@@ -556,6 +556,7 @@ traceCoverage(supportModel, reports.map((r) => r.trace)); // states and handlers
 ```
 
 - The model runs with `runAgent`. Each actor in `actors` is answered from the observations instead of running. An actor with `observes` consumes the next observation, which must be of that kind.
+- The callbacks are typed from the model and the observations. `actors` keys are the model's actor srcs, `observes` is one of the observation kinds, and `observation` is narrowed to that kind. `input` has the actor's input type, and an event's `matches` reads the model's typed `context`. An `observes` value in an options object built outside the call widens to `string`; write it `as const`.
 - `output` builds the actor's output from the observation. When the output carries state the recording does not show, such as a queue the code keeps internally, build it from the model's own `input` and the observation. Rebuilding it from the code's logic would make the check prove nothing.
 - `matches` returns `false` when the actor's input does not fit the observation. `error` returns a value to reject the actor, for work that failed in the recording.
 - An actor without `observes` consumes nothing. It is listed in `report.unobserved`, because the recording cannot check what it did. A run whose history or streaming was off cannot see those effects, so a bug in them goes unnoticed.
@@ -565,6 +566,8 @@ traceCoverage(supportModel, reports.map((r) => r.trace)); // states and handlers
   - `unexpected-observation`: the next observation is of another kind.
   - `missing-observation`: the recording had ended, or the model finished with `output` set and the code never returned.
   - `input-mismatch`: an actor's or event's `matches` returned `false`.
+  - `invalid-output`: an actor's `output` returned a value the actor's declared output schema rejects (`createAsyncLogic({ schemas: { output } })`, or the `result` of a text request's output schema). `schemaError` holds the schema's message.
+  - `invalid-event`: an event built from an observation has a payload the model's event schema rejects. `schemaError` holds the schema's message.
   - `output-mismatch`: the model finished, and `output.matches` returned `false`.
   - `extra-observations`: the model finished or settled idle, and the recording continues.
   - `ignored-event`: the model was idle, and it does not handle the event the next observation maps to.

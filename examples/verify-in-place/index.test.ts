@@ -5,11 +5,6 @@ import { SCENARIOS, checkRun, recordRun, runVerifyInPlaceExample } from "./index
 import { refundModel } from "./model.js";
 import { handleRefundRequestRegressed } from "./regression.js";
 
-type Snapshot = {
-  matches: (state: string) => boolean;
-  context: { amount: number; approved: boolean; order: { total: number } | null };
-};
-
 // The decisions the model may receive, for the proofs: a small, a large, and
 // an over-total refund, a reply, and another round.
 const proofOptions = {
@@ -32,11 +27,11 @@ describe("verify in place: the model's rules", () => {
   test("no refund over the threshold without an approval", async () => {
     const result = await canReach(
       refundModel,
-      ((snapshot: Snapshot) =>
+      (snapshot) =>
         snapshot.matches("refunding") &&
         snapshot.context.amount > APPROVAL_THRESHOLD &&
-        !snapshot.context.approved) as never,
-      proofOptions as never,
+        !snapshot.context.approved,
+      proofOptions,
     );
     expect(result).toMatchObject({ reachable: false, complete: true });
   });
@@ -45,11 +40,11 @@ describe("verify in place: the model's rules", () => {
     // Not vacuous: the path the first proof guards exists.
     const result = await canReach(
       refundModel,
-      ((snapshot: Snapshot) =>
+      (snapshot) =>
         snapshot.matches("refunding") &&
         snapshot.context.amount > APPROVAL_THRESHOLD &&
-        snapshot.context.approved) as never,
-      proofOptions as never,
+        snapshot.context.approved,
+      proofOptions,
     );
     expect(result.reachable).toBe(true);
   });
@@ -57,10 +52,9 @@ describe("verify in place: the model's rules", () => {
   test("no refund over the order total", async () => {
     const result = await canReach(
       refundModel,
-      ((snapshot: Snapshot) =>
-        snapshot.matches("refunding") &&
-        snapshot.context.amount > snapshot.context.order!.total) as never,
-      proofOptions as never,
+      (snapshot) =>
+        snapshot.matches("refunding") && snapshot.context.amount > snapshot.context.order!.total,
+      proofOptions,
     );
     expect(result).toMatchObject({ reachable: false, complete: true });
   });
