@@ -20,6 +20,7 @@ import {
   checkConformance,
   createRecorder,
   type ConformanceReport,
+  type RecordedError,
   type Recording,
 } from "@statelyai/agent/testing";
 import { handleRefundRequest, type Decision, type Order, type RefundEffects } from "./before.js";
@@ -110,21 +111,31 @@ export async function recordRun(
 // --- 2. Map recorded calls to observations. ---
 
 export type Observation =
-  | { kind: "lookup"; order: Order }
-  | { kind: "decision"; decision: Decision }
+  | { kind: "lookup"; orderId: string; order: Order; error?: RecordedError }
+  | { kind: "decision"; decision: Decision; error?: RecordedError }
   | { kind: "approval"; approved: boolean; amount: number }
-  | { kind: "refund"; orderId: string; amount: number }
+  | { kind: "refund"; orderId: string; amount: number; error?: RecordedError }
   | { kind: "returned"; outcome: unknown };
 
 export function toObservations(recording: Recording): Observation[] {
+  // A call that threw carries its error, so its actor fails with it.
+  const failed = (effect: { error?: RecordedError }) =>
+    effect.error ? { error: effect.error } : {};
   return recording.effects.flatMap((effect): Observation[] => {
     if (effect.kind === "output") return [{ kind: "returned", outcome: effect.value }];
     if (effect.kind !== "call") return [];
     switch (effect.name) {
       case "lookupOrder":
-        return [{ kind: "lookup", order: effect.result as Order }];
+        return [
+          {
+            kind: "lookup",
+            orderId: (effect.args as [string])[0],
+            order: effect.result as Order,
+            ...failed(effect),
+          },
+        ];
       case "decide":
-        return [{ kind: "decision", decision: effect.result as Decision }];
+        return [{ kind: "decision", decision: effect.result as Decision, ...failed(effect) }];
       case "requestApproval":
         return [
           {
@@ -134,7 +145,13 @@ export function toObservations(recording: Recording): Observation[] {
           },
         ];
       case "issueRefund":
-        return [{ kind: "refund", ...(effect.args as [{ orderId: string; amount: number }])[0] }];
+        return [
+          {
+            kind: "refund",
+            ...(effect.args as [{ orderId: string; amount: number }])[0],
+            ...failed(effect),
+          },
+        ];
       default:
         return [];
     }
@@ -153,13 +170,20 @@ export function checkRun(
     actors: {
       lookupOrder: {
         observes: "lookup",
+        // The code looked up the order the model looks up.
+        matches: ({ input, observation }) =>
+          input === (observation as Extract<Observation, { kind: "lookup" }>).orderId,
         output: ({ observation }) =>
           (observation as Extract<Observation, { kind: "lookup" }>).order,
+        // A lookup that failed in the recording fails here too.
+        error: ({ observation }) => (observation as Extract<Observation, { kind: "lookup" }>).error,
       },
       decide: {
         observes: "decision",
         output: ({ observation }) =>
           (observation as Extract<Observation, { kind: "decision" }>).decision,
+        error: ({ observation }) =>
+          (observation as Extract<Observation, { kind: "decision" }>).error,
       },
       issueRefund: {
         observes: "refund",
@@ -169,6 +193,7 @@ export function checkRun(
           const expected = input as { orderId: string; amount: number };
           return expected.orderId === refund.orderId && expected.amount === refund.amount;
         },
+        error: ({ observation }) => (observation as Extract<Observation, { kind: "refund" }>).error,
       },
     },
     events: {

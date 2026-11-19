@@ -70,10 +70,21 @@ export interface RecordedModelCall {
   error?: RecordedError;
   /**
    * This call failed, and model call `retriedBy` sent the same request after
-   * it: a retry, by the AI SDK (`maxRetries`) or by the code. A mapping that
-   * reads one observation per call the code made skips effects with it set.
+   * it: a retry, by the AI SDK (`maxRetries`) or by the code. Compare
+   * {@link RecordedModelCall.aiSdkCall} to tell which.
    */
   retriedBy?: number;
+  /**
+   * The 0-based `generateText` or `streamText` call this attempt belongs to,
+   * when {@link recordAiSdk} routed that call. Attempts with the same value
+   * are one call the code made: its tool-loop steps and the SDK's retries. A
+   * failed attempt whose `retriedBy` attempt has the same `aiSdkCall` was
+   * retried by the SDK; one with a different `aiSdkCall` was resent by the code.
+   * Absent when the attempt was not routed through `recordAiSdk`, or its model
+   * was not a `recorder.model` wrapper passed as is (a proxy around one, one
+   * with a replaced method): who resent it is then unknown.
+   */
+  aiSdkCall?: number;
   /** In replay, the recorded call (its `call`) whose answer served this one. */
   replayed?: number;
   /** In replay, `translate` adapted the recorded answer to this call. */
@@ -322,6 +333,22 @@ export interface Recorder {
   readonly recording: Recording;
 }
 
+const MODEL_METADATA = ["specificationVersion", "provider", "modelId", "supportedUrls"];
+const MODEL_METHODS = ["doGenerate", "doStream", "doDecide", "doEvaluate"];
+const MODEL_KEYS = [...MODEL_METADATA, ...MODEL_METHODS];
+
+/**
+ * Per recorder, what `recordAiSdk` needs from it: the model a `recorder.model`
+ * wrapper wraps, a way to wrap it again for one AI SDK call, and how many AI
+ * SDK calls it has routed.
+ */
+interface AiSdkInternals {
+  unwrap(model: unknown): object | undefined;
+  wrap(model: object, aiSdkCall: number): object;
+  calls: number;
+}
+const aiSdkInternals = new WeakMap<Recorder, AiSdkInternals>();
+
 /** What {@link recordAiSdk} routes an AI SDK call through. */
 export interface AiSdkSeam {
   recorder: Recorder;
@@ -332,15 +359,25 @@ export interface AiSdkSeam {
   model?: unknown;
 }
 
-type AiSdkCall = (options: { model?: unknown; tools?: object }) => unknown;
+type AiSdkCall = (options: {
+  model?: unknown;
+  tools?: object;
+  prepareStep?: (...args: never[]) => unknown;
+}) => unknown;
 
 /**
  * Records AI SDK code that builds its model inline or passes module-level
  * tools to `generateText`: there is nothing to inject, so the test mocks `"ai"`
  * and routes each call through the recorder. Every `generateText` and
  * `streamText` call runs on the real AI SDK with `seam.model` in place of the
- * code's model and its `tools` wrapped with `recorder.tools`. Everything else
- * in `"ai"` stays real, so the code's own tool loop runs.
+ * code's model (also in place of a model `prepareStep` returns) and its
+ * `tools` wrapped with `recorder.tools`. Everything else in `"ai"` stays real,
+ * so the code's own tool loop runs.
+ *
+ * Each model attempt made during the call carries the call's index as
+ * {@link RecordedModelCall.aiSdkCall} when its model is a `recorder.model`
+ * wrapper passed as is and the recorder came from `createRecorder`. Other
+ * attempts carry no index, and who resent them is unknown.
  *
  * `current` returns the seam of the run being recorded. A call while it returns
  * `undefined` throws, so no test reaches a real provider.
@@ -367,9 +404,44 @@ export function recordAiSdk<TAi extends { generateText: AnyFunction; streamText?
           `recordAiSdk: ${name} was called while no run is recording. Return { recorder } from current() while the code runs.`,
         );
       }
+      // A recorder `createRecorder` did not make has no internals: its
+      // attempts carry no `aiSdkCall`.
+      const internals = aiSdkInternals.get(seam.recorder);
+      const index = internals ? internals.calls++ : 0;
+      // Only a model `recorder.model` returned, unchanged, is re-wrapped with
+      // the index. Any other model (a proxy, a decorated wrapper) runs as given.
+      const tag = (model: unknown) => {
+        const base = internals?.unwrap(model);
+        return base ? internals!.wrap(base, index) : model;
+      };
+      const model = seam.model ?? options.model;
+      const prepareStep = options.prepareStep as ((...args: unknown[]) => unknown) | undefined;
       return call({
         ...options,
-        ...(seam.model !== undefined ? { model: seam.model } : {}),
+        ...(model !== undefined ? { model: tag(model) } : {}),
+        ...(prepareStep
+          ? {
+              prepareStep: async (...args: unknown[]) => {
+                const step = (await prepareStep(...args)) as { model?: unknown } | undefined;
+                if (step?.model === undefined) return step;
+                const model = tag(seam.model ?? step.model);
+                // Only `model` changes: every other read (a `messages` getter)
+                // goes to the code's own result. The target is a fresh object,
+                // so a frozen result's `model` does not bind the trap.
+                const own = (key: string | symbol) =>
+                  key === "model" ? model : Reflect.get(step, key, step);
+                return new Proxy({} as object, {
+                  get: (_target, key) => own(key),
+                  has: (_target, key) => key === "model" || key in step,
+                  ownKeys: () => [...new Set([...Reflect.ownKeys(step), "model"])],
+                  getOwnPropertyDescriptor: (_target, key) =>
+                    key === "model" || Object.prototype.hasOwnProperty.call(step, key)
+                      ? { value: own(key), enumerable: true, configurable: true, writable: true }
+                      : undefined,
+                });
+              },
+            }
+          : {}),
         ...(options.tools
           ? {
               tools: seam.recorder.tools(
@@ -642,6 +714,36 @@ export function createRecorder(options: CreateRecorderOptions = {}): Recorder {
    * Records a model call around `run`, or answers it from the recording.
    * `fallback` runs it on the stand-in when the recording has no answer.
    */
+  /**
+   * A retry resends the request of a model call that failed. Within one AI SDK
+   * call, the failed attempt is its own last attempt, even when a concurrent
+   * call came in between or claimed it first. Otherwise it is the last model
+   * call, which the code resent.
+   */
+  function linkRetry(effect: RecordedModelCall): void {
+    const models = effects
+      .filter((earlier): earlier is RecordedModelCall => earlier.kind === "model")
+      .reverse();
+    const failedWith = (earlier: RecordedModelCall | undefined) =>
+      earlier?.error !== undefined &&
+      earlier.method === effect.method &&
+      stableStringify(earlier.request) === stableStringify(effect.request);
+    const { aiSdkCall } = effect;
+    if (aiSdkCall !== undefined) {
+      const own = models.find((earlier) => earlier.aiSdkCall === aiSdkCall);
+      const claimedBy =
+        own?.retriedBy === undefined
+          ? undefined
+          : models.find((earlier) => earlier.call === own.retriedBy);
+      if (own && failedWith(own) && claimedBy?.aiSdkCall !== aiSdkCall) {
+        own.retriedBy = effect.call;
+        return;
+      }
+    }
+    const last = models[0];
+    if (last && failedWith(last) && last.retriedBy === undefined) last.retriedBy = effect.call;
+  }
+
   async function modelCall(
     seam: RecordedModelCall["seam"],
     method: string,
@@ -649,6 +751,7 @@ export function createRecorder(options: CreateRecorderOptions = {}): Recorder {
     streamed: boolean,
     run: () => Promise<unknown>,
     fallback?: () => Promise<unknown>,
+    aiSdkCall?: number,
   ): Promise<unknown> {
     const effect: RecordedModelCall = {
       kind: "model",
@@ -657,16 +760,8 @@ export function createRecorder(options: CreateRecorderOptions = {}): Recorder {
       call: modelCalls++,
       request: toJson(omit(request, ["abortSignal", "headers", "signal"])),
     };
-    // A retry resends the request of the model call just before it, which failed.
-    const previous = [...effects].reverse().find((earlier) => earlier.kind === "model");
-    if (
-      previous?.kind === "model" &&
-      previous.error &&
-      previous.method === method &&
-      stableStringify(previous.request) === stableStringify(effect.request)
-    ) {
-      previous.retriedBy = effect.call;
-    }
+    if (aiSdkCall !== undefined) effect.aiSdkCall = aiSdkCall;
+    linkRetry(effect);
     effects.push(effect);
     if (replay) {
       const replayed = nextReplayedModel(effect);
@@ -942,18 +1037,34 @@ export function createRecorder(options: CreateRecorderOptions = {}): Recorder {
     return result;
   }
 
-  return {
-    model(model) {
-      const base = model as unknown as Record<string, unknown>;
-      const stand = options.fallback?.model as Record<string, unknown> | undefined;
-      const wrapped = Object.create(base) as Record<string, unknown>;
-      // Only the methods the model has: the AI SDK tells a decision model
-      // (`doDecide`, or the deprecated `doEvaluate`) by which ones exist.
-      for (const method of ["doGenerate", "doStream", "doDecide", "doEvaluate"]) {
-        if (typeof base[method] !== "function") continue;
-        const invoke = (target: Record<string, unknown>, callOptions: unknown) =>
-          (target[method] as (o: unknown) => Promise<unknown>).call(target, callOptions);
-        wrapped[method] = (callOptions: unknown) =>
+  // Each wrapper `recorder.model` made: the model it wraps, and its methods as made.
+  const wrappedModels = new WeakMap<
+    object,
+    { base: object; made: Map<string, PropertyDescriptor | undefined> }
+  >();
+  function wrapModel(model: object, aiSdkCall?: number): object {
+    const base = model as Record<string, unknown>;
+    const stand = options.fallback?.model as Record<string, unknown> | undefined;
+    // Own properties on a new object: a frozen model's methods cannot be
+    // assigned over, and metadata getters read the model itself, so a getter
+    // over a private field still works.
+    const wrapped = Object.create(base) as Record<string, unknown>;
+    for (const key of MODEL_METADATA) {
+      if (!(key in base)) continue;
+      Object.defineProperty(wrapped, key, {
+        get: () => Reflect.get(base, key, base),
+        enumerable: true,
+        configurable: true,
+      });
+    }
+    // Only the methods the model has: the AI SDK tells a decision model
+    // (`doDecide`, or the deprecated `doEvaluate`) by which ones exist.
+    for (const method of MODEL_METHODS) {
+      if (typeof base[method] !== "function") continue;
+      const invoke = (target: Record<string, unknown>, callOptions: unknown) =>
+        (target[method] as (o: unknown) => Promise<unknown>).call(target, callOptions);
+      Object.defineProperty(wrapped, method, {
+        value: (callOptions: unknown) =>
           modelCall(
             "ai-sdk",
             method,
@@ -963,9 +1074,37 @@ export function createRecorder(options: CreateRecorderOptions = {}): Recorder {
             stand && typeof stand[method] === "function"
               ? () => invoke(stand, callOptions)
               : undefined,
-          );
-      }
-      return wrapped as never;
+            aiSdkCall,
+          ),
+        writable: true,
+        enumerable: true,
+        configurable: true,
+      });
+    }
+    wrappedModels.set(wrapped, {
+      base,
+      made: new Map(
+        [...MODEL_KEYS].map((key) => [key, Object.getOwnPropertyDescriptor(wrapped, key)]),
+      ),
+    });
+    return wrapped;
+  }
+
+  // The model a wrapper wraps, unless the caller replaced one of its methods
+  // or metadata: re-wrapping that would drop the caller's change.
+  function unwrapModel(model: object): object | undefined {
+    const entry = wrappedModels.get(model);
+    if (!entry) return undefined;
+    for (const [key, made] of entry.made) {
+      const now = Object.getOwnPropertyDescriptor(model, key);
+      if (now?.value !== made?.value || now?.get !== made?.get) return undefined;
+    }
+    return entry.base;
+  }
+
+  const recorder: Recorder = {
+    model(model) {
+      return wrapModel(model as unknown as object) as never;
     },
     openai(client) {
       // Proxies, not copies: the SDK's resources are class instances, so a
@@ -1097,6 +1236,15 @@ export function createRecorder(options: CreateRecorderOptions = {}): Recorder {
       return { version: 1 as const, effects: toJson(effects) as RecordedEffect[] };
     },
   };
+  aiSdkInternals.set(recorder, {
+    unwrap: (model) =>
+      model !== null && (typeof model === "object" || typeof model === "function")
+        ? unwrapModel(model)
+        : undefined,
+    wrap: wrapModel,
+    calls: 0,
+  });
+  return recorder;
 }
 
 /** Why two effects differ. */

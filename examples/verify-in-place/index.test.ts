@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { canReach } from "@statelyai/agent/testing";
+import { canReach, createRecorder } from "@statelyai/agent/testing";
 import { APPROVAL_THRESHOLD, handleRefundRequest } from "./before.js";
 import { SCENARIOS, checkRun, recordRun, runVerifyInPlaceExample } from "./index.js";
 import { refundModel } from "./model.js";
@@ -145,6 +145,24 @@ describe("verify in place: a seeded regression", () => {
       reason: "output-mismatch",
       observed: { kind: "returned", outcome: "replied" },
       state: "refunded",
+    });
+  });
+
+  test("a lookup that failed in the recording fails the model's lookup", async () => {
+    const recorder = createRecorder();
+    const lookupOrder = recorder.fn("lookupOrder", async (_orderId: string): Promise<never> => {
+      throw new Error("order not found");
+    });
+    await lookupOrder("A-1").catch(() => {});
+    const report = await checkRun(SCENARIOS[0]!, recorder.recording);
+    expect(report).toMatchObject({ conforms: true, status: "error", consumed: 1 });
+
+    // A lookup of another order is a mismatch, failed or not.
+    const other = createRecorder();
+    await other.fn("lookupOrder", async (_orderId: string) => SCENARIOS[0]!.order)("A-404");
+    expect((await checkRun(SCENARIOS[0]!, other.recording)).deviation).toMatchObject({
+      reason: "input-mismatch",
+      expected: "lookupOrder",
     });
   });
 });
