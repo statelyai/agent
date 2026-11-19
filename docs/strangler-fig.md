@@ -376,6 +376,101 @@ const tooMany = await canReach(
 
 Step 0 cannot give this proof: its one `running` state holds the whole function.
 
+## Host writes outside the log
+
+A host that writes to its own database during a run holds state the machine's log does not. When a run fails after such a write commits, the two disagree. In one conversion of a Cloudflare Durable Object agent, a run escalated a case in the database and then failed. The port did not store the machine state on the error path, so the stored snapshot said `open` while the database said `escalated`, and the next message called the model on a case a person owned.
+
+### Reconcile on error
+
+Give the machine a host event that moves it to the state matching the host's record. On an error result, read the record back, send the event to the snapshot stored before the failed run, and store the result.
+
+```ts no-check
+const caseSetup = setupAgent({
+  context: z.object({ caseId: z.string() }),
+  input: z.object({ caseId: z.string() }),
+  events: {
+    MESSAGE: z.object({ text: z.string() }),
+    RESYNC: z.object({ status: z.enum(["open", "escalated"]) }),
+  },
+});
+
+const caseMachine = caseSetup.createMachine({
+  id: "case",
+  version: "2", // RESYNC added
+  context: ({ input }) => ({ caseId: input.caseId }),
+  initial: "open",
+  on: {
+    RESYNC: ({ event }) => ({ target: event.status === "escalated" ? ".escalated" : ".open" }),
+  },
+  states: {
+    open: {
+      /* MESSAGE: to replying */
+    },
+    replying: {
+      /* the model call and the host's writes */
+    },
+    escalated: {},
+  },
+});
+
+async function onMessage(caseId: string, text: string) {
+  const stored = await storage.get(`snapshot:${caseId}`);
+  const result = await runAgent(caseMachine, {
+    snapshot: stored,
+    event: { type: "MESSAGE", text },
+    executors,
+  });
+  if (result.status !== "error") {
+    await storage.put(`snapshot:${caseId}`, result.persist());
+    return result;
+  }
+  // The run failed, possibly after the host's own writes committed.
+  const { status } = await db.readCase(caseId);
+  const resynced = await runAgent(caseMachine, {
+    snapshot: stored,
+    event: { type: "RESYNC", status },
+    executors,
+  });
+  await storage.put(`snapshot:${caseId}`, resynced.persist());
+  throw result.error;
+}
+```
+
+- `RESYNC` is handled on the root, so every state accepts it. Its payload is the host's record, read back after the failure, and the transition maps it to a state with no other logic.
+- Send it to the snapshot stored before the failed run. A snapshot of the error result stays in `error`: a resume from it settles `error` again.
+- Store a snapshot on every settle path. A port that stores only on success keeps the state from before the failure.
+- Adding `RESYNC` changes the machine, so bump `version`. XState requires an `id` on a machine with a `version`. See [Version bridge](persistence.md#version-bridge) for snapshots stored under the old version.
+
+### Inline writes
+
+When the existing class writes to its database inline (dozens of SQL or scheduler calls across its methods), routing every write through one `effects` object is impractical, and `checkParity` cannot see the writes. Take the extract path instead:
+
+- Extract each phase into its own method, one commit per extract, with the old suite passing after each. See [A phase in the middle of a method](#a-phase-in-the-middle-of-a-method).
+- Compare the old class and the port with `compareRuns` (from `@statelyai/agent/testing`) over world-state snapshots: each side runs a scenario against a fresh database and returns what the database holds afterward as `effects`.
+
+```ts no-check
+import { compareRuns } from "@statelyai/agent/testing";
+
+const report = await compareRuns({
+  scenarios, // [{ id, expected?, ...your fields }]
+  baseline: async (scenario) => {
+    const db = createTestDatabase();
+    const outcome = await runOldAgent(db, scenario);
+    return { outcome, effects: db.dumpTables() };
+  },
+  candidate: async (scenario) => {
+    const db = createTestDatabase();
+    const outcome = await runPortedAgent(db, scenario);
+    return { outcome, effects: db.dumpTables() };
+  },
+});
+expect(report.ok).toBe(true); // no regressions
+```
+
+- `effects` is compared structurally. Sort rows whose order does not matter.
+- Include every table the agent writes, scheduled alarms included. A write left out of `effects` is not compared.
+- See [Outcome labels](evals.md#outcome-labels) for how each difference is labeled.
+
 ## Limits
 
 - A wrapped workflow is a black box. The machine has one state for all of it.

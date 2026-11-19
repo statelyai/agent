@@ -521,6 +521,7 @@ The full prompt and its allowed tools are in the [example's README](https://gith
 
 - [retrofit](https://github.com/statelyai/agent/blob/next/examples/retrofit/index.ts): a larger loop refactored one step at a time, in the order `before.ts`, `step1.ts`, `step2.ts`, `step3.ts`, and `index.ts`.
 - [Strangler-fig retrofit](strangler-fig.md): wrap the workflow unchanged with `wrapWorkflow`, then carve one phase at a time, checked with `checkParity`.
+- [Host writes outside the log](strangler-fig.md#host-writes-outside-the-log): reconcile the machine with the host's database after a failed run, and compare world-state snapshots when the old code writes inline.
 - [Overview](index.md): what the machine gives you over the loop.
 - [Human in the loop](human-in-the-loop.md): idle states, `meta.interaction`, and resuming.
 - [Environment and policy](environment-and-policy.md): the fixed environment, the generated policy, the objective, and the improvement loop.

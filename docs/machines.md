@@ -120,7 +120,6 @@ The `models` map pairs a short alias with a resolved model. Request and decision
 
 ```ts
 import { openai } from "@ai-sdk/openai";
-import {} from "@statelyai/agent/ai-sdk";
 
 const models = {
   quick: openai("gpt-6-luna"),
