@@ -115,6 +115,7 @@ export {
   AGENT_TRACE_SCHEMA_VERSION,
   AgentMaxModelCallsExceededError,
   AgentSnapshotDivergedError,
+  AgentSnapshotInvalidError,
   createAgentInbox,
   createAgentRuntime,
   isAgentIdle,

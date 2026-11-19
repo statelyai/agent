@@ -251,6 +251,12 @@ function isModelWithSettings(
   return typeof entry === "object" && entry !== null && "model" in entry;
 }
 
+// Every SDK call starts from `maxRetries: 0`, under the host's settings: a
+// retry belongs to the machine, where it is counted in `modelCalls` and
+// covered by proofs. A host that sets `maxRetries` lets the SDK retry, and
+// those requests are not counted.
+const noProviderRetries = { maxRetries: 0 } as const;
+
 // Wraps an AI SDK Output spec so a parse failure retries once against the
 // repaired text (first complete JSON value) before surfacing the original
 // error. Host-side salvage — the model round-trip is not repeated.
@@ -412,6 +418,7 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
     const common = {
       model,
       abortSignal: info?.signal,
+      ...noProviderRetries,
       ...settings,
       onLanguageModelCallStart: (event: LanguageModelCallStartEvent) => {
         calls++;
@@ -500,6 +507,7 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
     const result = aiStreamText({
       model,
       abortSignal: info?.signal,
+      ...noProviderRetries,
       ...settings,
       onLanguageModelCallStart: (event) => {
         calls++;
@@ -528,8 +536,10 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
 
   const decide = async (request: AgentDecisionRequest, info?: AgentRequestExecutorInfo) => {
     const { model, settings: modelSettings } = resolveAiSdkModel(options, request.model);
-    if (isDecisionModel(model)) return decideWithDecisionModel(model, request, info);
     const settings = { ...callSettings(options, request), ...defined(modelSettings ?? {}) };
+    if (isDecisionModel(model)) {
+      return decideWithDecisionModel(model, request, info, settings.maxRetries);
+    }
     if (resolveDecisionMode(options.decideMode, request) === "object") {
       return decideWithObject(model, settings, request, info);
     }
@@ -556,6 +566,7 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
     const result = await aiGenerateText({
       model,
       abortSignal: info?.signal,
+      ...noProviderRetries,
       ...settings,
       providerOptions: withParallelToolCallsOff(settings.providerOptions),
       onLanguageModelCallEnd: (event) => {
@@ -648,6 +659,7 @@ async function decideWithObject(
   const result = await aiGenerateText({
     model,
     abortSignal: info?.signal,
+    ...noProviderRetries,
     ...settings,
     // `@ai-sdk/openai` sends schemas strict by default, and strict mode rejects
     // the decision schema's open payload branches. Host keys still win.
@@ -684,12 +696,13 @@ const DECISION_QUESTION_ID = "next";
 
 // Asks a decision model ONE `choice` question over the request's options: each
 // option id is a label, its description the criterion (the event as JSON when
-// it has none). The answer maps back to `option.event`. Host `settings` apply
-// to language models only.
+// it has none). The answer maps back to `option.event`. Of the host's
+// `settings`, only `maxRetries` applies to a decision model.
 async function decideWithDecisionModel(
   model: AiSdkDecisionModel,
   request: AgentDecisionRequest,
   info: AgentRequestExecutorInfo | undefined,
+  maxRetries = 0,
 ): Promise<AiSdkDecideResult> {
   const offered = request.options;
   if (!offered?.length) {
@@ -718,6 +731,7 @@ async function decideWithDecisionModel(
       model,
       state: toDecisionState(request.input),
       questions: { [DECISION_QUESTION_ID]: { type: "choice" as const, instructions, criteria } },
+      maxRetries,
       ...(info?.signal ? { abortSignal: info.signal } : {}),
     });
   let result: Awaited<ReturnType<typeof ask>>;

@@ -158,6 +158,15 @@ A snapshot is never authoritative within a version. Snapshot only at quiescent p
 
 Resuming from a snapshot with no log also yields a self-contained log (the new segment's init entry carries that snapshot), so every result is replayable.
 
+### Snapshot checks
+
+Every resume checks the context it restores, with or without a log, after XState's `migrate` runs.
+
+- The context must match the machine's `context` schema and the `schemas.context` of each active state (`setupAgent({ states })`).
+- A context that fails either check throws `AgentSnapshotInvalidError` (code `snapshot-invalid`) before the run starts. `stateNodeId` names the state when its schema failed.
+- A snapshot that XState cannot restore at all fails the run with status `error`.
+- The check does not cover the active state's position. A snapshot set by hand to a state whose invoked child it does not carry restores without that child: the run settles `idle`, and `isAgentIdle(result.snapshot)` returns `false`. Resume from the log to rule this out. A log replays to a state the machine reached.
+
 ## Version bridge
 
 A log is truth within one `machine.version`. Across a version change, pass the old `events` together with a `snapshot`:
