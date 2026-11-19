@@ -484,11 +484,11 @@ stateDiagram-v2
   processing --> done : always
 ```
 
-- **States:** every state node. A compound or parallel state is a `state id { ... }` block, with `--` between parallel regions. A choice state is a `<<choice>>` node. `[*] -->` marks each initial state and `--> [*]` each final state.
+- **States:** every state node. A compound or parallel state is a `state id { ... }` block, with `--` between parallel regions. A choice state is a `<<choice>>` node. A history state is a node labeled `H` (shallow) or `H*` (deep) with the `history` class. `[*] -->` marks each initial state and `--> [*]` each final state. When a transition targets the machine itself, the machine is a `state <machine id> { ... }` block.
 - **Edges:** one per target. The label is the event type, `always`, `after <delay>`, `onDone`, or `<id> done` and `<id> error` for an invoke (its `src` when it has no `id`). A guard follows in brackets (`[context.approved]`). A `choice` branch without a guard is labeled `else`.
 - **Transition functions:** one edge per target the source can return. A `?` after the label marks a function that can pick among several targets, stay, or return no transition, as `FAILED?` does above.
 - **Unknown targets:** a target the source does not spell out goes to a dashed `?` node. A target that names no state node goes to a dashed node labeled with the target and `?`. No transition with a target is left out.
-- **Ids:** a state's id is its key, or its path joined with `_` when another state has the same key. Characters Mermaid cannot read in an id become `_`, and the key stays as the label: `state "first step" as first_step`. Labels write `#`, `:`, `;`, `"`, `<`, and `>` as Mermaid entity codes.
+- **Ids:** a state's id is its key, or its path joined with `_` when another state has the same key. Characters Mermaid cannot read in an id become `_`, and the key stays as the label: `state "first step" as first_step`. A choice node shows no label, so a note keeps its key: `note right of first_step : first step`. Ids avoid words Mermaid reads as keywords (`state`, `note`, `href`, `scale`) and the ids Mermaid gives `[*]` markers (`root_start`, `<id>_end`). Labels write `#`, `:`, `;`, `"`, `<`, and `>` as Mermaid entity codes.
 - **Snapshot:** pass `snapshot` to give the active states the `active` class.
 - **Other transitions:** a transition on the machine itself leaves an `any state` node. A transition with no target changes no state and draws no edge. `source` and `helpers` apply to text only.
 

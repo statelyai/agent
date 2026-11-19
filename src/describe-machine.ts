@@ -152,7 +152,7 @@ interface TransitionInfo {
   /** A `choice` branch: its alternatives are the choice node's, so it carries no `?`. */
   choice: boolean;
   transition: unknown;
-  /** Each target it names, in order; a function's are unique by name. */
+  /** Each target it names, in order; a function's are unique by node (by name when it names none). */
   targets: Target[];
   /** Some path goes to a target its source does not spell out (`?`). */
   unknown: boolean;
@@ -205,11 +205,12 @@ function readTransition(
     if (!read) {
       info.unknown = true;
     } else {
-      const byName = new Map<string, Target>();
+      const unique = new Map<AnyStateNode | string, Target>();
       for (const target of read.targets.map((t) => targetOf(source, t))) {
-        if (!byName.has(target.name)) byName.set(target.name, target);
+        const key = target.node ?? target.name;
+        if (!unique.has(key)) unique.set(key, target);
       }
-      info.targets = [...byName.values()];
+      info.targets = [...unique.values()];
       info.unknown = read.unknown;
       const count = info.targets.length + (read.unknown ? 1 : 0);
       info.conditional = count > 1 || (!choice && (read.declines || read.stays));
@@ -232,7 +233,8 @@ function readTransition(
 
 /** Where a transition goes, as said in the text: `review`, `review, paying (conditional)`, `?`, `(stays)`. */
 function targetText(info: TransitionInfo): string {
-  const parts = info.targets.map((target) => target.name);
+  // Two nodes can share a name (`b` and `#m.b` from inside `group`); the text says it once.
+  const parts = [...new Set(info.targets.map((target) => target.name))];
   if (info.unknown) parts.push("?");
   if (!parts.length) return "(stays)";
   if (parts.length === 1 && info.unknown) return "?";
@@ -413,7 +415,7 @@ function eventLines(machine: AnyStateMachine): string[] {
   return lines;
 }
 
-/** Words Mermaid's state diagram grammar reserves, so never used as a bare id. */
+/** Words Mermaid's state diagram grammar reserves or its lexer reads as keywords, so never used as a bare id. */
 const MERMAID_RESERVED = new Set([
   "as",
   "class",
@@ -423,8 +425,11 @@ const MERMAID_RESERVED = new Set([
   "direction",
   "end",
   "hide",
+  "href",
   "note",
+  "scale",
   "state",
+  "statediagram",
   "style",
 ]);
 
@@ -475,8 +480,18 @@ function describeMermaid(machine: AnyStateMachine, options: DescribeMachineOptio
   };
   collect(root, json);
 
+  const transitionsOf = new Map(
+    nodes.map(([node, nodeJson]) => [
+      node,
+      readTransitions(node, nodeJson, delays).filter(
+        (entry): entry is TransitionInfo => !("invoke" in entry),
+      ),
+    ]),
+  );
+
   // Ids: a state's key when no other state shares it, else its path; then made safe and unique.
-  const used = new Set<string>();
+  // Mermaid names the top-level `[*]` markers `root_start` and `root_end`.
+  const used = new Set<string>(["root_start", "root_end"]);
   const allocate = (candidate: string) => {
     let id = candidate.replace(/[^A-Za-z0-9_]/g, "_");
     if (!/^[A-Za-z_]/.test(id) || MERMAID_RESERVED.has(id.toLowerCase())) id = `s_${id}`;
@@ -488,9 +503,24 @@ function describeMermaid(machine: AnyStateMachine, options: DescribeMachineOptio
   const keyCounts = new Map<string, number>();
   for (const [node] of nodes.slice(1)) keyCounts.set(node.key, (keyCounts.get(node.key) ?? 0) + 1);
   const ids = new Map<AnyStateNode, string>();
-  if (root.type === "parallel") ids.set(root, allocate(machine.id));
+  const assign = (node: AnyStateNode, candidate: string) => {
+    const id = allocate(candidate);
+    ids.set(node, id);
+    if (!Object.keys(node.states).length) return;
+    // Mermaid names a block's `[*]` markers `<id>_start` and `<id>_end`; a state holding one moves.
+    for (const marker of [`${id}_start`, `${id}_end`]) {
+      const holder = [...ids].find(([, held]) => held === marker)?.[0];
+      if (holder) ids.set(holder, allocate(marker));
+      else used.add(marker);
+    }
+  };
+  // The machine is a composite state when it is parallel or a transition targets it.
+  const rootTargeted = [...transitionsOf.values()].some((list) =>
+    list.some((info) => info.targets.some((target) => target.node === root)),
+  );
+  if (root.type === "parallel" || rootTargeted) assign(root, machine.id);
   for (const [node] of nodes.slice(1)) {
-    ids.set(node, allocate(keyCounts.get(node.key) === 1 ? node.key : node.path.join("_")));
+    assign(node, keyCounts.get(node.key) === 1 ? node.key : node.path.join("_"));
   }
 
   // Edges, each in the block of the nearest node that holds both ends.
@@ -500,10 +530,7 @@ function describeMermaid(machine: AnyStateMachine, options: DescribeMachineOptio
     edges.set(key, [...(edges.get(key) ?? []), ...lines]);
   };
   const unknownIds: string[] = [];
-  for (const [node, nodeJson] of nodes) {
-    const transitions = readTransitions(node, nodeJson, delays).filter(
-      (entry): entry is TransitionInfo => !("invoke" in entry),
-    );
+  for (const [node, transitions] of transitionsOf) {
     if (!transitions.length) continue;
     let from = ids.get(node);
     if (from === undefined) {
@@ -558,16 +585,28 @@ function describeMermaid(machine: AnyStateMachine, options: DescribeMachineOptio
     for (const line of edges.get(node) ?? []) lines.push(`${pad}${line}`);
     return lines;
   };
-  /** A state node's declaration: its label when its id differs from its key, then its block. */
+  const historyIds: string[] = [];
+  /**
+   * A state node's declaration: its label when its id differs from its key, then its block.
+   * A history node is labeled `H` (shallow) or `H*` (deep). A choice node has no label, so a
+   * note keeps its key when its id differs.
+   */
   const declare = (node: AnyStateNode, nodeJson: Json, pad: string): string[] => {
     const id = ids.get(node)!;
+    if (node.type === "history") {
+      historyIds.push(id);
+      return [`${pad}state "${nodeJson.history === "deep" ? "H*" : "H"}" as ${id}`];
+    }
+    if (node.type === "choice") {
+      const lines = [`${pad}state ${id} <<choice>>`];
+      if (id !== node.key) lines.push(`${pad}note right of ${id} : ${mermaidText(node.key)}`);
+      return lines;
+    }
     const lines: string[] = [];
-    const labelled = id !== node.key && node.type !== "choice";
+    const labelled = id !== node.key;
     if (labelled) lines.push(`${pad}state "${mermaidText(node.key)}" as ${id}`);
     if (Object.keys(node.states).length) {
       lines.push(`${pad}state ${id} {`, ...inner(node, nodeJson, `${pad}  `), `${pad}}`);
-    } else if (node.type === "choice") {
-      lines.push(`${pad}state ${id} <<choice>>`);
     } else if (!labelled) {
       lines.push(`${pad}${id}`);
     }
@@ -575,7 +614,7 @@ function describeMermaid(machine: AnyStateMachine, options: DescribeMachineOptio
   };
 
   const lines = ["stateDiagram-v2"];
-  if (root.type === "parallel") {
+  if (ids.has(root)) {
     lines.push(...declare(root, json, "  "));
     for (const line of edges.get(undefined) ?? []) lines.push(`  ${line}`);
   } else {
@@ -583,6 +622,9 @@ function describeMermaid(machine: AnyStateMachine, options: DescribeMachineOptio
   }
   if (unknownIds.length) {
     lines.push("  classDef unknown stroke-dasharray:5", `  class ${unknownIds.join(",")} unknown`);
+  }
+  if (historyIds.length) {
+    lines.push("  classDef history font-style:italic", `  class ${historyIds.join(",")} history`);
   }
   const active = new Set(options.snapshot?.nodes.map((node) => node.id) ?? []);
   const activeIds = nodes.flatMap(([node]) =>

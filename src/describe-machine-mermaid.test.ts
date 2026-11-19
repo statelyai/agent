@@ -158,6 +158,193 @@ describe("describeMachine format: mermaid", () => {
     `);
   });
 
+  test("a choice state whose id differs from its key keeps the key in a note", () => {
+    const { machine } = setupAgent.fromConfig(
+      {
+        id: "triage",
+        schemas: { context: { type: "object" } },
+        context: {},
+        initial: "first",
+        states: {
+          first: {
+            initial: "route me",
+            states: {
+              "route me": { type: "choice", choice: [{ target: "#triage.second" }] },
+            },
+          },
+          second: {
+            initial: "route",
+            states: {
+              route: {
+                type: "choice",
+                choice: [{ guard: "isUrgent", target: "#triage.done" }, { target: "#triage.done" }],
+              },
+            },
+          },
+          third: {
+            initial: "route",
+            states: { route: { type: "choice", choice: [{ target: "#triage.done" }] } },
+          },
+          done: { type: "final" },
+        },
+      },
+      { compileSchema, guards: { isUrgent: () => true } },
+    );
+    expect(describeMachine(machine, { format: "mermaid" })).toMatchInlineSnapshot(`
+      "stateDiagram-v2
+        [*] --> first
+        state first {
+          [*] --> route_me
+          state route_me <<choice>>
+          note right of route_me : route me
+        }
+        state second {
+          [*] --> second_route
+          state second_route <<choice>>
+          note right of second_route : route
+        }
+        state third {
+          [*] --> third_route
+          state third_route <<choice>>
+          note right of third_route : route
+        }
+        done
+        done --> [*]
+        route_me --> second
+        second_route --> done : [isUrgent]
+        second_route --> done : else
+        third_route --> done"
+    `);
+  });
+
+  test("history states read as history: H for shallow, H* for deep", () => {
+    const machine = setup({}).createMachine({
+      id: "editor",
+      initial: "editing",
+      states: {
+        editing: {
+          initial: "text",
+          states: {
+            text: { on: { NEXT: { target: "image" } } },
+            image: {},
+            hist: { type: "history", target: "text" },
+            deepHist: { type: "history", history: "deep", target: "text" },
+          },
+          on: { PAUSE: { target: "paused" } },
+        },
+        paused: {
+          on: {
+            RESUME: { target: "editing.hist" },
+            RESTORE: { target: "editing.deepHist" },
+          },
+        },
+      },
+    });
+    expect(describeMachine(machine, { format: "mermaid" })).toMatchInlineSnapshot(`
+      "stateDiagram-v2
+        [*] --> editing
+        state editing {
+          [*] --> text
+          text
+          image
+          state "H" as hist
+          state "H*" as deepHist
+          text --> image : NEXT
+        }
+        paused
+        editing --> paused : PAUSE
+        paused --> hist : RESUME
+        paused --> deepHist : RESTORE
+        classDef history font-style:italic
+        class hist,deepHist history"
+    `);
+  });
+
+  test("a function's targets stay distinct when two nodes share a name", () => {
+    const pick = () => Math.random() > 0.5;
+    const machine = setup({}).createMachine({
+      id: "m",
+      initial: "group",
+      states: {
+        group: {
+          initial: "a",
+          states: {
+            a: {
+              on: {
+                GO: () => (pick() ? { target: "b" } : { target: "#m.b" }),
+                SAME: () => (pick() ? { target: "b" } : { target: "#m.group.b" }),
+              },
+            },
+            b: {},
+          },
+        },
+        b: {},
+      },
+    });
+    const lines = describeMachine(machine, { format: "mermaid" }).split("\n");
+    expect(lines).toContain("    a --> group_b : GO?");
+    expect(lines).toContain("  a --> b : GO?");
+    expect(lines.filter((line) => line.includes(": SAME"))).toEqual(["    a --> group_b : SAME"]);
+  });
+
+  test("ids never take the ids Mermaid gives start and end markers", () => {
+    const machine = setup({}).createMachine({
+      id: "m",
+      initial: "root_start",
+      states: {
+        root_start: { on: { GO: { target: "flow" } } },
+        flow: { initial: "flow_start", states: { flow_start: { type: "final" } } },
+        root_end: {},
+      },
+    });
+    expect(describeMachine(machine, { format: "mermaid" })).toMatchInlineSnapshot(`
+      "stateDiagram-v2
+        [*] --> root_start_2
+        state "root_start" as root_start_2
+        state flow {
+          [*] --> flow_start_2
+          state "flow_start" as flow_start_2
+          flow_start_2 --> [*]
+        }
+        state "root_end" as root_end_2
+        root_start_2 --> flow : GO"
+    `);
+  });
+
+  test("ids never take a word Mermaid's lexer reads as a keyword", () => {
+    const machine = setup({}).createMachine({
+      id: "m",
+      initial: "href",
+      states: { href: { on: { GO: { target: "scale" } } }, scale: {}, stateDiagram: {} },
+    });
+    expect(describeMachine(machine, { format: "mermaid" })).toMatchInlineSnapshot(`
+      "stateDiagram-v2
+        [*] --> s_href
+        state "href" as s_href
+        state "scale" as s_scale
+        state "stateDiagram" as s_stateDiagram
+        s_href --> s_scale : GO"
+    `);
+  });
+
+  test("a compound root that a transition targets is a composite state", () => {
+    const machine = setup({}).createMachine({
+      id: "m",
+      initial: "a",
+      states: { a: { on: { RESET: { target: "#m" }, NEXT: { target: "b" } } }, b: {} },
+    });
+    expect(describeMachine(machine, { format: "mermaid" })).toMatchInlineSnapshot(`
+      "stateDiagram-v2
+        state m {
+          [*] --> a
+          a
+          b
+          a --> b : NEXT
+        }
+        a --> m : RESET"
+    `);
+  });
+
   test("ids are sanitized and labels escaped", () => {
     const machine = setup({}).createMachine({
       id: "odd",
