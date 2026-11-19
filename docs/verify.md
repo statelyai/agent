@@ -591,7 +591,7 @@ import { machine } from "./machine";
 assertAgentMachine(machine); // throws AgentLintError on error-severity findings
 ```
 
-For machines authored as data, validate the config with `validateAgentConfig(config)` from `@statelyai/agent/validate` first, then compile it and lint the machine: `assertAgentMachine(setupAgent.fromConfig(config, { compileSchema }).machine)`. See [Machines as data](machines-as-data.md). Every lint check applies. Lint does not check reachability: use `explorePaths` or `canReach` for that. `verifyAgentConfig` runs validation, lowering, lint, and exploration in one call. See [Generating machines with an LLM](generate-machines.md).
+For machines authored as data, validate the config with `validateAgentConfig(config)` from `@statelyai/agent/validate` first, then compile it and lint the machine: `assertAgentMachine(setupAgent.fromConfig(config, { compileSchema }).machine)`. See [Machines as data](machines-as-data.md). Every lint check applies. Lint does not check reachability: use `explorePaths` or `canReach` for that. `verifyAgentConfig` runs validation, lowering, and lint in one call, and exploration when `options.explore` is set. See [Generating machines with an LLM](generate-machines.md).
 
 ## Related
 

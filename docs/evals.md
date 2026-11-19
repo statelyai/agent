@@ -104,7 +104,7 @@ The mock answers in the provider's format, not the request's:
 - A plain-text request takes the text as is.
 - A structured request asks the provider for JSON and reads the declared output from a `result` key, so the mock returns `{ "result": … }` as JSON text.
 - An `agent.decide` request uses object mode by default, so the mock returns JSON text. An open choice reads `{ "event": { "type": "APPROVE", … } }`: the chosen event type plus its payload fields. A closed choice (`payloads`) reads `{ "choice": "<option id>" }`. Text that is not JSON is rejected with "the answer was not valid JSON".
-- In tool mode (`decideMode: "tool"`, or the default when a candidate's payload is not an object), the mock returns a `tool-call` content part instead. Its `toolName` is `send_event_<TYPE>` for the chosen event type, and its `input` is the event payload as JSON text. See [Coercion](decisions.md#coercion).
+- In tool mode (`decideMode: "tool"`, or the default when a candidate's payload is not an object), the mock returns a `tool-call` content part instead. For an open choice, its `toolName` is `send_event_<TYPE>` for the chosen event type, and its `input` is the event payload as JSON text. For a closed choice, its `toolName` is `choose_option` and its `input` is `{ "option": "<option id>" }` as JSON text. See [Coercion](decisions.md#coercion).
 
 `doGenerateCalls` records the options of every call, including the prompt the adapter rendered.
 

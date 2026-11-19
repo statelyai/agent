@@ -414,7 +414,11 @@ const caseMachine = caseSetup.createMachine({
 });
 
 async function onMessage(caseId: string, text: string) {
-  const stored = await storage.get(`snapshot:${caseId}`);
+  let stored = await storage.get(`snapshot:${caseId}`);
+  // A reconciliation that failed earlier runs before any new message.
+  if (await storage.get(`resync:${caseId}`)) {
+    stored = await resync(caseId, stored);
+  }
   const result = await runAgent(caseMachine, {
     snapshot: stored,
     event: { type: "MESSAGE", text },
@@ -424,19 +428,29 @@ async function onMessage(caseId: string, text: string) {
     await storage.put(`snapshot:${caseId}`, result.persist());
     return result;
   }
-  // The run failed, possibly after the host's own writes committed.
+  // The run failed, possibly after the host's own writes committed. Mark the
+  // case first, so a failure inside resync leaves it marked.
+  await storage.put(`resync:${caseId}`, true);
+  await resync(caseId, stored);
+  throw result.error;
+}
+
+async function resync(caseId: string, stored: unknown) {
   const { status } = await db.readCase(caseId);
   const resynced = await runAgent(caseMachine, {
     snapshot: stored,
     event: { type: "RESYNC", status },
     executors,
   });
-  await storage.put(`snapshot:${caseId}`, resynced.persist());
-  throw result.error;
+  const snapshot = resynced.persist();
+  await storage.put(`snapshot:${caseId}`, snapshot);
+  await storage.delete(`resync:${caseId}`);
+  return snapshot;
 }
 ```
 
 - `RESYNC` is handled on the root, so every state accepts it. Its payload is the host's record, read back after the failure, and the transition maps it to a state with no other logic.
+- No message runs against a case until its reconciliation completes. The `resync:` marker is written before reconciling and deleted only after the resynced snapshot is stored, so a failed `db.readCase` or `storage.put` leaves the marker, and the next message reconciles first. If that reconciliation fails too, `onMessage` throws before any model call.
 - Send it to the snapshot stored before the failed run. A snapshot of the error result stays in `error`: a resume from it settles `error` again.
 - Store a snapshot on every settle path. A port that stores only on success keeps the state from before the failure.
 - Adding `RESYNC` changes the machine, so bump `version`. XState requires an `id` on a machine with a `version`. See [Version bridge](persistence.md#version-bridge) for snapshots stored under the old version.
@@ -451,23 +465,27 @@ When the existing class writes to its database inline (dozens of SQL or schedule
 ```ts no-check
 import { compareRuns } from "@statelyai/agent/testing";
 
+async function runAgainstDatabase(run: typeof runOldAgent, scenario: Scenario) {
+  const db = createTestDatabase();
+  try {
+    const outcome = await run(db, scenario);
+    return { outcome, effects: db.dumpTables() };
+  } catch {
+    // A run that throws can still have committed writes: compare them too.
+    return { outcome: "threw", effects: db.dumpTables() };
+  }
+}
+
 const report = await compareRuns({
   scenarios, // [{ id, expected?, ...your fields }]
-  baseline: async (scenario) => {
-    const db = createTestDatabase();
-    const outcome = await runOldAgent(db, scenario);
-    return { outcome, effects: db.dumpTables() };
-  },
-  candidate: async (scenario) => {
-    const db = createTestDatabase();
-    const outcome = await runPortedAgent(db, scenario);
-    return { outcome, effects: db.dumpTables() };
-  },
+  baseline: (scenario) => runAgainstDatabase(runOldAgent, scenario),
+  candidate: (scenario) => runAgainstDatabase(runPortedAgent, scenario),
 });
 expect(report.ok).toBe(true); // no regressions
 ```
 
 - `effects` is compared structurally. Sort rows whose order does not matter.
+- Read the database on the throw path too. A run that throws after a write commits is the case the [reconcile](#reconcile-on-error) step exists for, and `outcome: "threw"` with no `effects` would hide that write.
 - Include every table the agent writes, scheduled alarms included. A write left out of `effects` is not compared.
 - See [Outcome labels](evals.md#outcome-labels) for how each difference is labeled.
 
