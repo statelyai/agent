@@ -311,6 +311,28 @@ describe("describeMachine format: mermaid", () => {
     `);
   });
 
+  test("a composite state moved off a marker id reserves its own markers", () => {
+    const machine = setup({}).createMachine({
+      id: "m",
+      initial: "group_start",
+      states: {
+        group_start: { initial: "a", states: { a: {} } },
+        group: { initial: "b", states: { b: {} } },
+        group_start_2_start: {},
+      },
+    });
+    const lines = describeMachine(machine, { format: "mermaid" }).split("\n");
+    const declared = lines
+      .map((line) => /^\s*(?:state (?:"[^"]*" as )?)?(\w+)(?: \{)?$/.exec(line)?.[1])
+      .filter((id): id is string => id !== undefined && id !== "stateDiagram");
+    const composites = lines
+      .map((line) => /^\s*state (\w+) \{$/.exec(line)?.[1])
+      .filter((id): id is string => id !== undefined);
+    const markers = composites.flatMap((id) => [`${id}_start`, `${id}_end`]);
+    expect(composites).toContain("group_start_2");
+    expect(declared.filter((id) => markers.includes(id))).toEqual([]);
+  });
+
   test("ids never take a word Mermaid's lexer reads as a keyword", () => {
     const machine = setup({}).createMachine({
       id: "m",

@@ -510,7 +510,8 @@ function describeMermaid(machine: AnyStateMachine, options: DescribeMachineOptio
     // Mermaid names a block's `[*]` markers `<id>_start` and `<id>_end`; a state holding one moves.
     for (const marker of [`${id}_start`, `${id}_end`]) {
       const holder = [...ids].find(([, held]) => held === marker)?.[0];
-      if (holder) ids.set(holder, allocate(marker));
+      // Assigned again, so a composite holder reserves its own new markers.
+      if (holder) assign(holder, marker);
       else used.add(marker);
     }
   };
