@@ -17,4 +17,8 @@ export default defineConfig({
   format: ["esm", "cjs"],
   dts: true,
   clean: true,
+  // JSDoc stays in the .d.mts/.d.cts files. In the .mjs/.cjs files, a JSDoc
+  // example with `vi.mock(` makes Vitest 4 hoist the module as a mock file
+  // under the Cloudflare pool, and its re-exports then read `undefined`.
+  outputOptions: { comments: { jsdoc: false } },
 });

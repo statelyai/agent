@@ -47,13 +47,12 @@ describe("verification", () => {
   });
 
   test("the violation stated as a snapshot predicate needs no sentinel state", async () => {
-    type Ctx = { amount: number; approved: boolean };
     const violation = await canReach(
       refundMachine,
       (snapshot) =>
         snapshot.matches("issued") &&
-        (snapshot.context as Ctx).amount > APPROVAL_THRESHOLD &&
-        !(snapshot.context as Ctx).approved,
+        snapshot.context.amount > APPROVAL_THRESHOLD &&
+        !snapshot.context.approved,
       { input: LARGE },
     );
     expect(violation.reachable).toBe(false);
@@ -61,7 +60,7 @@ describe("verification", () => {
     // The predicate's legal counterpart: issued WITH approval on record.
     const legal = await canReach(
       refundMachine,
-      (snapshot) => snapshot.matches("issued") && (snapshot.context as Ctx).approved,
+      (snapshot) => snapshot.matches("issued") && snapshot.context.approved,
       { input: LARGE },
     );
     expect(legal.reachable).toBe(true);

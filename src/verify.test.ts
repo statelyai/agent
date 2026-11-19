@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, expectTypeOf, test } from "vitest";
 import { z } from "zod";
 import { createAsyncLogic, createMachine } from "xstate";
 import { createTextLogic, createAgentRuntime, setupAgent, type ChosenEvent } from "./index.js";
@@ -560,18 +560,39 @@ describe("canReach — predicate targets", () => {
     });
   }
 
-  test("a snapshot predicate can express a violation property without a sentinel state", async () => {
-    type Ctx = { amount: number; approved: boolean };
+  test("predicates and snapshot callbacks receive the machine's typed snapshot", () => {
+    // Type-only: the calls below never run.
+    const typesOnly = () => {
+      const machine = createApprovalMachine();
+      void canReach(machine, (snapshot) => {
+        expectTypeOf(snapshot.context.amount).toBeNumber();
+        expectTypeOf(snapshot.context.approved).toBeBoolean();
+        // @ts-expect-error the context has no `amout`
+        void snapshot.context.amout;
+        return snapshot.matches("issued");
+      });
+      void explorePaths(machine, {
+        dedupeBy: (snapshot) => {
+          expectTypeOf(snapshot.context.amount).toBeNumber();
+          return String(snapshot.context.approved);
+        },
+        payloads: (snapshot) => {
+          expectTypeOf(snapshot.context.approved).toBeBoolean();
+          return {};
+        },
+      });
+    };
+    expect(typesOnly).toBeTypeOf("function");
+  });
 
+  test("a snapshot predicate can express a violation property without a sentinel state", async () => {
     // The safety property: over the limit, `issued` is never entered without
     // `approved` — a predicate over context that only APPROVE can flip, so
     // this is decided by exploration, not by the input alone.
     const violation = await canReach(
       createApprovalMachine(),
       (snapshot) =>
-        snapshot.matches("issued") &&
-        (snapshot.context as Ctx).amount > 100 &&
-        !(snapshot.context as Ctx).approved,
+        snapshot.matches("issued") && snapshot.context.amount > 100 && !snapshot.context.approved,
       { input: { amount: 5000 } },
     );
     expect(violation.reachable).toBe(false);
@@ -580,7 +601,7 @@ describe("canReach — predicate targets", () => {
     // witness must pass through the human gate.
     const legal = await canReach(
       createApprovalMachine(),
-      (snapshot) => snapshot.matches("issued") && (snapshot.context as Ctx).approved,
+      (snapshot) => snapshot.matches("issued") && snapshot.context.approved,
       { input: { amount: 5000 } },
     );
     expect(legal.reachable).toBe(true);
@@ -590,7 +611,7 @@ describe("canReach — predicate targets", () => {
     // (approved never set) still has no witness.
     const small = await canReach(
       createApprovalMachine(),
-      (snapshot) => snapshot.matches("issued") && !(snapshot.context as Ctx).approved,
+      (snapshot) => snapshot.matches("issued") && !snapshot.context.approved,
       { input: { amount: 40 } },
     );
     expect(small.reachable).toBe(true);
