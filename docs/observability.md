@@ -6,6 +6,8 @@ Use XState inspection for actor/runtime behavior and Agent traces for model-requ
 
 The package does not ship a visualizer. A run streams XState's inspection events through the `inspect` option, and the Stately inspector renders them live: the machine diagram, the active state, and every event.
 
+For a diagram that needs no relay or network connection, `describeMachine(machine, { format: "mermaid" })` renders the machine as a Mermaid state diagram. See [Mermaid diagrams](machines-as-data.md#mermaid-diagrams).
+
 ```sh
 pnpm add -D @statelyai/sdk
 ```

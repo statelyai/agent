@@ -22,7 +22,13 @@ import { getJsonSchemaSync } from "./utils.js";
 
 /** Options for {@link describeMachine}. */
 export interface DescribeMachineOptions {
-  /** Marks the state nodes active in this snapshot with `*`. */
+  /**
+   * `"text"` (the default) for the indented outline a model reads, or
+   * `"mermaid"` for a Mermaid `stateDiagram-v2` diagram. `source` and
+   * `helpers` apply to text only.
+   */
+  format?: "text" | "mermaid";
+  /** Marks the state nodes active in this snapshot: `*` in text, the `active` class in Mermaid. */
   snapshot?: AnyMachineSnapshot;
   /**
    * Prints each transition written as a function under its line, so one read
@@ -131,67 +137,114 @@ function guardText(guard: unknown): string | undefined {
   return "guarded";
 }
 
+/** A transition's target as said from the state it leaves, with the node it names when it names one. */
+interface Target {
+  name: string;
+  node?: AnyStateNode;
+}
+
+/** One transition leaving a state node, as read from its definition. Both formats render from it. */
+interface TransitionInfo {
+  /** The text line's head: `on GO`, `always`, `after 1s`, `  done`, `choice else`. */
+  head: string;
+  /** The diagram edge's label: `GO`, `always`, `after 1s`, `payout done`, `else`, or none. */
+  label: string;
+  /** A `choice` branch: its alternatives are the choice node's, so it carries no `?`. */
+  choice: boolean;
+  transition: unknown;
+  /** Each target it names, in order; a function's are unique by node (by name when it names none). */
+  targets: Target[];
+  /** Some path goes to a target its source does not spell out (`?`). */
+  unknown: boolean;
+  /** A function that may decline, stay, or pick among several targets. */
+  conditional: boolean;
+  guard?: string;
+  description?: string;
+  human: boolean;
+  sets: string[];
+}
+
+/** What leaves a state node, in order: transitions, and a header line before each invoke's. */
+type TransitionEntry = TransitionInfo | { invoke: string };
+
+const targetOf = (source: AnyStateNode, target: string): Target => {
+  const node = resolveTarget(source, target);
+  return node ? { name: nameOf(source, node), node } : { name: `${target} ?` };
+};
+
 /**
- * Where a transition written as a function goes, read from its return paths:
- * each literal target (`x ?` when it names no state node), `?` for one the
- * source does not spell out (a variable's value, a helper call's result),
- * `(conditional)` when it may decline, stay, or pick among several, and
- * `(stays)` when no path names a target.
+ * Reads one transition. A function's targets come from its return paths: each
+ * literal target (`x ?` when it names no state node), `unknown` for one the
+ * source does not spell out (a variable's value, a helper call's result), and
+ * `conditional` when it may decline, stay, or pick among several.
  */
-function targetsInSource(source: AnyStateNode, code: string, choice: boolean): string {
-  const read = readTransitionSource(code);
-  if (!read) return "?";
-  const names = read.targets.map((target) => {
-    const node = resolveTarget(source, target);
-    return node ? nameOf(source, node) : `${target} ?`;
-  });
-  const parts = [...new Set(names)];
-  if (read.unknown) parts.push("?");
+function readTransition(
+  source: AnyStateNode,
+  head: string,
+  label: string,
+  transition: unknown,
+  options: { guardKey?: "guard" | "when"; choice?: boolean } = {},
+): TransitionInfo {
+  const choice = options.choice ?? false;
+  const info: TransitionInfo = {
+    head,
+    label,
+    choice,
+    transition,
+    targets: [],
+    unknown: false,
+    conditional: false,
+    human: false,
+    sets: [],
+  };
+  const code = codeOf(transition);
+  if (typeof transition === "string") {
+    info.targets = [targetOf(source, transition)];
+  } else if (code !== undefined) {
+    const read = readTransitionSource(code);
+    if (!read) {
+      info.unknown = true;
+    } else {
+      const unique = new Map<AnyStateNode | string, Target>();
+      for (const target of read.targets.map((t) => targetOf(source, t))) {
+        const key = target.node ?? target.name;
+        if (!unique.has(key)) unique.set(key, target);
+      }
+      info.targets = [...unique.values()];
+      info.unknown = read.unknown;
+      const count = info.targets.length + (read.unknown ? 1 : 0);
+      info.conditional = count > 1 || (!choice && (read.declines || read.stays));
+    }
+    info.sets = contextKeys(undefined, code);
+  } else if (isObject(transition) && !("@expr" in transition)) {
+    info.targets = toList(transition.target)
+      .filter((t): t is string => typeof t === "string")
+      .map((target) => targetOf(source, target));
+    info.guard = guardText(transition[options.guardKey ?? "guard"]);
+    info.description =
+      typeof transition.description === "string" ? transition.description : undefined;
+    info.human = isObject(transition.meta) && transition.meta.actor === "human";
+    info.sets = contextKeys(transition, undefined);
+  } else {
+    info.unknown = true;
+  }
+  return info;
+}
+
+/** Where a transition goes, as said in the text: `review`, `review, paying (conditional)`, `?`, `(stays)`. */
+function targetText(info: TransitionInfo): string {
+  // Two nodes can share a name (`b` and `#m.b` from inside `group`); the text says it once.
+  const parts = [...new Set(info.targets.map((target) => target.name))];
+  if (info.unknown) parts.push("?");
   if (!parts.length) return "(stays)";
-  if (parts.length === 1 && read.unknown) return "?";
-  const conditional = parts.length > 1 || (!choice && (read.declines || read.stays));
-  return `${parts.join(", ")}${conditional ? " (conditional)" : ""}`;
+  if (parts.length === 1 && info.unknown) return "?";
+  return `${parts.join(", ")}${info.conditional ? " (conditional)" : ""}`;
 }
 
 /** One transition, as a line: `on GO (human) if context.ready → review; sets draft - description`. */
-function transitionLine(
-  source: AnyStateNode,
-  head: string,
-  transition: unknown,
-  options: { guardKey?: "guard" | "when"; choice?: boolean } = {},
-): string {
-  const code = codeOf(transition);
-  let to: string;
-  let guard: string | undefined;
-  let description: string | undefined;
-  let human = false;
-  let sets: string[];
-  if (typeof transition === "string") {
-    const node = resolveTarget(source, transition);
-    to = node ? nameOf(source, node) : `${transition} ?`;
-    sets = [];
-  } else if (code !== undefined) {
-    to = targetsInSource(source, code, options.choice ?? false);
-    sets = contextKeys(undefined, code);
-  } else if (isObject(transition) && !("@expr" in transition)) {
-    const targets = toList(transition.target).filter((t): t is string => typeof t === "string");
-    to = targets.length
-      ? targets
-          .map((target) => {
-            const node = resolveTarget(source, target);
-            return node ? nameOf(source, node) : `${target} ?`;
-          })
-          .join(", ")
-      : "(stays)";
-    guard = guardText(transition[options.guardKey ?? "guard"]);
-    description = typeof transition.description === "string" ? transition.description : undefined;
-    human = isObject(transition.meta) && transition.meta.actor === "human";
-    sets = contextKeys(transition, undefined);
-  } else {
-    to = "?";
-    sets = [];
-  }
-  return `${head}${human ? " (human)" : ""}${guard ? ` if ${guard}` : ""} → ${to}${sets.length ? `; sets ${sets.join(", ")}` : ""}${
+function transitionLine(info: TransitionInfo): string {
+  const { head, human, guard, sets, description } = info;
+  return `${head}${human ? " (human)" : ""}${guard ? ` if ${guard}` : ""} → ${targetText(info)}${sets.length ? `; sets ${sets.join(", ")}` : ""}${
     description ? ` - ${oneLine(description)}` : ""
   }`;
 }
@@ -223,6 +276,50 @@ function sourceLines(transition: unknown, pad: string): string[] {
     .map((line) => `${pad}  | ${line.trimEnd()}`);
 }
 
+/** Every transition leaving one state node, in order: `on`, `onDone`, `always`, `after`, invokes, `choice`. */
+function readTransitions(node: AnyStateNode, json: Json, delays: Json): TransitionEntry[] {
+  const entries: TransitionEntry[] = [];
+  const push = (head: string, label: string, value: unknown) => {
+    for (const transition of toList(value)) {
+      entries.push(readTransition(node, head, label, transition));
+    }
+  };
+  for (const [event, value] of Object.entries(isObject(json.on) ? json.on : {})) {
+    // fromConfig lowers a state-level `onDone` to its own done event.
+    if (event === "xstate.done.state") push("onDone", "onDone", value);
+    else push(`on ${event}`, event, value);
+  }
+  push("onDone", "onDone", json.onDone);
+  push("always", "always", json.always);
+  for (const [key, value] of Object.entries(isObject(json.after) ? json.after : {})) {
+    const after = `after ${delayText(key, delays)}`;
+    push(after, after, value);
+  }
+  for (const invoke of toList(json.invoke)) {
+    if (!isObject(invoke)) continue;
+    const src = typeof invoke.src === "string" ? invoke.src : "(inline)";
+    const id = typeof invoke.id === "string" && invoke.id !== src ? ` (${invoke.id})` : "";
+    const name = typeof invoke.id === "string" ? invoke.id : src;
+    entries.push({ invoke: `invoke ${src}${id}` });
+    push("  done", `${name} done`, invoke.onDone);
+    push("  error", `${name} error`, invoke.onError);
+  }
+  if (json.choice !== undefined) {
+    const branches = toList(json.choice);
+    branches.forEach((branch, index) => {
+      const guarded = isObject(branch) && branch.when !== undefined;
+      const head = guarded || index === 0 ? "choice" : "choice else";
+      entries.push(
+        readTransition(node, head, head === "choice" ? "" : "else", branch, {
+          guardKey: "when",
+          choice: true,
+        }),
+      );
+    });
+  }
+  return entries;
+}
+
 /** Every transition leaving one state node, as lines at `pad`. */
 function transitionLines(
   node: AnyStateNode,
@@ -232,17 +329,6 @@ function transitionLines(
   source: boolean,
 ): string[] {
   const lines: string[] = [];
-  const line = (
-    head: string,
-    transition: unknown,
-    options?: Parameters<typeof transitionLine>[3],
-  ) => {
-    lines.push(`${pad}${transitionLine(node, head, transition, options)}`);
-    if (source) lines.push(...sourceLines(transition, pad));
-  };
-  const push = (head: string, value: unknown) => {
-    for (const transition of toList(value)) line(head, transition);
-  };
   if (source) {
     for (const key of ["entry", "exit"] as const) {
       for (const action of toList(json[key])) {
@@ -251,30 +337,13 @@ function transitionLines(
       }
     }
   }
-  for (const [event, value] of Object.entries(isObject(json.on) ? json.on : {})) {
-    // fromConfig lowers a state-level `onDone` to its own done event.
-    push(event === "xstate.done.state" ? "onDone" : `on ${event}`, value);
-  }
-  push("onDone", json.onDone);
-  push("always", json.always);
-  for (const [key, value] of Object.entries(isObject(json.after) ? json.after : {})) {
-    push(`after ${delayText(key, delays)}`, value);
-  }
-  for (const invoke of toList(json.invoke)) {
-    if (!isObject(invoke)) continue;
-    const src = typeof invoke.src === "string" ? invoke.src : "(inline)";
-    const id = typeof invoke.id === "string" && invoke.id !== src ? ` (${invoke.id})` : "";
-    lines.push(`${pad}invoke ${src}${id}`);
-    push("  done", invoke.onDone);
-    push("  error", invoke.onError);
-  }
-  if (json.choice !== undefined) {
-    const branches = toList(json.choice);
-    branches.forEach((branch, index) => {
-      const guarded = isObject(branch) && branch.when !== undefined;
-      const head = guarded || index === 0 ? "choice" : "choice else";
-      line(head, branch, { guardKey: "when", choice: true });
-    });
+  for (const entry of readTransitions(node, json, delays)) {
+    if ("invoke" in entry) {
+      lines.push(`${pad}${entry.invoke}`);
+      continue;
+    }
+    lines.push(`${pad}${transitionLine(entry)}`);
+    if (source) lines.push(...sourceLines(entry.transition, pad));
   }
   return lines;
 }
@@ -346,6 +415,231 @@ function eventLines(machine: AnyStateMachine): string[] {
   return lines;
 }
 
+/** Words Mermaid's state diagram grammar reserves or its lexer reads as keywords, so never used as a bare id. */
+const MERMAID_RESERVED = new Set([
+  "as",
+  "class",
+  "classdef",
+  "click",
+  "default",
+  "direction",
+  "end",
+  "hide",
+  "href",
+  "note",
+  "scale",
+  "state",
+  "statediagram",
+  "style",
+]);
+
+const MERMAID_ENTITIES: Record<string, string> = {
+  "#": "#35;",
+  ":": "#58;",
+  ";": "#59;",
+  '"': "#quot;",
+  "<": "#lt;",
+  ">": "#gt;",
+};
+
+/** Text Mermaid reads as written: one line, with the characters its grammar uses as entity codes. */
+const mermaidText = (text: string) =>
+  oneLine(text).replace(/[#:;"<>]/g, (char) => MERMAID_ENTITIES[char]!);
+
+/** An edge's label: the event, `?` when a function may go elsewhere or nowhere, and the guard. */
+function edgeLabel(info: TransitionInfo): string {
+  const label = `${info.label}${info.conditional && !info.choice ? "?" : ""}`;
+  return info.guard ? `${label}${label ? " " : ""}[${info.guard}]` : label;
+}
+
+/** Whether `ancestor` contains `node` (and is not `node`). */
+const contains = (ancestor: AnyStateNode, node: AnyStateNode) =>
+  node.path.length > ancestor.path.length &&
+  ancestor.path.every((key, index) => node.path[index] === key);
+
+/** The nearest node whose diagram block can hold an edge: never inside a parallel node, where `--` separates regions. */
+function blockOf(node: AnyStateNode | undefined): AnyStateNode | undefined {
+  while (node && node.type === "parallel") node = node.parent;
+  return node;
+}
+
+/** The machine as a Mermaid `stateDiagram-v2`; see {@link describeMachine}. */
+function describeMermaid(machine: AnyStateMachine, options: DescribeMachineOptions): string {
+  const json = machineToJSON(machine) as Json;
+  const delays = isObject(json.delays) ? json.delays : {};
+  const root = machine.root;
+
+  // Every state node with its JSON, depth-first.
+  const nodes: Array<[AnyStateNode, Json]> = [];
+  const collect = (node: AnyStateNode, nodeJson: Json) => {
+    nodes.push([node, nodeJson]);
+    const childJson = isObject(nodeJson.states) ? nodeJson.states : {};
+    for (const [key, child] of Object.entries(node.states)) {
+      collect(child, isObject(childJson[key]) ? childJson[key] : {});
+    }
+  };
+  collect(root, json);
+
+  const transitionsOf = new Map(
+    nodes.map(([node, nodeJson]) => [
+      node,
+      readTransitions(node, nodeJson, delays).filter(
+        (entry): entry is TransitionInfo => !("invoke" in entry),
+      ),
+    ]),
+  );
+
+  // Ids: a state's key when no other state shares it, else its path; then made safe and unique.
+  // Mermaid names the top-level `[*]` markers `root_start` and `root_end`.
+  const used = new Set<string>(["root_start", "root_end"]);
+  const allocate = (candidate: string) => {
+    let id = candidate.replace(/[^A-Za-z0-9_]/g, "_");
+    if (!/^[A-Za-z_]/.test(id) || MERMAID_RESERVED.has(id.toLowerCase())) id = `s_${id}`;
+    let unique = id;
+    for (let n = 2; used.has(unique); n++) unique = `${id}_${n}`;
+    used.add(unique);
+    return unique;
+  };
+  const keyCounts = new Map<string, number>();
+  for (const [node] of nodes.slice(1)) keyCounts.set(node.key, (keyCounts.get(node.key) ?? 0) + 1);
+  const ids = new Map<AnyStateNode, string>();
+  const assign = (node: AnyStateNode, candidate: string) => {
+    const id = allocate(candidate);
+    ids.set(node, id);
+    if (!Object.keys(node.states).length) return;
+    // Mermaid names a block's `[*]` markers `<id>_start` and `<id>_end`; a state holding one moves.
+    for (const marker of [`${id}_start`, `${id}_end`]) {
+      const holder = [...ids].find(([, held]) => held === marker)?.[0];
+      // Assigned again, so a composite holder reserves its own new markers.
+      if (holder) assign(holder, marker);
+      else used.add(marker);
+    }
+  };
+  // The machine is a composite state when it is parallel or a transition targets it.
+  const rootTargeted = [...transitionsOf.values()].some((list) =>
+    list.some((info) => info.targets.some((target) => target.node === root)),
+  );
+  if (root.type === "parallel" || rootTargeted) assign(root, machine.id);
+  for (const [node] of nodes.slice(1)) {
+    assign(node, keyCounts.get(node.key) === 1 ? node.key : node.path.join("_"));
+  }
+
+  // Edges, each in the block of the nearest node that holds both ends.
+  const edges = new Map<AnyStateNode | undefined, string[]>();
+  const addEdge = (block: AnyStateNode | undefined, ...lines: string[]) => {
+    const key = blockOf(block);
+    edges.set(key, [...(edges.get(key) ?? []), ...lines]);
+  };
+  const unknownIds: string[] = [];
+  for (const [node, transitions] of transitionsOf) {
+    if (!transitions.length) continue;
+    let from = ids.get(node);
+    if (from === undefined) {
+      // Transitions on the machine itself leave any state.
+      from = allocate("any_state");
+      addEdge(root, `state "any state" as ${from}`);
+    }
+    for (const info of transitions) {
+      const label = edgeLabel(info);
+      const suffix = label ? ` : ${mermaidText(label)}` : "";
+      for (const target of info.targets) {
+        if (target.node && ids.has(target.node)) {
+          let block = node === root ? root : node.parent;
+          while (block && !contains(block, target.node)) block = block.parent;
+          addEdge(block, `${from} --> ${ids.get(target.node)}${suffix}`);
+        } else {
+          const id = allocate(`${from}_unknown`);
+          unknownIds.push(id);
+          addEdge(
+            node === root ? root : node.parent,
+            `state "${mermaidText(target.name)}" as ${id}`,
+            `${from} --> ${id}${suffix}`,
+          );
+        }
+      }
+      if (info.unknown) {
+        const id = allocate(`${from}_unknown`);
+        unknownIds.push(id);
+        addEdge(
+          node === root ? root : node.parent,
+          `state "?" as ${id}`,
+          `${from} --> ${id}${suffix}`,
+        );
+      }
+    }
+  }
+
+  /** The lines inside a node's block: initial, children, finals, then the edges it holds. */
+  const inner = (node: AnyStateNode, nodeJson: Json, pad: string): string[] => {
+    const lines: string[] = [];
+    const initial =
+      typeof nodeJson.initial === "string" ? node.states[nodeJson.initial] : undefined;
+    if (node.type === "compound" && initial) lines.push(`${pad}[*] --> ${ids.get(initial)}`);
+    const childJson = isObject(nodeJson.states) ? nodeJson.states : {};
+    Object.entries(node.states).forEach(([key, child], index) => {
+      if (node.type === "parallel" && index > 0) lines.push(`${pad}--`);
+      lines.push(...declare(child, isObject(childJson[key]) ? childJson[key] : {}, pad));
+    });
+    for (const child of Object.values(node.states)) {
+      if (child.type === "final") lines.push(`${pad}${ids.get(child)} --> [*]`);
+    }
+    for (const line of edges.get(node) ?? []) lines.push(`${pad}${line}`);
+    return lines;
+  };
+  const historyIds: string[] = [];
+  /**
+   * A state node's declaration: its label when its id differs from its key, then its block.
+   * A history node is labeled `H` (shallow) or `H*` (deep). A choice node has no label, so a
+   * note keeps its key when its id differs.
+   */
+  const declare = (node: AnyStateNode, nodeJson: Json, pad: string): string[] => {
+    const id = ids.get(node)!;
+    if (node.type === "history") {
+      historyIds.push(id);
+      return [`${pad}state "${nodeJson.history === "deep" ? "H*" : "H"}" as ${id}`];
+    }
+    if (node.type === "choice") {
+      const lines = [`${pad}state ${id} <<choice>>`];
+      if (id !== node.key) lines.push(`${pad}note right of ${id} : ${mermaidText(node.key)}`);
+      return lines;
+    }
+    const lines: string[] = [];
+    const labelled = id !== node.key;
+    if (labelled) lines.push(`${pad}state "${mermaidText(node.key)}" as ${id}`);
+    if (Object.keys(node.states).length) {
+      lines.push(`${pad}state ${id} {`, ...inner(node, nodeJson, `${pad}  `), `${pad}}`);
+    } else if (!labelled) {
+      lines.push(`${pad}${id}`);
+    }
+    return lines;
+  };
+
+  const lines = ["stateDiagram-v2"];
+  if (ids.has(root)) {
+    lines.push(...declare(root, json, "  "));
+    for (const line of edges.get(undefined) ?? []) lines.push(`  ${line}`);
+  } else {
+    lines.push(...inner(root, json, "  "));
+  }
+  if (unknownIds.length) {
+    lines.push("  classDef unknown stroke-dasharray:5", `  class ${unknownIds.join(",")} unknown`);
+  }
+  if (historyIds.length) {
+    lines.push("  classDef history font-style:italic", `  class ${historyIds.join(",")} history`);
+  }
+  const active = new Set(options.snapshot?.nodes.map((node) => node.id) ?? []);
+  const activeIds = nodes.flatMap(([node]) =>
+    node !== root && active.has(node.id) ? [ids.get(node)!] : [],
+  );
+  if (activeIds.length) {
+    lines.push(
+      "  classDef active font-weight:bold,stroke-width:3px",
+      `  class ${activeIds.join(",")} active`,
+    );
+  }
+  return lines.join("\n");
+}
+
 /**
  * Describes a machine in plain text for a model to read. The machine's
  * `description` is its goal, so it leads: `Machine <id>`, then `Goal: …`.
@@ -368,6 +662,12 @@ function eventLines(machine: AnyStateMachine): string[] {
  * functions they call by name. A `setupAgent.fromConfig(...)` machine is read from its config, so
  * its targets, guards and context patches are always known.
  *
+ * With `format: "mermaid"`, the same states and transitions render as a
+ * Mermaid `stateDiagram-v2` diagram: one edge per target, labeled with the
+ * event (`always`, `after 5s`, `payout done`, `[guard]`), `?` after the label
+ * of a function that may go elsewhere or nowhere, and a dashed `?` node for a
+ * target its source does not spell out.
+ *
  * @example
  * ```ts
  * const prompt = `Propose a better machine for this goal.\n\n${describeMachine(machine)}`;
@@ -377,6 +677,7 @@ export function describeMachine(
   machine: AnyStateMachine,
   options: DescribeMachineOptions = {},
 ): string {
+  if (options.format === "mermaid") return describeMermaid(machine, options);
   const json = machineToJSON(machine) as Json;
   const delays = isObject(json.delays) ? json.delays : {};
   const active = new Set(options.snapshot?.nodes.map((node) => node.id) ?? []);
