@@ -444,6 +444,8 @@ async function resync(caseId: string, stored: unknown) {
     event: { type: "RESYNC", status },
     executors,
   });
+  // A failed RESYNC keeps the marker for the next message to retry.
+  if (resynced.status === "error") throw resynced.error;
   const snapshot = resynced.persist();
   await storage.put(`snapshot:${caseId}`, snapshot);
   await storage.delete(`resync:${caseId}`);
