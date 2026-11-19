@@ -440,7 +440,7 @@ Set `budget.ms` under the test runner's timeout, so a long search fails its asse
 `canReach(machine, target, opts)` wraps `explorePaths` to answer whether a target is reachable, with a witness path when it is. The target (`CanReachTarget`) is one of:
 
 - A state path or state-node ID.
-- A snapshot predicate, `(snapshot) => boolean`, for a property no single state names: a context invariant, a tag, a state plus context. `snapshot` is the machine's own snapshot type, so `snapshot.context` is typed. `payloads` and `dedupeBy` receive the same type.
+- A snapshot predicate, `(snapshot) => boolean`, for a property no single state names: a context invariant, a tag, a state plus context. `snapshot` is the machine's own snapshot type, so `snapshot.context` is typed. `payloads` and `dedupeBy` receive the same type, except where a child search also calls them with a child's snapshot: `payloads` under `children: "explore"` or `"coupled"`, and `dedupeBy` under `children: "explore"`. There they receive `TSnapshot | ExploreSnapshot`. Tell the two apart with `snapshot.machine.id`.
 - An ordering, `{ after, reach }`, for a rule about order: "no turn starts after STOP". See [Ordering targets](#ordering-targets).
 
 ```ts no-check

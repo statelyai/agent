@@ -698,5 +698,55 @@ describe("checkConformance", () => {
       });
       expect(report.deviation?.schemaError).toContain("Invalid event payload for 'USER'");
     });
+
+    test("an output is checked against the actor a provide replaced, not the setup actor", async () => {
+      const provided = typed.provide({
+        actors: {
+          // A replacement whose output type differs from the setup actor's.
+          lookup: createAsyncLogic({
+            schemas: { output: z.number() },
+            run: async (): Promise<never> => Promise.reject(new Error("model only")),
+          }) as never,
+        },
+      });
+      const check = (lookup: unknown) =>
+        checkConformance(provided, {
+          observations,
+          actors: {
+            callModel: { observes: "model", output: () => ({ kind: "calls", calls: ["lookup"] }) },
+            lookup: { observes: "lookup", output: () => lookup },
+          },
+          events: { user: () => ({ type: "USER", text: "hi" }) },
+        });
+
+      expect((await check(42)).conforms).toBe(true);
+      expect((await check("found")).deviation).toMatchObject({
+        reason: "invalid-output",
+        expected: "lookup",
+      });
+    });
+
+    test("the model receives the event as its schema parsed it", async () => {
+      const defaulted = setupAgent({
+        context: z.object({}),
+        events: { USER: z.object({ text: z.string(), lang: z.string().default("en") }) },
+      }).createMachine({
+        context: {},
+        initial: "waiting",
+        states: {
+          waiting: {
+            on: { USER: ({ event }) => (event.lang === "en" ? { target: "done" } : undefined) },
+          },
+          done: { type: "final" },
+        },
+      });
+      const report = await checkConformance(defaulted, {
+        observations: [{ kind: "user" }],
+        actors: {},
+        events: { user: () => ({ type: "USER", text: "hi" }) as never },
+      });
+      expect(report.deviation).toBeUndefined();
+      expect(report.conforms).toBe(true);
+    });
   });
 });

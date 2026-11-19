@@ -1139,12 +1139,32 @@ export type CanReachTarget<TSnapshot extends ExploreSnapshot = ExploreSnapshot> 
   | ((snapshot: TSnapshot) => boolean)
   | CanReachOrdering;
 
+/** How {@link ExplorePathsOptions.children} settles a child state machine. */
+type ExploreChildren = "outputs" | "explore" | "coupled";
+
+/**
+ * The snapshot a callback receives: the machine's own, or also any explored
+ * child's when one of the `children` modes in `TModes` runs it in a child
+ * search.
+ */
+type ExploreCallbackSnapshot<
+  TSnapshot extends ExploreSnapshot,
+  TChildren extends ExploreChildren,
+  TModes extends ExploreChildren,
+> = [Extract<TChildren, TModes>] extends [never] ? TSnapshot : TSnapshot | ExploreSnapshot;
+
 /**
  * Options for {@link explorePaths} and {@link canReach}. `payloads` and
  * `dedupeBy` receive the machine's snapshot, typed from the machine passed to
- * the call.
+ * the call. A child search calls them with the child's snapshot too:
+ * `payloads` with `children: "explore"` or `"coupled"`, `dedupeBy` with
+ * `children: "explore"`. There they are typed `TSnapshot | ExploreSnapshot`;
+ * tell the two apart with `snapshot.machine.id`.
  */
-export interface ExplorePathsOptions<TSnapshot extends ExploreSnapshot = ExploreSnapshot> {
+export interface ExplorePathsOptions<
+  TSnapshot extends ExploreSnapshot = ExploreSnapshot,
+  TChildren extends ExploreChildren = ExploreChildren,
+> {
   /**
    * The machine input. A machine with a declared input schema validates it as
    * a run does: input the schema rejects throws `invalid-machine-input`, and
@@ -1286,7 +1306,7 @@ export interface ExplorePathsOptions<TSnapshot extends ExploreSnapshot = Explore
    * than `"explore"` for authored child machines; `"explore"` remains the
    * over-approximation for a child whose behavior you do not want to trust.
    */
-  children?: "outputs" | "explore" | "coupled";
+  children?: TChildren;
   /**
    * With `children: "explore"`: per child src, the event types that can
    * reach the child at its waits (the ones the parent forwards with
@@ -1322,7 +1342,9 @@ export interface ExplorePathsOptions<TSnapshot extends ExploreSnapshot = Explore
    * were not all tried, so it is listed in `unexpandedEvents`. A type with no
    * schema at all is applied as `{ type }`.
    */
-  payloads?: (snapshot: TSnapshot) => Partial<Record<string, Record<string, unknown>[]>>;
+  payloads?: (
+    snapshot: ExploreCallbackSnapshot<TSnapshot, TChildren, "explore" | "coupled">,
+  ) => Partial<Record<string, Record<string, unknown>[]>>;
   /**
    * A projection of the snapshot that determines its future. Settled
    * snapshots with an equal key are explored once (again only when reached
@@ -1337,7 +1359,7 @@ export interface ExplorePathsOptions<TSnapshot extends ExploreSnapshot = Explore
    * key holds structure, not identity: a guard that compares context with an
    * object held outside the snapshot needs its own `dedupeBy`.
    */
-  dedupeBy?: (snapshot: TSnapshot) => string;
+  dedupeBy?: (snapshot: ExploreCallbackSnapshot<TSnapshot, TChildren, "explore">) => string;
   /**
    * Armed timers: `after` delays, state and invoke `timeout`s, and delayed
    * `enq.raise` events (`snapshot.timers` entries the machine delivers to
@@ -4156,12 +4178,17 @@ function withMachineInput<T extends { input?: unknown }>(
  * // report.terminals → both 'refunded' and 'denied'; report.prunedByGuard → 1
  * ```
  */
-export async function explorePaths<TMachine extends AnyStateMachine>(
+export async function explorePaths<
+  TMachine extends AnyStateMachine,
+  TChildren extends ExploreChildren = "outputs",
+>(
   machine: TMachine,
-  options: ExplorePathsOptions<SnapshotFrom<TMachine>> = {},
+  options: ExplorePathsOptions<SnapshotFrom<TMachine>, TChildren> = {},
 ): Promise<AgentPathReport> {
-  return explore(machine, withMachineInput(machine, options as ExplorePathsOptions, "explorePaths"))
-    .report;
+  return explore(
+    machine,
+    withMachineInput(machine, options as unknown as ExplorePathsOptions, "explorePaths"),
+  ).report;
 }
 
 /** The result of a {@link canReach} query. */
@@ -4242,12 +4269,19 @@ function resolveStateTarget(machine: AnyStateMachine, target: string): string {
  * // violation.reachable → false is the safety proof
  * ```
  */
-export async function canReach<TMachine extends AnyStateMachine>(
+export async function canReach<
+  TMachine extends AnyStateMachine,
+  TChildren extends ExploreChildren = "outputs",
+>(
   machine: TMachine,
   target: CanReachTarget<SnapshotFrom<TMachine>>,
-  machineOptions: ExplorePathsOptions<SnapshotFrom<TMachine>> = {},
+  machineOptions: ExplorePathsOptions<SnapshotFrom<TMachine>, TChildren> = {},
 ): Promise<CanReachResult> {
-  const options = withMachineInput(machine, machineOptions as ExplorePathsOptions, "canReach");
+  const options = withMachineInput(
+    machine,
+    machineOptions as unknown as ExplorePathsOptions,
+    "canReach",
+  );
   const resolvedTarget =
     typeof target === "string" ? resolveStateTarget(machine, target) : undefined;
   const ordering = typeof target === "object" ? target : undefined;

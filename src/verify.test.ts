@@ -581,6 +581,37 @@ describe("canReach — predicate targets", () => {
           return {};
         },
       });
+      // Child searches call `payloads` (explore, coupled) and `dedupeBy`
+      // (explore) with the child's snapshot; the predicate sees the root only.
+      void explorePaths(machine, {
+        children: "explore",
+        dedupeBy: (snapshot) => {
+          expectTypeOf(snapshot.context).toBeAny();
+          return "";
+        },
+        payloads: (snapshot) => {
+          expectTypeOf(snapshot.context).toBeAny();
+          return {};
+        },
+      });
+      void canReach(
+        machine,
+        (snapshot) => {
+          expectTypeOf(snapshot.context.amount).toBeNumber();
+          return true;
+        },
+        {
+          children: "coupled",
+          dedupeBy: (snapshot) => {
+            expectTypeOf(snapshot.context.amount).toBeNumber();
+            return "";
+          },
+          payloads: (snapshot) => {
+            expectTypeOf(snapshot.context).toBeAny();
+            return {};
+          },
+        },
+      );
     };
     expect(typesOnly).toBeTypeOf("function");
   });

@@ -270,12 +270,13 @@ function inlineInvokeStates(machine: AnyStateMachine): string[] {
   return found.sort();
 }
 
+// The actor logic a run binds per src: the machine's own (post-provide)
+// sources, as the runtime resolves them, over the setup pack's actors.
 function actorLogics(machine: AnyStateMachine): Record<string, unknown> {
-  return (
-    (getRegisteredAgentExecutionOptions(machine).actors as Record<string, unknown> | undefined) ??
-    (machine as { sources?: { actors?: Record<string, unknown> } }).sources?.actors ??
-    {}
-  );
+  return {
+    ...(getRegisteredAgentExecutionOptions(machine).actors as Record<string, unknown> | undefined),
+    ...(machine as { sources?: { actors?: Record<string, unknown> } }).sources?.actors,
+  };
 }
 
 function actorSources(machine: AnyStateMachine): string[] {
@@ -513,9 +514,12 @@ export async function checkConformance<
       };
       break;
     }
-    const event = callback(`events.${next.kind}`, () => toEvent(next));
+    const mapped = callback(`events.${next.kind}`, () => toEvent(next));
+    let event: unknown;
     try {
-      parseAgentEvent(machine, event, { events: eventSchemasOf(machine) });
+      // Parsed as a host parses at the boundary: the model gets the event
+      // with its schema's defaults and transforms applied.
+      event = parseAgentEvent(machine, mapped, { events: eventSchemasOf(machine) });
     } catch (error) {
       deviation = {
         reason: "invalid-event",

@@ -4,10 +4,10 @@
 
 `@statelyai/agent/testing` loads under the Cloudflare Vitest pool. The built `.mjs` and `.cjs` files no longer carry JSDoc comments, so a `vi.mock(` example in one no longer makes Vitest 4 hoist the module and drop its re-exports. The `.d.mts` and `.d.cts` files keep the JSDoc.
 
-`checkConformance` validates what the mapping feeds the model. An actor output that the actor's declared output schema rejects is an `invalid-output` deviation, and an event payload that the model's event schema rejects is an `invalid-event` deviation. Both carry the schema's message in `schemaError`. A malformed model-call output no longer throws a `TypeError` from the model's `onDone`.
+`checkConformance` validates what the mapping feeds the model. An actor output that the actor's declared output schema rejects is an `invalid-output` deviation, and an event payload that the model's event schema rejects is an `invalid-event` deviation. The output schema is the one on the actor the run binds, so a `machine.provide({ actors })` replacement is checked against its own schema. The model receives each event as its schema parsed it, with defaults and transforms applied, as a host that calls `parseAgentEvent` sends it. Both carry the schema's message in `schemaError`. A malformed model-call output no longer throws a `TypeError` from the model's `onDone`.
 
 `checkConformance` callbacks are typed from the model and the observations. `actors` keys are the model's actor srcs, `observes` is one of the observation kinds, `observation` is narrowed to that kind, `input` has the actor's input type, and an event's `matches` reads the model's typed `context`. A misspelled src or kind is a compile error. An options object built outside the call needs `as const` on its `observes` values.
 
-`canReach` and `explorePaths` type the snapshot their predicate, `payloads`, and `dedupeBy` receive as the machine's own snapshot, so `snapshot.context` needs no cast.
+`canReach` and `explorePaths` type the snapshot their predicate, `payloads`, and `dedupeBy` receive as the machine's own snapshot, so `snapshot.context` needs no cast. Where a child search also calls a callback with a child's snapshot (`payloads` under `children: "explore"` or `"coupled"`, `dedupeBy` under `children: "explore"`), its parameter is `TSnapshot | ExploreSnapshot`.
 
 The default `maxPaths` for `canReach` and `explorePaths` is 10,000, up from 200.
