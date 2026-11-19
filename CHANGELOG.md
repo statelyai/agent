@@ -1,5 +1,31 @@
 # @statelyai/agent
 
+## 2.0.0-alpha.42
+
+### Minor Changes
+
+- [#258](https://github.com/statelyai/agent/pull/258) [`74134e8`](https://github.com/statelyai/agent/commit/74134e865a0386c92595d9bf38a2734fe3a61ee6) Thanks [@davidkpiano](https://github.com/davidkpiano)! - The AI SDK adapter now passes `maxRetries: 0` to every AI SDK call by default, so run usage counts every provider request. Set `maxRetries` in the adapter's `settings` or a model entry's settings to let the SDK retry; a request that succeeds counts once in `modelCalls` however many SDK retries it took, and a failed `streamText` request counts every attempt.
+  
+  A resume now checks the restored context against the machine's `context` schema and the `schemas.context` of each active state, with or without an event log. A context that fails throws `AgentSnapshotInvalidError` (code `snapshot-invalid`) before the run starts. The check runs each schema's validator on the stored values, so a context schema with a transform that changes a field's type rejects valid snapshots: declare context fields with the type they hold.
+
+- [#257](https://github.com/statelyai/agent/pull/257) [`8856252`](https://github.com/statelyai/agent/commit/885625285a01a8df027c45fd08865cbe1cc10f6c) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Removed unused public exports: `GROUPED_EVENT_THRESHOLD` and `AGENT_TRACE_SCHEMA_VERSION` from `@statelyai/agent`; `AGENT_EVENT_SCHEMA_VERSION`, `AGENT_INIT_EVENT_TYPE`, `agentCallOccurrence`, `getSnapshotStateHash`, and `validateReplayEntries` from `/log`; `toLanguageModel` from `/ai-sdk`; `addAgentCallUsage`, `toAgentFinishReason`, `toAgentResponseFinishReason`, `toAgentResponseUsage`, `toOpenAiCallSettings`, `toOpenAiEventTools`, `toOpenAiMessages`, `toOpenAiToolChoice`, `toOpenAiTools`, and `toResponsesInput` from `/openai`; `toAgentFinishReason`, `toTanStackAiEventTools`, `toTanStackAiMessages`, `toTanStackAiModelOptions`, `toTanStackAiTools`, and `toTextAdapter` from `/tanstack-ai`; and `sameModelCallShape` from `/testing`.
+
+- [#259](https://github.com/statelyai/agent/pull/259) [`23265fe`](https://github.com/statelyai/agent/commit/23265fe922b3d577cac12818adfb90a4fee6707c) Thanks [@davidkpiano](https://github.com/davidkpiano)! - `describeMachine(machine, { format: "mermaid" })` renders a machine as a Mermaid `stateDiagram-v2` diagram, with no network connection. It draws one edge per target that a transition written as a function can return, marks conditional ones with `?`, and sends targets it cannot read to a dashed `?` node. GitHub renders the output in Markdown.
+
+- [#260](https://github.com/statelyai/agent/pull/260) [`7d1dc30`](https://github.com/statelyai/agent/commit/7d1dc3031c49cd43a38d895919d41832a1ba734c) Thanks [@davidkpiano](https://github.com/davidkpiano)! - `@statelyai/agent/testing` loads under the Cloudflare Vitest pool. The built `.mjs` and `.cjs` files no longer carry JSDoc comments, so a `vi.mock(` example in one no longer makes Vitest 4 hoist the module and drop its re-exports. The `.d.mts` and `.d.cts` files keep the JSDoc.
+  
+  `checkConformance` validates what the mapping feeds the model. An actor output that the actor's declared output schema rejects is an `invalid-output` deviation, and an event payload that the model's event schema rejects is an `invalid-event` deviation. The output schema is the one on the actor the run binds, so a `machine.provide({ actors })` replacement is checked against its own schema. The model receives each event as its schema parsed it, with defaults and transforms applied, as a host that calls `parseAgentEvent` sends it. Both carry the schema's message in `schemaError`. A malformed model-call output no longer throws a `TypeError` from the model's `onDone`.
+  
+  `checkConformance` callbacks are typed from the model and the observations. `actors` keys are the model's actor srcs, `observes` is one of the observation kinds, `observation` is narrowed to that kind, `input` has the actor's input type, and an event's `matches` reads the model's typed `context`. A misspelled src or kind is a compile error. An options object built outside the call needs `as const` on its `observes` values.
+  
+  `canReach` and `explorePaths` type the snapshot their predicate, `payloads`, and `dedupeBy` receive as the machine's own snapshot, so `snapshot.context` needs no cast. Where a child search also calls a callback with a child's snapshot (`payloads` under `children: "explore"` or `"coupled"`, `dedupeBy` under `children: "explore"`), its parameter is `TSnapshot | ExploreSnapshot`.
+  
+  The default `maxPaths` for `canReach` and `explorePaths` is 10,000, up from 200.
+
+### Patch Changes
+
+- [#256](https://github.com/statelyai/agent/pull/256) [`4dc5f42`](https://github.com/statelyai/agent/commit/4dc5f42b1a5311a41f721e4f8ebb52c170761688) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Docs: install the published `2.0.0-alpha.41` with `xstate@6.0.0-beta.2`, and fix the decide mock shape, the conformance mapping example, the local relay URL, and lint references. Add a strangler-fig section on reconciling host writes after a failed run.
+
 ## 2.0.0-alpha.41
 
 ### Minor Changes
