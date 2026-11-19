@@ -24,7 +24,7 @@ Stately Agent is XState plus typed model requests, decisions, and host executors
 | `setupAgent`                                | Schema-first XState setup with Agent request actors                        |
 | `createAgentRuntime`                        | Advanced, own the loop: bind executors, expose one durable transition loop |
 | `getInteraction` / `eventFromInteraction`   | Render and validate human interactions                                     |
-| `describeMachine`                           | Render a machine as plain text for a model                                 |
+| `describeMachine`                           | Render a machine as plain text for a model, or as a Mermaid diagram        |
 | `wrapWorkflow`                              | Wrap an existing async workflow, unchanged, as a machine                   |
 | `isAgentIdle`                               | Distinguish a human wait from a stuck settled machine                      |
 | `ContextOf` / `EventOf` / other `*Of` types | Extract setup and machine types                                            |
