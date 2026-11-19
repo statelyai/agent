@@ -415,10 +415,14 @@ const caseMachine = caseSetup.createMachine({
 
 async function onMessage(caseId: string, text: string) {
   let stored = await storage.get(`snapshot:${caseId}`);
-  // A reconciliation that failed earlier runs before any new message.
+  // A run or reconciliation that did not finish leaves the marker: reconcile
+  // before any new message.
   if (await storage.get(`resync:${caseId}`)) {
     stored = await resync(caseId, stored);
   }
+  // Write-ahead: mark the case before the run, so a run that commits host
+  // writes and then fails at any point leaves the marker.
+  await storage.put(`resync:${caseId}`, true);
   const result = await runAgent(caseMachine, {
     snapshot: stored,
     event: { type: "MESSAGE", text },
@@ -426,11 +430,9 @@ async function onMessage(caseId: string, text: string) {
   });
   if (result.status !== "error") {
     await storage.put(`snapshot:${caseId}`, result.persist());
+    await storage.delete(`resync:${caseId}`);
     return result;
   }
-  // The run failed, possibly after the host's own writes committed. Mark the
-  // case first, so a failure inside resync leaves it marked.
-  await storage.put(`resync:${caseId}`, true);
   await resync(caseId, stored);
   throw result.error;
 }
@@ -450,7 +452,8 @@ async function resync(caseId: string, stored: unknown) {
 ```
 
 - `RESYNC` is handled on the root, so every state accepts it. Its payload is the host's record, read back after the failure, and the transition maps it to a state with no other logic.
-- No message runs against a case until its reconciliation completes. The `resync:` marker is written before reconciling and deleted only after the resynced snapshot is stored, so a failed `db.readCase` or `storage.put` leaves the marker, and the next message reconciles first. If that reconciliation fails too, `onMessage` throws before any model call.
+- No message runs against a case until its reconciliation completes. The `resync:` marker is written before the run and deleted only after a snapshot is stored, so a run, `db.readCase`, or `storage.put` that fails at any point leaves the marker, and the next message reconciles first. If that reconciliation fails too, `onMessage` throws before any model call.
+- Messages for one case must run one at a time, or a second message can read the snapshot before the first one's marker is written. Hold a per-case lock around `onMessage`, such as a promise chain kept on the Durable Object: a Durable Object delivers the next request while a run awaits a model call.
 - Send it to the snapshot stored before the failed run. A snapshot of the error result stays in `error`: a resume from it settles `error` again.
 - Store a snapshot on every settle path. A port that stores only on success keeps the state from before the failure.
 - Adding `RESYNC` changes the machine, so bump `version`. XState requires an `id` on a machine with a `version`. See [Version bridge](persistence.md#version-bridge) for snapshots stored under the old version.
