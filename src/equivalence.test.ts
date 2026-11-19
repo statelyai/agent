@@ -15,10 +15,10 @@ import {
   type RecordedEffect,
   type RecordedError,
   type RecordedModelCall,
-  sameModelCallShape,
   type Recorder,
   type Recording,
 } from "./testing/index.js";
+import { sameModelCallShape } from "./equivalence.js";
 
 const usage = {
   inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },

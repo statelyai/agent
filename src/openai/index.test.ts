@@ -8,17 +8,15 @@ import {
 } from "../decision.js";
 import type { AgentTextRequest } from "../text-logic.js";
 import type { AgentTools } from "../types.js";
+import { createOpenAiExecutors, toAgentCallUsage, toDecisionMessages } from "./index.js";
 import {
-  createOpenAiExecutors,
-  toAgentCallUsage,
   toAgentFinishReason,
-  toDecisionMessages,
   toOpenAiCallSettings,
   toOpenAiEventTools,
   toOpenAiMessages,
   toOpenAiTools,
   toResponsesInput,
-} from "./index.js";
+} from "./mappers.js";
 
 // A stubbed `OpenAI` client for tool-free calls: only `chat.completions.create`
 // is ever called, so the whole SDK surface reduces to one function. No network.

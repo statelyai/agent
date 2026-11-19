@@ -10,7 +10,6 @@ import {
 } from "xstate";
 import { createDecisionLogic } from "./decision.js";
 import {
-  AGENT_TRACE_SCHEMA_VERSION,
   AGENT_USAGE_EVENT_TYPE,
   AgentError,
   AgentEventLogConflictError,
@@ -34,15 +33,15 @@ import {
   type AgentTraceEvent,
   type ChosenEvent,
 } from "./index.js";
-import { runToQuiescence } from "./run-agent.js";
+import { AGENT_TRACE_SCHEMA_VERSION, runToQuiescence } from "./run-agent.js";
 import {
-  AGENT_INIT_EVENT_TYPE,
   forkEventLog,
   getLogExecutionId,
   getUsageFromEvents,
   replay,
   createInMemoryEventLogStore,
 } from "./log/index.js";
+import { AGENT_INIT_EVENT_TYPE } from "./event-log.js";
 import { getMachineStructuralHash } from "./utils.js";
 
 /**
