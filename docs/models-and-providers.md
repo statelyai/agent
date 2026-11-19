@@ -91,7 +91,7 @@ const executors = createAiSdkExecutors({
 
 Precedence is global `settings`, then model-entry settings, then portable generation fields declared by the request.
 
-The adapter passes `maxRetries: 0` to every AI SDK call by default, so run usage counts every provider request and the machine's own retries are the only ones. Set `maxRetries` in `settings` or a model entry's settings to let the SDK retry. Those retries are not counted in `modelCalls`. See [Retries and executor budgets](usage-and-budgets.md#retries-and-executor-budgets).
+The adapter passes `maxRetries: 0` to every AI SDK call by default, so run usage counts every provider request and the machine's own retries are the only ones. Set `maxRetries` in `settings` or a model entry's settings to let the SDK retry. A request that succeeds counts once in `modelCalls`, however many SDK retries it took. A `streamText` request that fails counts every attempt. See [Retries and executor budgets](usage-and-budgets.md#retries-and-executor-budgets).
 
 ## Decision models
 

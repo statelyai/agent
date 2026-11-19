@@ -1919,18 +1919,38 @@ describe("createAiSdkExecutors — provider retries", () => {
     expect(calls(model)).toBe(3);
   });
 
-  test.each(paths)("%s keeps the default when settings leave maxRetries undefined", async (_, run) => {
-    const model = failing();
-    await expect(
-      run(
-        createAiSdkExecutors({
-          models: { m: model },
-          decideMode,
-          settings: { maxRetries: undefined },
-        }),
-      ),
-    ).rejects.toThrow();
-    expect(calls(model)).toBe(1);
+  test.each(paths)(
+    "%s keeps the default when settings leave maxRetries undefined",
+    async (_, run) => {
+      const model = failing();
+      await expect(
+        run(
+          createAiSdkExecutors({
+            models: { m: model },
+            decideMode,
+            settings: { maxRetries: undefined },
+          }),
+        ),
+      ).rejects.toThrow();
+      expect(calls(model)).toBe(1);
+    },
+  );
+
+  // `streamText` reports every transport attempt to `onLanguageModelCallStart`;
+  // `generateText` reports none for a request that fails.
+  test("a failed request's modelCalls with SDK retries", async () => {
+    const counts: Record<string, unknown> = {};
+    for (const [name, run] of paths.slice(0, 3)) {
+      const error = await run(
+        createAiSdkExecutors({ models: { m: failing() }, decideMode, settings: { maxRetries: 2 } }),
+      ).catch((caught: unknown) => caught);
+      counts[name] = (error as { modelCalls?: number }).modelCalls;
+    }
+    expect(counts).toEqual({
+      generateText: undefined,
+      "structured generateText": undefined,
+      streamText: 3,
+    });
   });
 
   test("a model entry's own maxRetries wins over the default", async () => {

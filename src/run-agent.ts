@@ -185,8 +185,13 @@ function assertRestorableSnapshot(machine: AnyStateMachine, persisted: unknown):
   for (const { schema, stateNodeId } of checks) {
     if (schema === undefined) continue;
     const result = schema["~standard"].validate(snapshot.context);
-    // An async schema cannot be checked before the run starts.
-    if (result instanceof Promise || !result.issues) continue;
+    // An async schema cannot be checked before the run starts. Its rejection
+    // is handled so it never surfaces as an unhandled rejection.
+    if (result instanceof Promise) {
+      result.catch(() => {});
+      continue;
+    }
+    if (!result.issues) continue;
     const where = stateNodeId === undefined ? "the machine's" : `state '${stateNodeId}''s`;
     throw new AgentSnapshotInvalidError(
       `the resume snapshot's context does not match ${where} context schema: ${result.issues.map((issue: { message: string }) => issue.message).join(", ")}`,
