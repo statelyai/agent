@@ -677,6 +677,58 @@ describe("canReach — states passed through", () => {
     expect(result).toMatchObject({ reachable: true, complete: true, witness: [{ type: "PICK" }] });
   });
 
+  test("a final child whose parent's onDone leaves at once is reachable", async () => {
+    const machine = createMachine({
+      initial: "outer",
+      states: {
+        outer: {
+          initial: "a",
+          states: { a: { on: { GO: { target: "fin" } } }, fin: { type: "final" } },
+          onDone: { target: "next" },
+        },
+        next: { on: { GO: { target: "end" } } },
+        end: { type: "final" },
+      },
+    });
+    expect(await canReach(machine, "outer.fin")).toMatchObject({
+      reachable: true,
+      complete: true,
+      witness: [{ type: "GO" }],
+    });
+    const report = await explorePaths(machine);
+    expect(report.reachedStates).toEqual(expect.arrayContaining([{ outer: "fin" }]));
+  });
+
+  test("the last region to finish a parallel state with onDone is reachable", async () => {
+    const machine = createMachine({
+      initial: "work",
+      states: {
+        work: {
+          type: "parallel",
+          states: {
+            r1: {
+              initial: "s",
+              states: { s: { on: { A: { target: "d" } } }, d: { type: "final" } },
+            },
+            r2: {
+              initial: "s",
+              states: { s: { on: { B: { target: "d" } } }, d: { type: "final" } },
+            },
+          },
+          onDone: { target: "end" },
+        },
+        end: { type: "final" },
+      },
+    });
+    const both = await canReach(machine, (snapshot) =>
+      snapshot.matches({ work: { r1: "d", r2: "d" } }),
+    );
+    // A predicate sees settled snapshots only; the state target sees transits.
+    expect(both).toMatchObject({ reachable: false, complete: true });
+    expect(await canReach(machine, "work.r2.d")).toMatchObject({ reachable: true, complete: true });
+    expect(await canReach(machine, "work.r1.d")).toMatchObject({ reachable: true, complete: true });
+  });
+
   test("a transient state nothing transits stays unreachable", async () => {
     expect(await canReach(createRouting(), "orphan")).toMatchObject({
       reachable: false,

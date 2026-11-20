@@ -61,7 +61,7 @@ try {
 ```
 
 - `@statelyai/sdk/node-relay` imports `ws`, an optional peer of `@statelyai/sdk`. Without it, the import fails with `Cannot find package 'ws'`.
-- A `choice` state, or one left at once by `always`, is passed through within one step, so no snapshot shows it. Read it from `describeMachine` or `explorePaths`'s `reachedStates`.
+- A `choice` state, one left at once by `always`, or a final child whose parent's `onDone` leaves at once, is passed through within one step, so no snapshot shows it. Read it from `describeMachine` or `explorePaths`'s `reachedStates`.
 - `session: "direct"` connects with the room id only, which is what a local relay expects.
 - With a local relay, `createInspector` logs `[Stately Inspector] http://127.0.0.1:<port>/?r=<roomId>`, a URL derived from `relay.url` by replacing `ws` with `http`. The Node relay serves WebSocket connections only, so that URL opens no page in a browser.
 - To view a local run in a browser, pass `inspectorBaseUrl` to `createInspector`, naming an inspector UI hosted separately from the relay. The inspector adds the `ws` and `r` query parameters to it. Without one, use the hosted relay to view the run.
@@ -83,6 +83,7 @@ await runAgent(machine, { input, executors, inspect: inspector.inspect });
 await prompt.question("Press Enter to stop the relay. ");
 prompt.close();
 ```
+
 - A test's viewer connects a WebSocket to `${relay.url}?r=<roomId>` and registers as a viewer. That is the relay endpoint, not an inspector page.
 
 ## Trace one run

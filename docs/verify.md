@@ -452,7 +452,7 @@ const violation = await canReach(
 // violation.reachable → false with complete: true is the safety proof
 ```
 
-A state the machine only passes through within one step counts as reached: one left at once by an `always` transition, or a `choice` state. `canReach` returns the path that transits it, and `explorePaths` lists it in `reachedStates`.
+A state the machine only passes through within one step counts as reached: one left at once by an `always` transition, a `choice` state, or a final child whose parent's `onDone` (or a parallel ancestor's) leaves at once. `canReach` returns the path that transits it, and `explorePaths` lists it in `reachedStates`.
 
 `reachable: false` proves unreachability only when `complete` is true. `complete` is false when the search left a branch it could not rule out:
 
@@ -552,7 +552,10 @@ const report = await checkConformance(supportModel, {
 
 report.conforms; // false: the code did something the model does not allow
 report.deviation; // { reason: "extra-observations", expected: "idle, waiting for an event", observed: { kind: "send" }, state: "awaitingApproval" }
-traceCoverage(supportModel, reports.map((r) => r.trace)); // states and handlers no recorded run reached
+traceCoverage(
+  supportModel,
+  reports.map((r) => r.trace),
+); // states and handlers no recorded run reached
 ```
 
 - The model runs with `runAgent`. Each actor in `actors` is answered from the observations instead of running. An actor with `observes` consumes the next observation, which must be of that kind.
@@ -574,6 +577,7 @@ traceCoverage(supportModel, reports.map((r) => r.trace)); // states and handlers
   - `unmapped-actor`: the model invoked a src with no entry in `actors`.
 
   `expected` is what the model did next, `observed` is the recording's next observation, and `state` is the model's state value.
+
 - An `actors` key the model does not declare throws `AgentError` with code `unknown-actor-source`.
 - Every actor the model invokes must be declared by name in `setupAgent({ actors })` and invoked by `src`. An invoke that names its logic inline would run that logic for real, so `checkConformance` throws `inline-actor-source` before the run starts.
 - Code that builds its AI SDK model inline or passes module-level tools to `generateText` is recorded with `recordAiSdk`. See [Verify in place](verify-in-place.md#ai-sdk-code).
