@@ -72,6 +72,7 @@ describe("example human waits", () => {
     // example is a regression this test exists to catch.
     expect([...humanWaits].sort()).toEqual([
       "answer-reuse#answerReuseMachine",
+      "approve-tool-calls#approveToolCallsMachine",
       "booking-compensation#bookingCompensationMachine",
       "chameleon#chameleonMachine",
       "chat-with-pdf#chatWithPdfMachine",

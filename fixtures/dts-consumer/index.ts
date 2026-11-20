@@ -29,10 +29,6 @@ export {
 export { createAiSdkExecutors, parseModelRef } from "@statelyai/agent/ai-sdk";
 export { createTanStackAiExecutors } from "@statelyai/agent/tanstack-ai";
 export {
-  createApprovalBatchMachine,
-  type CreateApprovalBatchMachineConfig,
-} from "@statelyai/agent/machines";
-export {
   createOtelTraceHandler,
   type OtelTraceHandler,
   type OtelTraceHandlerOptions,

@@ -1,0 +1,168 @@
+import { describe, expect, test } from "vitest";
+import { runAgent } from "@statelyai/agent";
+import { canReach } from "@statelyai/agent/testing";
+import { createAsyncLogic } from "xstate";
+import {
+  approveToolCallsMachine,
+  runApproveToolCallsExample,
+  ruleMatches,
+  type ApprovalRule,
+  type ProposedCall,
+} from "./index.js";
+
+const npmTest: ProposedCall = { id: "c1", tool: "runCommand", args: { cmd: "npm test" } };
+const npmTestAgain: ProposedCall = { ...npmTest, id: "c2" };
+const wipe: ProposedCall = { id: "c3", tool: "runCommand", args: { cmd: "rm -rf ~" } };
+
+describe("approve-tool-calls", () => {
+  test("approve-always covers the same call later in the batch, not a different one", async () => {
+    const ran: string[] = [];
+    const result = await runApproveToolCallsExample({
+      calls: [npmTest, npmTestAgain, wipe],
+      verdicts: [{ type: "APPROVE_ALWAYS" }, { type: "DENY", reason: "never" }],
+      run: async (call) => ran.push(call.id),
+    });
+
+    expect(ran).toEqual(["c1", "c2"]);
+    expect(result.asked).toEqual([
+      'Run runCommand(cmd="npm test")?',
+      'Run runCommand(cmd="rm -rf ~")?',
+    ]);
+    expect(result.results.map(({ id, status, by }) => ({ id, status, by }))).toEqual([
+      { id: "c1", status: "executed", by: "person" },
+      { id: "c2", status: "executed", by: "rule" },
+      { id: "c3", status: "denied", by: undefined },
+    ]);
+    expect(result.rules).toEqual([{ tool: "runCommand", args: { cmd: "npm test" } }]);
+  });
+
+  test("the prompt shows nested arguments, literal braces, and repeated spaces as the runner gets them", async () => {
+    const call: ProposedCall = {
+      id: "w1",
+      tool: "writeFile",
+      args: { path: "a.txt", opts: { dryRun: false }, note: "keep {this}", cmd: "a  b" },
+    };
+    const received: unknown[] = [];
+    const result = await runApproveToolCallsExample({
+      calls: [call],
+      verdicts: [{ type: "APPROVE" }],
+      run: async ({ args }) => received.push(args),
+    });
+    expect(result.asked).toEqual([
+      'Run writeFile(path="a.txt", opts={"dryRun":false}, note="keep {this}", cmd="a  b")?',
+    ]);
+    expect(received).toEqual([call.args]);
+  });
+
+  test("a rule matches the same arguments in any key order", async () => {
+    const write: ProposedCall = {
+      id: "w2",
+      tool: "writeFile",
+      args: { content: "hello", path: "a.txt", meta: { b: 1, a: [1, 2] } },
+    };
+    const result = await runApproveToolCallsExample({
+      calls: [write],
+      rules: [
+        { tool: "writeFile", args: { path: "a.txt", meta: { a: [1, 2], b: 1 }, content: "hello" } },
+      ],
+      verdicts: [],
+    });
+    expect(result.results.map(({ status, by }) => ({ status, by }))).toEqual([
+      { status: "executed", by: "rule" },
+    ]);
+    expect(
+      ruleMatches(
+        { tool: "writeFile", args: { meta: { a: [2, 1] } } },
+        {
+          id: "w3",
+          tool: "writeFile",
+          args: { meta: { a: [1, 2] } },
+        },
+      ),
+    ).toBe(false);
+  });
+
+  test.each([
+    ["NaN", Number.NaN],
+    ["Infinity", Number.POSITIVE_INFINITY],
+    ["a Date", new Date(0)],
+    ["an undefined array element", [undefined]],
+  ])("arguments must be JSON: %s is refused before anything runs", async (_label, value) => {
+    const ran: string[] = [];
+    await expect(
+      runApproveToolCallsExample({
+        calls: [{ id: "f1", tool: "fetch", args: { limit: value } as never }],
+        rules: [{ tool: "fetch", args: { limit: null } }],
+        run: async (call) => ran.push(call.id),
+      }),
+    ).rejects.toThrow();
+    expect(ran).toEqual([]);
+  });
+
+  test("an approve-always rule holds its own copy of the arguments", async () => {
+    // Development builds freeze context; production builds do not. Without a
+    // copy, a runner that mutates its input would change what was approved.
+    const paused = await runAgent(approveToolCallsMachine, {
+      input: {
+        calls: [{ id: "w1", tool: "writeFile", args: { path: "a", opts: { dryRun: true } } }],
+      },
+    });
+    const result = await runAgent(approveToolCallsMachine, {
+      snapshot: paused.persist(),
+      event: { type: "APPROVE_ALWAYS" },
+      actors: { runTool: createAsyncLogic({ run: async () => "ok" }) },
+    });
+    const { calls, rules } = result.snapshot.context;
+    expect(rules).toEqual([{ tool: "writeFile", args: { path: "a", opts: { dryRun: true } } }]);
+    expect(rules[0]!.args).not.toBe(calls[0]!.args);
+    expect(rules[0]!.args["opts"]).not.toBe(calls[0]!.args["opts"]);
+  });
+
+  test("calls run in proposal order and a failure does not stop the batch", async () => {
+    const ran: string[] = [];
+    const result = await runApproveToolCallsExample({
+      calls: [wipe, npmTest],
+      rules: [{ tool: "runCommand", args: { cmd: "npm test" } }],
+      verdicts: [{ type: "APPROVE" }],
+      run: async (call) => {
+        ran.push(call.id);
+        if (call.id === "c3") throw new Error("refused");
+        return "ok";
+      },
+    });
+
+    expect(ran).toEqual(["c3", "c1"]);
+    expect(result.results.map(({ id, status }) => ({ id, status }))).toEqual([
+      { id: "c3", status: "failed" },
+      { id: "c1", status: "executed" },
+    ]);
+  });
+
+  describe("safety", () => {
+    const rules: ApprovalRule[] = [{ tool: "runCommand", args: { cmd: "npm test" } }];
+    const options = {
+      input: { calls: [npmTest, wipe], rules },
+      outputs: { runTool: ["ok"] },
+      errors: { runTool: new Error("boom") },
+      payloads: () => ({ DENY: [{}, { reason: "no" }] }),
+    };
+    const wipeRuns = (snapshot: {
+      matches: (state: string) => boolean;
+      context: { cursor: number };
+    }) => snapshot.matches("running") && snapshot.context.cursor === 1;
+
+    test("without a person's approval, only rule-matched calls run (complete proof)", async () => {
+      const result = await canReach(approveToolCallsMachine, wipeRuns as never, {
+        ...options,
+        hostEvents: ["DENY"],
+      });
+      expect(result).toEqual({ reachable: false, complete: true });
+    });
+
+    test("a person's approval runs it", async () => {
+      const result = await canReach(approveToolCallsMachine, wipeRuns as never, options);
+      expect(result.reachable).toBe(true);
+      expect(result.witness?.at(-1)?.type).toBe("APPROVE");
+    });
+  });
+});

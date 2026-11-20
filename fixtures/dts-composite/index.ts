@@ -7,7 +7,6 @@
 import { z } from "zod";
 import { createActor, createAsyncLogic } from "xstate";
 import { createAgentRuntime, createAgentSchemas, runAgent, setupAgent } from "@statelyai/agent";
-import { createApprovalBatchMachine } from "@statelyai/agent/machines";
 
 /** A bare setupAgent result. */
 export const batchSetup = setupAgent({
@@ -88,14 +87,6 @@ export const runtime = createAgentRuntime(batchMachine);
 
 /** A plain XState actor of a setupAgent machine. */
 export const actor = createActor(batchMachine, { input: { items: [] } });
-
-/** Preset machines from /machines. */
-export const approvalMachine = createApprovalBatchMachine({
-  execute: createAsyncLogic({ run: async () => "ok" }),
-});
-export function createToolCallMachine() {
-  return createApprovalBatchMachine({ execute: createAsyncLogic({ run: async () => "ok" }) });
-}
 
 // A second setup exercising the rest of the config surface: a schema pack,
 // payload-less `{}` events, actors, guards, delays, emitted events, and meta.

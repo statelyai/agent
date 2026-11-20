@@ -41,9 +41,6 @@
       "log": [
         "./dist/log.d.mts"
       ],
-      "machines": [
-        "./dist/machines.d.mts"
-      ],
       "openai": [
         "./dist/openai.d.mts"
       ],
@@ -100,16 +97,6 @@
       "require": {
         "types": "./dist/log.d.cts",
         "default": "./dist/log.cjs"
-      }
-    },
-    "./machines": {
-      "import": {
-        "types": "./dist/machines.d.mts",
-        "default": "./dist/machines.mjs"
-      },
-      "require": {
-        "types": "./dist/machines.d.cts",
-        "default": "./dist/machines.cjs"
       }
     },
     "./openai": {

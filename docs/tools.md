@@ -165,91 +165,192 @@ Build these parts by hand only when the machine owns the loop, such as in a ReAc
 
 Model the tool loop as machine states when it needs states of its own:
 
-- To approve or reject each of a turn's tool calls before it runs, use `createApprovalBatchMachine`. See [Approval gate](#approval-gate).
-- To model approval as machine states, with approve, edit, and reject steps that persist and resume, start from [examples/review-tool-calls](https://github.com/statelyai/agent/blob/next/examples/review-tool-calls/index.ts).
+- To approve or deny each of a turn's tool calls before it runs, model approval as states. See [Approval gate](#approval-gate).
+- To approve, edit, or reject one proposed call, with a model redo on reject, start from [examples/review-tool-calls](https://github.com/statelyai/agent/blob/next/examples/review-tool-calls/index.ts).
 - To model each think, act, and observe turn as its own transition, use explicit request, tool, and observation states.
 
 > **Note:** There is no built-in MCP client. MCP discovery, auth, and transport are the host's responsibility. Pass the discovered tool descriptors into `tools` like any other tool. See [Scope](scope.md).
 
 ## Approval gate
 
-`createApprovalBatchMachine` from `@statelyai/agent/machines` gates one model turn's tool calls: a policy allows, asks about, or denies each call, a person approves or rejects the asked ones, and only approved calls execute. See [Preset machines](machines-presets.md#createapprovalbatchmachine).
+Approval is not a library feature. It is a state that waits for a person's event, plus a rule check in context. [examples/approve-tool-calls](https://github.com/statelyai/agent/blob/next/examples/approve-tool-calls/index.ts) gates one model turn's tool calls this way:
+
+- **Calls and rules in context.** The proposed calls, a `cursor`, and the approve-always rules persist with the snapshot.
+- **Proposal order.** `next` is a choice state over the call at `cursor`. A rule that matches the call runs it; otherwise the machine waits in `reviewing`.
+- **Events a person sends.** `APPROVE`, `APPROVE_ALWAYS`, and `DENY` are tagged `meta: { actor: "human" }`, so no model-facing decision offers them. `reviewing` declares a `meta.interaction`, so `runAgent` settles `idle` there.
+- **Narrow rules.** `APPROVE_ALWAYS` stores the call's tool and arguments. A later call, in this batch or a later one, matches only with the same tool and the same arguments. Key order in the arguments does not matter.
+
+```ts no-check
+next: {
+  type: "choice",
+  choice: ({ context }) => {
+    const call = context.calls[context.cursor];
+    if (!call) return { target: "done" };
+    if (context.rules.some((rule) => ruleMatches(rule, call))) return { target: "running" };
+    return { target: "reviewing" };
+  },
+},
+reviewing: {
+  meta: { interaction: { label: describeCall, events: { APPROVE: "Approve", APPROVE_ALWAYS: "Always", DENY: "Deny" } } },
+  on: {
+    APPROVE: { target: "running", meta: { actor: "human" } },
+    APPROVE_ALWAYS: {
+      target: "running",
+      meta: { actor: "human" },
+      context: ({ context }) => ({ rules: [...context.rules, toRule(context.calls[context.cursor])] }),
+    },
+    DENY: { target: "next", meta: { actor: "human" }, context: ({ context }) => denied(context) },
+  },
+},
+running: {
+  invoke: {
+    src: "runTool",
+    input: ({ context }) => ({ call: context.calls[context.cursor] }),
+    // Advance past the call, so a rule it just created does not run it again.
+    onDone: ({ context, output }) => ({ target: "next", context: executed(context, output) }),
+    onError: ({ context, event }) => ({ target: "next", context: failed(context, event.error) }),
+  },
+},
+```
+
+`denied`, `executed`, and `failed` append the call's result and advance `cursor`. The example spells them out.
+
+The run loop resumes the persisted snapshot with each answer:
+
+```ts no-check
+let result = await runAgent(approveToolCallsMachine, { input: { calls, rules }, actors: { runTool } });
+while (result.status === "idle") {
+  // preserveWhitespace keeps argument values exact in the prompt.
+  const event = await askPerson(getInteraction(result.snapshot, { preserveWhitespace: true })); // your approval UI
+  result = await runAgent(approveToolCallsMachine, { snapshot: result.persist(), event, actors: { runTool } });
+}
+```
+
+Prove the safety rule with `canReach`. With only `DENY` available to the host, the call that no rule covers never runs:
+
+```ts no-check
+const result = await canReach(approveToolCallsMachine, wipeRuns, {
+  input: { calls: [npmTest, wipe], rules: [{ tool: "runCommand", args: { cmd: "npm test" } }] },
+  outputs: { runTool: ["ok"] },
+  hostEvents: ["DENY"],
+  payloads: () => ({ DENY: [{}, { reason: "no" }] }),
+});
+// { reachable: false, complete: true }
+```
+
+Copy the example and change what your domain needs: run approved calls concurrently, widen a rule to a glob or a command prefix, or add an edit step. Rerun the proof after each change. A rule matched by tool name alone fails it.
 
 ### AI SDK `needsApproval`
 
-A tool with `needsApproval: true` comes back from `generateText` unexecuted, as a `tool-approval-request` content part. Run those calls through the batch, then answer each request in a `tool` message:
+A tool with `needsApproval: true` comes back from `generateText` unexecuted, as a `tool-approval-request` content part. Run those calls through the machine, then answer each request in a `tool` message:
 
-- **Executed.** `tool-approval-response` with `approved: true`, plus the batch's `tool-result`. The SDK skips an approved call that already has a result, so it does not run twice.
-- **Rejected or cancelled.** `tool-approval-response` with `approved: false`. The SDK reports it to the model as denied.
+- **Executed.** `tool-approval-response` with `approved: true`, plus the machine's `tool-result`. The SDK skips an approved call that already has a result, so it does not run twice.
+- **Denied.** `tool-approval-response` with `approved: false`. The SDK reports it to the model as denied.
 - **Failed.** `approved: true` plus an `error-text` tool result.
 
 ```ts no-check
 import { generateText, type ModelMessage } from "ai";
-import { getInteraction, runAgent } from "@statelyai/agent";
 
-const first = await generateText({ model, tools, messages });
-const requests = first.content.filter((part) => part.type === "tool-approval-request");
-
-// 1. Map the unexecuted calls to the batch input.
-const calls = requests.map(({ toolCall }) => ({
-  id: toolCall.toolCallId,
-  name: toolCall.toolName,
-  args: toolCall.input,
-}));
-
-// 2. Run the batch; resume it with APPROVE / REJECT events until it is done.
-const batch = createApprovalBatchMachine({
-  policy,
-  execute: createAsyncLogic({
-    run: ({ input }) =>
-      tools[input.call.name].execute(input.call.args, { toolCallId: input.call.id, messages }),
-  }),
-});
-// askPerson is your approval UI: it shows each awaiting call's name and arguments
-// next to its choices, and returns the event the person picked.
-let done = await runAgent(batch, { input: { calls } });
-while (done.status === "idle") {
-  const awaiting = done.snapshot.context.awaiting;
-  const event = await askPerson(awaiting, getInteraction(done.snapshot)?.choices ?? []);
-  done = await runAgent(batch, { snapshot: done.persist(), event });
+/** A plain JSON value. A `Date`, `Set`, `Map`, `BigInt`, `-0`, or cycle has no exact JSON form. */
+function isJson(value: unknown, parents: object[] = []): boolean {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return true;
+  if (typeof value === "number") return Number.isFinite(value) && !Object.is(value, -0);
+  if (typeof value !== "object" || parents.includes(value)) return false;
+  const inner = [...parents, value];
+  if (Array.isArray(value)) return Array.from(value).every((item) => isJson(item, inner));
+  return (
+    Object.getPrototypeOf(value) === Object.prototype &&
+    Object.values(value).every((item) => isJson(item, inner))
+  );
 }
 
-// 3. Feed the results back as one tool message, and continue.
-const toolMessage: ModelMessage = {
-  role: "tool",
-  content: done.output.results.flatMap((result, index) => {
-    const { approvalId, toolCall } = requests[index]!;
-    const approved = result.status === "executed" || result.status === "failed";
-    return [
-      { type: "tool-approval-response", approvalId, approved, reason: result.reason },
-      ...(approved
-        ? [
-            {
-              type: "tool-result",
-              toolCallId: toolCall.toolCallId,
-              toolName: toolCall.toolName,
-              output:
-                result.status === "executed"
-                  ? { type: "json", value: result.result }
-                  : { type: "error-text", value: result.error },
-            },
-          ]
-        : []),
-    ];
-  }),
-};
-await generateText({
-  model,
-  tools,
-  messages: [...messages, ...first.response.messages, toolMessage],
-});
+/**
+ * The SDK's output for a tool without `toModelOutput`: a string as text,
+ * anything else as JSON. An output JSON cannot hold (a `BigInt`) is reported
+ * as an error, since the tool has already run.
+ */
+function defaultOutput(value: unknown) {
+  if (typeof value === "string") return { type: "text", value } as const;
+  try {
+    return { type: "json", value: JSON.parse(JSON.stringify(value) ?? "null") } as const;
+  } catch (error) {
+    return { type: "error-text", value: `output is not JSON: ${String(error)}` } as const;
+  }
+}
+
+async function answerApprovals(messages: ModelMessage[]) {
+  const first = await generateText({ model, tools, messages });
+  const requests = first.content.filter((part) => part.type === "tool-approval-request");
+  // No call waits for a person: hand `first` to your usual tool loop.
+  if (requests.length === 0) return first;
+
+  // 1. Map the unexecuted calls to the machine input. A person approves the
+  //    arguments, and a rule matches them later, so they must be exact. A call
+  //    whose parsed input is not a plain JSON object (an input schema turned
+  //    a string into a `Date` or a `Set`, say, or the input is `null` or an
+  //    array) stays out of the machine, and step 3 answers it as failed.
+  //    The SDK parses an empty argument string as `{}` before the schema runs.
+  const calls = requests
+    .filter(({ toolCall }) => {
+      const { input } = toolCall;
+      return typeof input === "object" && input !== null && !Array.isArray(input) && isJson(input);
+    })
+    .map(({ toolCall }) => ({
+      id: toolCall.toolCallId,
+      tool: toolCall.toolName,
+      args: toolCall.input,
+    }));
+
+  // 2. Run the approval loop above with a runTool actor that calls
+  //    tools[call.tool].execute(call.args, { toolCallId: call.id, messages }),
+  //    passing the execution options the SDK would pass.
+
+  // 3. Answer every request in one tool message, matching each result by call
+  //    id. An executed result goes through the tool's own `toModelOutput`, as
+  //    the SDK does when it runs a tool.
+  const results = new Map(result.output.results.map((entry) => [entry.id, entry]));
+  const content = [];
+  for (const { approvalId, toolCall } of requests) {
+    const entry = results.get(toolCall.toolCallId) ?? {
+      status: "failed",
+      reason: "input is not plain JSON",
+    };
+    const approved = entry.status !== "denied";
+    content.push({ type: "tool-approval-response", approvalId, approved, reason: entry.reason });
+    if (!approved) continue;
+    const toModelOutput = tools[toolCall.toolName]?.toModelOutput;
+    content.push({
+      type: "tool-result",
+      toolCallId: toolCall.toolCallId,
+      toolName: toolCall.toolName,
+      output:
+        entry.status === "failed"
+          ? { type: "error-text", value: entry.reason }
+          : toModelOutput
+            ? await toModelOutput({
+                toolCallId: toolCall.toolCallId,
+                input: toolCall.input,
+                output: entry.value,
+              })
+            : defaultOutput(entry.value),
+    });
+  }
+  const toolMessage: ModelMessage = { role: "tool", content };
+  return generateText({
+    model,
+    tools,
+    messages: [...messages, ...first.response.messages, toolMessage],
+  });
+}
 ```
 
-`results` is in input order, so `results[index]` answers `requests[index]`. Persist `done.output.approveAlways` and have `policy` allow a later call only when its tool name and arguments match a stored rule. Allowing by tool name alone approves every argument that tool accepts.
+Persist `result.output.rules` and pass them as `rules` in the next turn's input.
+
+A host that can restart while a call waits for approval stores the snapshot, `requests`, and `first.response.messages` together, and resumes the approval loop from them. The tool message needs `requests` and the messages. The snapshot's `results` hold each tool's raw output, which `toModelOutput` reads, so the serializer must keep non-JSON outputs (a `Date`, a `BigInt`), or `runTool` must return JSON.
 
 ## Related
 
 - Read more about [Text requests](text-requests.md), the request a tool attaches to, including structured and streaming output.
 - Read more about [Hosts](hosts.md), including executors, model aliases, and writing your own adapter.
 - Read more about [Messages](messages.md), the message model that tool parts live in.
-- Read more about [Preset machines](machines-presets.md), including `createApprovalBatchMachine`.
+- Read more about [Human in the loop](human-in-the-loop.md), including interaction metadata and payload choices.

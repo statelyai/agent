@@ -3,8 +3,16 @@
  * workflow, unchanged, as an agent machine.
  * @module
  */
-import { createAsyncLogic, type AnyActorLogic } from "xstate";
-import type { PresetMachine } from "./machines/internal.js";
+import {
+  createAsyncLogic,
+  type AnyActorLogic,
+  type AnyActorRef,
+  type EventObject,
+  type MetaObject,
+  type StateMachine,
+  type StateSchema,
+  type StateValue,
+} from "xstate";
 import { AgentError } from "./errors.js";
 import type { RecordCallOptions, Recorder } from "./equivalence.js";
 import type { JsonValue } from "./event-log.js";
@@ -479,11 +487,21 @@ function createWrappedMachine<TInput, TOutput>(
 export type WrappedWorkflowEvent = EffectCallEvent | EffectDoneEvent | EffectErrorEvent;
 
 /** The machine {@link wrapWorkflow} returns. */
-export type WrappedWorkflowMachine<TInput, TOutput> = PresetMachine<
+export type WrappedWorkflowMachine<TInput, TOutput> = StateMachine<
   WrappedWorkflowContext<TInput, TOutput>,
+  WrappedWorkflowEvent,
+  Record<string, AnyActorRef | undefined>,
+  StateValue,
+  string,
   TInput,
   TOutput,
-  WrappedWorkflowEvent
+  EventObject,
+  MetaObject,
+  StateSchema,
+  any,
+  any,
+  any,
+  any
 >;
 
 /**
