@@ -47,9 +47,9 @@ import {
   type AgentTraceEvent,
   type ChosenEvent,
   type DecisionAttempt,
+  decideNext,
   runAgent,
 } from "@statelyai/agent";
-import { decideNext } from "@statelyai/agent/policy";
 import { createInMemoryEventLogStore, getDecisionAttempts } from "@statelyai/agent/log";
 import {
   APPROVAL_THRESHOLD,

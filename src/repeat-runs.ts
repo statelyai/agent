@@ -4,7 +4,7 @@ import { traceSteps } from "./internal/trace-states.js";
 
 type AnyTrace = readonly { readonly type: string }[];
 
-/** One run of a repeated scenario. See {@link summarizeRepeats}. */
+/** One run of a repeated scenario. See {@link repeatRuns}. */
 export interface RepeatRun<TTrace extends AnyTrace = AnyTrace> {
   passed: boolean;
   /** The run's trace. Absent for a run that threw. */
@@ -15,7 +15,7 @@ export interface RepeatRun<TTrace extends AnyTrace = AnyTrace> {
   error?: string;
 }
 
-/** One scenario's runs. See {@link summarizeRepeats}. */
+/** One scenario's runs. See {@link repeatRuns}. */
 export interface RepeatGroup<TScenario, TTrace extends AnyTrace = AnyTrace> {
   id: string;
   scenario: TScenario;
@@ -39,7 +39,7 @@ export interface RepeatResult<TScenario, TTrace extends AnyTrace = AnyTrace> ext
   divergedAt?: string;
 }
 
-/** The result of {@link summarizeRepeats} and {@link repeatRuns}. */
+/** The result of {@link repeatRuns}. */
 export interface RepeatReport<TScenario, TTrace extends AnyTrace = AnyTrace> {
   scenarios: RepeatResult<TScenario, TTrace>[];
   /**
@@ -65,23 +65,8 @@ export interface RepeatRunsOptions<TScenario extends { id: string }, TTrace exte
   passed: (scenario: TScenario, result: { trace: TTrace; outcome?: string }) => boolean;
 }
 
-/**
- * Summarizes repeated runs of each scenario: how often each passed, whether
- * all its runs passed (pass^k), how many distinct state paths they took, and
- * where they first went different ways. Pure. Use it for runs collected
- * elsewhere, such as CI shards or replays; {@link repeatRuns} collects them and
- * calls it.
- *
- * A scenario that passes 3 of 5 runs and `divergedAt: 'deciding'` points at one
- * decision, not at a flaky agent.
- *
- * @example
- * ```ts no-check
- * const report = summarizeRepeats(shards.map((s) => ({ id: s.id, scenario: s, runs: s.runs })));
- * report.passHat(3); // the chance 3 runs of a scenario all pass
- * ```
- */
-export function summarizeRepeats<TScenario, TTrace extends AnyTrace = AnyTrace>(
+// The report over every scenario's runs.
+function report<TScenario, TTrace extends AnyTrace = AnyTrace>(
   groups: readonly RepeatGroup<TScenario, TTrace>[],
 ): RepeatReport<TScenario, TTrace> {
   const scenarios = groups.map((group) => summarize(group));
@@ -107,9 +92,14 @@ export function summarizeRepeats<TScenario, TTrace extends AnyTrace = AnyTrace>(
 }
 
 /**
- * Runs every scenario `k` times and summarizes the runs with
- * {@link summarizeRepeats}. Runs are sequential, scenario by scenario. A run
- * that throws fails, with its message as `error` and no trace.
+ * Runs every scenario `k` times and summarizes the runs: how often each
+ * passed, whether all its runs passed (pass^k), how many distinct state paths
+ * they took, and where they first went different ways. Runs are sequential,
+ * scenario by scenario. A run that throws fails, with its message as `error`
+ * and no trace.
+ *
+ * A scenario that passes 3 of 5 runs and `divergedAt: 'deciding'` points at one
+ * decision, not at a flaky agent.
  *
  * With a live model, one run per scenario says little: τ-bench found pass^k
  * falls well below the single-run rate. Report pass^k next to it.
@@ -158,7 +148,7 @@ export async function repeatRuns<TScenario extends { id: string }, TTrace extend
     }
     groups.push({ id: scenario.id, scenario, runs });
   }
-  return summarizeRepeats(groups);
+  return report(groups);
 }
 
 function summarize<TScenario, TTrace extends AnyTrace>(

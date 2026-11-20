@@ -33,7 +33,6 @@ const COMPILER_OPTIONS: ts.CompilerOptions = {
     "@statelyai/agent/machines": ["./src/machines/index.ts"],
     "@statelyai/agent/openai": ["./src/openai/index.ts"],
     "@statelyai/agent/otel": ["./src/otel/index.ts"],
-    "@statelyai/agent/policy": ["./src/policy/index.ts"],
     "@statelyai/agent/tanstack-ai": ["./src/tanstack-ai/index.ts"],
   },
 };
@@ -96,7 +95,6 @@ const PACKAGE_ENTRIES: Record<string, string> = {
   "@statelyai/agent/machines": "src/machines/index.ts",
   "@statelyai/agent/openai": "src/openai/index.ts",
   "@statelyai/agent/otel": "src/otel/index.ts",
-  "@statelyai/agent/policy": "src/policy/index.ts",
   "@statelyai/agent/tanstack-ai": "src/tanstack-ai/index.ts",
   "@statelyai/agent/testing": "src/testing/index.ts",
 };

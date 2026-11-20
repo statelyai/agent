@@ -42,7 +42,6 @@ Stately Agent is XState plus typed model requests, decisions, and host executors
 | `@statelyai/agent/tanstack-ai` | `createTanStackAiExecutors`, the TanStack AI adapter                                       |
 | `@statelyai/agent/machines`    | `createApprovalBatchMachine`, a preset that gates a turn's tool calls on approval          |
 | `@statelyai/agent/otel`        | OpenTelemetry trace handler                                                                |
-| `@statelyai/agent/policy`      | `decideNext` for any XState snapshot, and `createPolicyDecider` for a policy machine       |
 | `@statelyai/agent/validate`    | JSON workflow config validation and `verifyAgentConfig` pre-run gates                      |
 
 Core has no runtime dependency on the AI SDK.
