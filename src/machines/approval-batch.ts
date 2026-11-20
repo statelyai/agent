@@ -31,8 +31,13 @@ export type ApprovalCallResult = {
   reason?: string;
 };
 
-/** A standing approval granted with `APPROVE_ALWAYS`. The host persists it and feeds it to its policy. */
-export type ApproveAlwaysRule = { name: string };
+/**
+ * A standing approval granted with `APPROVE_ALWAYS`: the approved call's tool
+ * name and arguments. The host persists it and feeds it to its policy, which
+ * should allow a later call only when both match. Matching on `name` alone
+ * approves every argument the tool accepts.
+ */
+export type ApproveAlwaysRule = { name: string; args: unknown };
 
 /** Config for {@link createApprovalBatchMachine}. */
 export interface CreateApprovalBatchMachineConfig {
@@ -388,9 +393,13 @@ export function createApprovalBatchMachine(
         type === "REJECT" && event.reason !== undefined ? { type, reason: event.reason } : { type },
       );
       const awaiting = context.awaiting.filter((candidate) => candidate.id !== call.id);
+      const args = JSON.stringify(call.args);
       const approveAlways =
-        type === "APPROVE_ALWAYS" && !context.approveAlways.some((rule) => rule.name === call.name)
-          ? [...context.approveAlways, { name: call.name }]
+        type === "APPROVE_ALWAYS" &&
+        !context.approveAlways.some(
+          (rule) => rule.name === call.name && JSON.stringify(rule.args) === args,
+        )
+          ? [...context.approveAlways, { name: call.name, args: call.args }]
           : context.approveAlways;
       return { context: { awaiting, choices: choicesFor(awaiting), approveAlways } };
     };

@@ -72,8 +72,32 @@ describe("createApprovalBatchMachine", () => {
         { id: "c2", status: "executed", result: "ran write" },
         { id: "c3", status: "rejected", reason: "denied by policy" },
       ],
-      approveAlways: [{ name: "write" }],
+      approveAlways: [{ name: "write", args: { path: "b.txt" } }],
     });
+  });
+
+  test("APPROVE_ALWAYS records the approved call's arguments, one rule per distinct call", async () => {
+    const { execute } = recordingExecute();
+    const machine = createApprovalBatchMachine({ execute });
+    const batch: ProposedCall[] = [
+      { id: "r1", name: "run", args: { cmd: "npm test" } },
+      { id: "r2", name: "run", args: { cmd: "npm test" } },
+      { id: "r3", name: "run", args: { cmd: "rm -rf ~" } },
+    ];
+    let step = await runToQuiescence(createAgentRuntime(machine), { input: { calls: batch } });
+    for (const event of [
+      { type: "APPROVE_ALWAYS", callId: "r1" },
+      { type: "APPROVE_ALWAYS", callId: "r2" },
+      { type: "REJECT", callId: "r3" },
+    ] as const) {
+      step = await runToQuiescence(createAgentRuntime(machine), {
+        snapshot: step.persist(),
+        event,
+      });
+    }
+    expect(step.status === "done" && step.output.approveAlways).toEqual([
+      { name: "run", args: { cmd: "npm test" } },
+    ]);
   });
 
   test("call ids that name Object.prototype members are not read as settled", async () => {
