@@ -2023,12 +2023,23 @@ function pruneDelivered(
 
 // Whether `node` or a state under it is only ever passed through: one with
 // an `always` transition, or a choice state.
+// A state a step can leave in the same macrostep it enters: a choice state,
+// an `always` state, or a nested final state (its parent's `onDone`, or a
+// parallel ancestor's, can fire at once).
+function isPassThrough(node: Record<string, unknown>): boolean {
+  if (node["type"] === "choice" || (Array.isArray(node["always"]) && node["always"].length > 0)) {
+    return true;
+  }
+  const parent = node["parent"];
+  return node["type"] === "final" && isRecord(parent) && parent["parent"] !== undefined;
+}
+
 function hasTransientStates(node: unknown): boolean {
   const visit = (node: unknown): boolean => {
     if (!isRecord(node)) {
       return false;
     }
-    if (node["type"] === "choice" || (Array.isArray(node["always"]) && node["always"].length > 0)) {
+    if (isPassThrough(node)) {
       return true;
     }
     return Object.values(isRecord(node["states"]) ? node["states"] : {}).some(visit);
@@ -2036,12 +2047,12 @@ function hasTransientStates(node: unknown): boolean {
   return visit(node);
 }
 
-// The ids of the states under `node` (itself included) only ever passed through.
+// The ids of the states under `node` (itself included) a step can pass through.
 function transientStateIds(node: unknown, ids: string[] = []): string[] {
   if (!isRecord(node)) {
     return ids;
   }
-  if (node["type"] === "choice" || (Array.isArray(node["always"]) && node["always"].length > 0)) {
+  if (isPassThrough(node)) {
     ids.push(String(node["id"]));
   }
   for (const child of Object.values(isRecord(node["states"]) ? node["states"] : {})) {
@@ -2878,7 +2889,10 @@ function explore(
       if ((stateTarget || !awaitsKids(current, kids)) && stops(current, kids)) {
         return { step: current, hit: true };
       }
-      if (current.done) {
+      // An errored machine runs nothing more, as a live actor does. Its
+      // snapshot still lists the other regions' invokes, but none of them
+      // can settle it.
+      if (current.done || current.snapshot.status === "error") {
         return { step: current };
       }
       const request = current.requests.find(

@@ -39,7 +39,12 @@ import {
   resolveMachineVersion,
   validateSchemaSync,
 } from "./utils.js";
-import { getAcceptedEvents, getHumanEventTypes, type AgentSchemas } from "./events.js";
+import {
+  getAcceptedEvents,
+  getHumanEventTypes,
+  isEventPattern,
+  type AgentSchemas,
+} from "./events.js";
 import {
   GENERATE_TEXT_ACTOR,
   getCallFinishReason,
@@ -1563,7 +1568,8 @@ function bindActLogic(runCtx: RunAgentBindContext): ActLogic {
         const before = actorRef.getSnapshot() as AnyMachineSnapshot;
         let accepted: boolean;
         try {
-          accepted = !getHumanEventTypes(before).has(type) && before.can(event);
+          accepted =
+            !getHumanEventTypes(before, runCtx.schemas?.events).has(type) && before.can(event);
         } catch {
           accepted = false;
         }
@@ -1707,73 +1713,6 @@ function createCountingDecide(
   };
 }
 
-// A decision strategy's `fillModel` call: a structured text call, budgeted,
-// traced, and usage-recorded like the decide calls beside it. `info.callKey`
-// arrives from the strategy (`…#n.<attempt>.fill`).
-function createCountingFill(
-  runCtx: RunAgentBindContext,
-  self: BoundActorSelf | undefined,
-  recordLater: (record: () => void) => void,
-): AgentRequestExecutor {
-  return async (request, info) => {
-    const { id, src } = selfIdAndSrc(self);
-    const agentRequest: AgentRequest = {
-      kind: "text",
-      id,
-      src,
-      mode: "generate",
-      input: request,
-      tools: request.tools,
-      events: [],
-    };
-    runCtx.consumeModelCall();
-    runCtx.emitTrace?.({ type: "request.start", request: agentRequest }, self);
-    try {
-      await runCtx.awaitJournal?.();
-      info?.signal?.throwIfAborted();
-      const raw = await runCtx.generateText!(request, {
-        ...info,
-        ...(runCtx.runId !== undefined ? { runId: runCtx.runId } : {}),
-        ...(info?.requestId === undefined && id !== "" ? { requestId: id } : {}),
-      });
-      runCtx.countModelCalls?.(getCallModelCalls(raw) - 1);
-      const usage = getCallUsage(raw);
-      const finishReason = getCallFinishReason(raw);
-      if (usage) {
-        recordLater(() =>
-          runCtx.recordUsage?.(
-            usage,
-            {
-              kind: "decision",
-              ...(id !== "" ? { id } : {}),
-              ...(src !== "" ? { src } : {}),
-              model: request.model,
-              ...(info?.callKey !== undefined ? { callKey: info.callKey } : {}),
-            },
-            self,
-          ),
-        );
-      }
-      runCtx.emitTrace?.(
-        {
-          type: "request.end",
-          request: agentRequest,
-          output: raw.result,
-          raw,
-          ...(usage !== undefined ? { usage } : {}),
-          ...(finishReason !== undefined ? { finishReason } : {}),
-        },
-        self,
-      );
-      return raw;
-    } catch (error) {
-      runCtx.countModelCalls?.(getCallModelCalls(error) - 1);
-      runCtx.emitTrace?.({ type: "request.error", request: agentRequest, error }, self);
-      throw error;
-    }
-  };
-}
-
 /**
  * Builds the decision actor logic the runtime installs in place of a
  * `DecisionLogic`/`agent.decide` source. `DecisionLogic.withExecutor(...)`
@@ -1830,7 +1769,10 @@ function bindDecisionLogic(logic: DecisionLogic, runCtx: RunAgentBindContext): D
       const agentCan = (event: ChosenEvent): boolean => {
         if (!actorRef) return true;
         const snapshot = actorRef.getSnapshot() as AnyMachineSnapshot;
-        return !getHumanEventTypes(snapshot).has(event.type) && snapshot.can(event);
+        return (
+          !getHumanEventTypes(snapshot, runCtx.schemas?.events).has(event.type) &&
+          snapshot.can(event)
+        );
       };
 
       const lowered = logic.request(input as never);
@@ -1861,9 +1803,30 @@ function bindDecisionLogic(logic: DecisionLogic, runCtx: RunAgentBindContext): D
       }
       // After the options: a closed choice builds them from `events`, so a
       // person's event still lands in `withheld`.
+      // A pattern left unexpanded (no registered type matches it) is no event a model can send.
       if (actorRef) {
-        const humanEventTypes = getHumanEventTypes(actorRef.getSnapshot() as AnyMachineSnapshot);
-        request.events = events.filter((event) => !humanEventTypes.has(event.type));
+        const humanEventTypes = getHumanEventTypes(
+          actorRef.getSnapshot() as AnyMachineSnapshot,
+          runCtx.schemas?.events,
+        );
+        request.events = events.filter(
+          (event) => !humanEventTypes.has(event.type) && !isEventPattern(event.type),
+        );
+      }
+      // No candidate at all: say why, rather than exhaust with no attempts.
+      if (actorRef && request.events.length === 0) {
+        const allowed = declaredEventTypes?.map((type) => `'${type}'`).join(", ") ?? "any";
+        // The same error as exhausted retries, so a host branching on
+        // `decision-exhausted` keeps handling it; the message says why.
+        const error = new AgentDecisionExhaustedError([]);
+        error.message =
+          `Decision '${request.name}' has no event to offer: the current state accepts no event ` +
+          `type matching allowedEvents (${allowed}) that a model may send; no model call was made. ` +
+          "A wildcard handler such as `on: { 'desk.*': ... }` accepts only the matching event " +
+          "types registered in the machine's event schemas.";
+        runCtx.emitTrace?.({ type: "request.start", request }, self);
+        runCtx.emitTrace?.({ type: "request.error", request, error }, self);
+        throw error;
       }
       // Nothing to choose from: fail without a model call, the same way
       // exhausted retries fail, so the invoke's onError handles it.
@@ -1885,9 +1848,6 @@ function bindDecisionLogic(logic: DecisionLogic, runCtx: RunAgentBindContext): D
       const usageRecords: Array<() => void> = [];
       const recordLater = (record: () => void) => usageRecords.push(record);
       const decide = createCountingDecide(runCtx, self, recordLater);
-      const generateText = runCtx.generateText
-        ? createCountingFill(runCtx, self, recordLater)
-        : undefined;
       // The invoke-level key: resolveDecision appends each attempt's ordinal.
       const invokeCallKey = id !== "" ? runCtx.callKey?.(id, self) : undefined;
       let priorAttempts: DecisionAttempt[] = [];
@@ -1900,7 +1860,6 @@ function bindDecisionLogic(logic: DecisionLogic, runCtx: RunAgentBindContext): D
               priorAttempts = attemptRequest.attempts;
               return decide(attemptRequest, info);
             },
-            ...(generateText ? { generateText } : {}),
           },
           {
             ...(invokeCallKey !== undefined ? { callKey: invokeCallKey } : {}),

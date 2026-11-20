@@ -13,10 +13,9 @@ import {
   getHumanEventTypes,
   isEventPattern,
   type EventFromSnapshot,
+  matchesHandlerDescriptor,
 } from "./events.js";
-import type { DecisionStrategy } from "./decision-strategy.js";
 import { isRecord } from "./internal/is-record.js";
-import type { AgentRequestExecutor } from "./text-logic.js";
 import type { ChosenEvent, StandardSchemaV1 } from "./types.js";
 
 /** Options for {@link decideNext}. */
@@ -38,6 +37,14 @@ export interface DecideNextOptions<TSnapshot extends AnyMachineSnapshot = AnyMac
   prompt?: string;
   /** Semantic request name, for traces and scripted executors. Default `'decideNext'`. */
   name?: string;
+  /** Passed through as `request.metadata`, as `agent.decide` input's `metadata` is. */
+  metadata?: Record<string, unknown>;
+  /**
+   * The decision's idempotency key, unique per decision and the same when a
+   * crashed host asks again. Each attempt's executor `info.callKey` is
+   * `${callKey}.${attempt}`, as under `agent.decide`. Default: none.
+   */
+  callKey?: string;
   /**
    * Describe what each option changes: the state value and the changed
    * top-level context keys, computed with xstate's pure `transition()`.
@@ -48,14 +55,6 @@ export interface DecideNextOptions<TSnapshot extends AnyMachineSnapshot = AnyMac
   /** Retries after a failed choice. Default `2`. */
   maxRetries?: number;
   signal?: AbortSignal;
-  /** How the decision is split into model calls. Default `'auto'`; see {@link DecisionStrategy}. */
-  strategy?: DecisionStrategy;
-  /** Model ref that fills open payload fields under `'pick-then-fill'`. */
-  fillModel?: string;
-  /** Named groups of event types for `'grouped'`; the rest group by prefix before the first `.`. */
-  groups?: Record<string, readonly string[]>;
-  /** Fills open payload fields with `fillModel`. */
-  generateText?: AgentRequestExecutor;
 }
 
 /** Result of {@link decideNext}. */
@@ -147,12 +146,10 @@ export async function decideNext<TSnapshot extends AnyMachineSnapshot>(
     system: options.system,
     prompt: options.prompt,
     input: { value: snapshot.value, context: snapshot.context },
+    ...(options.metadata !== undefined ? { metadata: options.metadata } : {}),
     events,
     options: offered,
     withheld,
-    ...(options.strategy !== undefined ? { strategy: options.strategy } : {}),
-    ...(options.fillModel !== undefined ? { fillModel: options.fillModel } : {}),
-    ...(options.groups !== undefined ? { groups: options.groups } : {}),
   });
 
   if (offered.length === 0) {
@@ -167,12 +164,12 @@ export async function decideNext<TSnapshot extends AnyMachineSnapshot>(
         attempts = attemptRequest.attempts;
         return options.decide(attemptRequest, info);
       },
-      ...(options.generateText ? { generateText: options.generateText } : {}),
     },
     {
       maxRetries: options.maxRetries,
       signal: options.signal,
       canTake: (chosen) => safeCan(snapshot, chosen),
+      ...(options.callKey !== undefined ? { callKey: options.callKey } : {}),
     },
   );
   return { event: event as EventFromSnapshot<TSnapshot>, attempts, request, withheld };
@@ -193,12 +190,22 @@ function describeOption(
   schema: StandardSchemaV1 | undefined,
   lookahead: boolean | readonly string[] | undefined,
 ): string {
-  const what =
-    getNextTransitions(snapshot).find(
-      (candidate) => candidate.eventType === event.type && candidate.description,
-    )?.description ??
-    schemaDescription(schema) ??
-    event.type;
+  // The handler xstate routes the event to: child states before parents
+  // (getNextTransitions' order), and within one state an exact handler before
+  // a matching partial wildcard. The `*` catch-all describes nothing.
+  const routed = getNextTransitions(snapshot).filter(
+    (candidate) =>
+      candidate.eventType !== "*" && matchesHandlerDescriptor(event.type, candidate.eventType),
+  );
+  const first = routed[0];
+  const fromSource = routed.filter((candidate) => candidate.source === first?.source);
+  // An exact handler routes before any wildcard in its state, so only its
+  // branches describe the event when it has one.
+  const exact = fromSource.filter((candidate) => candidate.eventType === event.type);
+  const handler = (exact.length > 0 ? exact : fromSource).find(
+    (candidate) => candidate.description,
+  );
+  const what = handler?.description ?? schemaDescription(schema) ?? event.type;
   const fields = Object.entries(event)
     .filter(([key]) => key !== "type")
     .map(([key, value]) => `${key}: ${short(value)}`);

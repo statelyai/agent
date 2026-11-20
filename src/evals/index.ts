@@ -27,9 +27,7 @@ export type {
   ProposeApprovalRulesOptions,
   ProposeCapsOptions,
 } from "../propose-from-traces.js";
-export { getDecisionRequests } from "../decision-requests.js";
-export type { GetDecisionRequestsOptions, TracedDecisionRequest } from "../decision-requests.js";
-export { repeatRuns, summarizeRepeats } from "../repeat-runs.js";
+export { repeatRuns } from "../repeat-runs.js";
 export type {
   RepeatGroup,
   RepeatReport,
