@@ -172,6 +172,7 @@ export {
   toolCallingMachine,
   runToolCallingExample,
 } from "./review-tool-calls/index.js";
+export { approveToolCallsMachine, runApproveToolCallsExample } from "./approve-tool-calls/index.js";
 export { customerSupportMachine, runCustomerSupportExample } from "./customer-support/index.js";
 export { sqlAgentMachine, runSqlAgentExample } from "./sql-agent/index.js";
 export {

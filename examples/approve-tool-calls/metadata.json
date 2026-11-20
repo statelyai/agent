@@ -1,0 +1,31 @@
+{
+  "name": "approve-tool-calls",
+  "title": "Approve a turn's tool calls, as plain states",
+  "kind": "agent-workflow",
+  "comparison": {
+    "targets": ["Approval presets", "AI SDK needsApproval"],
+    "purpose": "Approval is a waiting state, three events a person sends, and approve-always rules kept in context. Calls run in proposal order, a rule matches only the same tool and arguments, and canReach proves that nothing runs without a rule or a person's approval."
+  },
+  "starters": [
+    {
+      "label": "npm test twice, then rm -rf ~",
+      "input": {
+        "calls": [
+          { "id": "c1", "tool": "runCommand", "args": { "cmd": "npm test" } },
+          { "id": "c2", "tool": "runCommand", "args": { "cmd": "npm test" } },
+          { "id": "c3", "tool": "runCommand", "args": { "cmd": "rm -rf ~" } }
+        ]
+      }
+    },
+    {
+      "label": "A read covered by a rule, then a write",
+      "input": {
+        "calls": [
+          { "id": "c1", "tool": "readFile", "args": { "path": "src/index.ts" } },
+          { "id": "c2", "tool": "writeFile", "args": { "path": "src/index.ts", "content": "..." } }
+        ],
+        "rules": [{ "tool": "readFile", "args": { "path": "src/index.ts" } }]
+      }
+    }
+  ]
+}
