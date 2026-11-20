@@ -40,6 +40,7 @@ const { event } = await decideNext(snapshot, {
   decide: policyDecide, // runs policyMachine, as in "A policy as the decider"
   model: "decider",
   allowedEvents: "desk.*",
+  payloads: (s) => ({ "desk.refund": [{ amount: s.context.requested }] }),
   metadata: { facts: { requested: snapshot.context.requested } },
 });
 ```
