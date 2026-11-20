@@ -4,7 +4,8 @@ import { ACT_ACTOR } from "./text-logic.js";
 
 /**
  * Inline input for the `agent.act` builtin actor: one model call whose tools
- * are the invoking state's accepted events (plus any plain `tools`). The model
+ * are the events the invoking state and its descendants accept (plus any plain
+ * `tools`), named `send_event_<TYPE>`. The model
  * calls them in any order across up to `maxSteps` steps of the host's tool
  * loop; each event call is delivered to the machine and answered with what it
  * did (`{ state?, changed? }`). Typed against the machine's own event schemas.
@@ -21,7 +22,7 @@ export interface AgentActInput<
   prompt?: string;
   /** Framework-native messages, passed through without conversion. */
   messages?: any[];
-  /** Event types offered as tools, intersected with what the state accepts. Omitted means all of them. */
+  /** Event types offered as tools, intersected with the event tools. Omitted means all of them. */
   allowedEvents?: AllowedEvents<TEvent>;
   /** Plain tools offered beside the event tools. */
   tools?: AgentTools;

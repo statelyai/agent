@@ -41,6 +41,7 @@ import {
 } from "./utils.js";
 import {
   getAcceptedEvents,
+  getActEvents,
   getHumanEventTypes,
   isEventPattern,
   type AgentSchemas,
@@ -1219,6 +1220,12 @@ interface RunAgentBindContext {
    */
   awaitDelivery?: (event: object) => Promise<void>;
   /**
+   * Holds the run's finish until `settled` resolves: an `agent.act` loop that
+   * a state exit aborted is still settling, and its usage counts. Unset off
+   * the runtime path.
+   */
+  settleBeforeFinish?: (settled: Promise<void>) => void;
+  /**
    * Called as an invoked child machine starts processing `event`, before its
    * snapshot moves, so the runtime can journal it in processing order. Unset
    * off the runtime path.
@@ -1432,8 +1439,22 @@ async function runTextRequest(
 
   runCtx.consumeModelCall();
   runCtx.emitTrace?.({ type: "request.start", request: agentRequest }, self);
+  const callKey = id !== "" ? runCtx.callKey?.(id, self) : undefined;
+  // Folds this call's reported tokens into the run-level AgentUsage.
+  const recordUsage = (usage: AgentCallUsage) =>
+    runCtx.recordUsage?.(
+      usage,
+      {
+        kind: "text",
+        ...(id !== "" ? { id } : {}),
+        ...(src !== "" ? { src } : {}),
+        model: request.model,
+        ...(request.name !== undefined ? { name: request.name } : {}),
+        ...(callKey !== undefined ? { callKey } : {}),
+      },
+      self,
+    );
   try {
-    const callKey = id !== "" ? runCtx.callKey?.(id, self) : undefined;
     // Write-ahead: the log up to this point must be durable before the call.
     await runCtx.awaitJournal?.();
     // The step that started the call may also have left its state.
@@ -1461,20 +1482,7 @@ async function runTextRequest(
     // surface them per-call on the request.end trace.
     const usage = getCallUsage(raw);
     const finishReason = getCallFinishReason(raw);
-    if (usage) {
-      runCtx.recordUsage?.(
-        usage,
-        {
-          kind: "text",
-          ...(id !== "" ? { id } : {}),
-          ...(src !== "" ? { src } : {}),
-          model: request.model,
-          ...(request.name !== undefined ? { name: request.name } : {}),
-          ...(callKey !== undefined ? { callKey } : {}),
-        },
-        self,
-      );
-    }
+    if (usage) recordUsage(usage);
 
     runCtx.emitTrace?.(
       {
@@ -1491,8 +1499,11 @@ async function runTextRequest(
 
     return { result: output, messages: responseMessagesOf(raw) };
   } catch (error) {
-    // A tool loop that failed after some steps still made them.
+    // A tool loop that failed after some steps still made them, and paid for
+    // the responses it received.
     runCtx.countModelCalls?.(getCallModelCalls(error) - 1);
+    const usage = getCallUsage(error);
+    if (usage) recordUsage(usage);
     runCtx.emitTrace?.({ type: "request.error", request: agentRequest, error }, self);
     throw error;
   }
@@ -1501,8 +1512,9 @@ async function runTextRequest(
 /**
  * Builds the actor logic the runtime installs in place of the `agent.act`
  * builtin: ONE `generateText` call (the host's tool loop, `maxSteps` default
- * 20) whose tools are the invoking state's accepted, non-human events plus the
- * input's plain `tools`. Each event tool call, in call order:
+ * 20) whose tools are the non-human events the invoking state can accept while
+ * it stays active (its own, its ancestors' and its descendants' handlers) plus
+ * the input's plain `tools`. Each event tool call, in call order:
  *
  * 1. validates its payload against the event schema (error result on failure);
  * 2. answers "not allowed" when the live snapshot cannot take the event;
@@ -1512,7 +1524,9 @@ async function runTextRequest(
  *
  * Once the invoking state exits (the invoke's `signal` aborts), every later
  * call answers {@link ACT_STATE_EXITED} and the executor's signal aborts, so
- * the loop stops. Completes with the final text when the state is still active.
+ * the loop stops. The run waits for that aborted executor to settle before it
+ * finishes, so every request the loop made counts in its usage. Completes with
+ * the final text when the state is still active.
  *
  * Not resumable mid-loop: a crash during the tool loop replays the events it
  * already delivered from the journal, but the act invoke itself restarts from
@@ -1536,10 +1550,11 @@ function bindActLogic(runCtx: RunAgentBindContext): ActLogic {
           ? runCtx.awaitDelivery
           : undefined;
       const snapshot = actorRef.getSnapshot() as AnyMachineSnapshot;
-      const events = getAcceptedEvents(snapshot, {
+      // Every event the state can take while it stays active, not only the
+      // ones it takes now: a call the snapshot cannot take yet is refused below.
+      const events = getActEvents(snapshot, id, {
         schemas: runCtx.schemas,
         eventTypes: resolveAllowedEventTypes(input.allowedEvents, input),
-        actor: "agent",
       });
 
       // Aborts the executor once the state exits: the loop has nothing left to drive.
@@ -1622,8 +1637,20 @@ function bindActLogic(runCtx: RunAgentBindContext): ActLogic {
         stopSequences: input.stopSequences,
         metadata: input.metadata,
       };
+      const call = runTextRequest(runCtx, "generate", request, self, loop.signal);
+      // A state exit ends the loop, but its requests were made: the run waits
+      // for the executor to settle so their usage reaches the run.
+      if (runCtx.settleBeforeFinish) {
+        const settled = call.then(
+          () => {},
+          () => {},
+        );
+        const hold = () => runCtx.settleBeforeFinish!(settled);
+        if (loop.signal.aborted) hold();
+        else loop.signal.addEventListener("abort", hold, { once: true });
+      }
       try {
-        const { result } = await runTextRequest(runCtx, "generate", request, self, loop.signal);
+        const { result } = await call;
         return result;
       } catch (error) {
         // The state exited mid-loop: nobody is left to receive this invoke's outcome.
@@ -3404,6 +3431,13 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
     deliveryWaiters.clear();
     releaseCommitted();
   };
+  // `agent.act` loops a state exit aborted, still settling: `finish` waits for
+  // them, unless the run stops first (`stopped` resolves in `stopRun`).
+  const settling = new Set<Promise<void>>();
+  let markStopped!: () => void;
+  const stopped = new Promise<void>((resolve) => {
+    markStopped = resolve;
+  });
   const runCtx: RunAgentBindContext = {
     generateText: executors.generateText,
     streamText: executors.streamText,
@@ -3419,6 +3453,10 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
         if (finished || stopReason !== undefined) resolve();
         else deliveryWaiters.set(event, resolve);
       }),
+    settleBeforeFinish: (settled) => {
+      settling.add(settled);
+      void settled.then(() => settling.delete(settled));
+    },
     runId,
     schemas: getRegisteredAgentExecutionOptions(machine).schemas,
     // What an invoked child machine processes is journaled with its
@@ -3645,6 +3683,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       return;
     }
     stopReason = reason;
+    markStopped();
     // Persisted before the children stop, so a resume restarts the work
     // this stop cut off instead of finding it stopped.
     try {
@@ -4401,6 +4440,12 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       // came to rest short of a final state (nothing left can finish it).
       if ((pendingAbort !== undefined || abortApplied) && current?.status === "active") {
         abortNow();
+      }
+      // An act loop the machine ended by leaving its state made requests the
+      // usage must count. Not when the run stopped: that cut-off is a straggler.
+      while (stopReason === undefined && settling.size > 0) {
+        releaseAllDeliveries();
+        await Promise.race([Promise.all(settling), stopped]);
       }
       // A decision's usage is queued after the event it chose; when that event
       // ends the machine, the usage is never handed out. Journal it out of

@@ -717,7 +717,7 @@ export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): Op
         }
       }
     } catch (error) {
-      throw withModelCalls(error, step);
+      throw withModelCalls(error, step, usage);
     }
 
     const choice = response.choices[0];
@@ -839,7 +839,7 @@ export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): Op
         }
       }
     } catch (error) {
-      throw withModelCalls(error, step);
+      throw withModelCalls(error, step, usage);
     }
 
     return {

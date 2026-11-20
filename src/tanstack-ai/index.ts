@@ -288,7 +288,7 @@ async function readRun(
     }
   } catch (error) {
     // The failed turn was a call too.
-    throw withModelCalls(error, summary.modelCalls + 1);
+    throw withModelCalls(error, summary.modelCalls + 1, summary.usage);
   }
   const invalid = new Set<string>();
   for (const { part, json } of args.values()) {
@@ -551,7 +551,12 @@ async function runChat(
     signal?.removeEventListener("abort", abort);
   }
   if (signal?.aborted) {
-    throw signal.reason ?? new Error("createTanStackAiExecutors: the request was aborted.");
+    // The stream can end normally after a cancel: its turns still count.
+    throw withModelCalls(
+      signal.reason ?? new Error("createTanStackAiExecutors: the request was aborted."),
+      run.modelCalls,
+      run.usage,
+    );
   }
   return run;
 }
@@ -706,16 +711,21 @@ export function createTanStackAiExecutors<TModels extends TanStackAiModelMap>(
         info?.signal,
       );
     } catch (error) {
-      throw structured && isTruncationError(error)
-        ? truncated(request, info, undefined, error)
-        : error;
+      if (!(structured && isTruncationError(error))) throw error;
+      // The replacement error carries the turns `readRun` recorded on the cause.
+      const { modelCalls, usage } = error as { modelCalls?: number; usage?: AgentCallUsage };
+      throw withModelCalls(truncated(request, info, undefined, error), modelCalls ?? 1, usage);
     }
 
     if (outputSchema) {
       // A structured output the model DID close, but only because it stopped
       // mid-thought, is not something to hand a machine as a final answer.
       if (run.finishReason === "length") {
-        throw withModelCalls(truncated(request, info, run.structured ?? run.text), run.modelCalls);
+        throw withModelCalls(
+          truncated(request, info, run.structured ?? run.text),
+          run.modelCalls,
+          run.usage,
+        );
       }
       let parsed: ReturnType<typeof parseProviderOutput>;
       try {
@@ -724,7 +734,7 @@ export function createTanStackAiExecutors<TModels extends TanStackAiModelMap>(
           run.structured !== undefined ? run.structured : JSON.parse(run.text),
         );
       } catch (error) {
-        throw withModelCalls(error, run.modelCalls);
+        throw withModelCalls(error, run.modelCalls, run.usage);
       }
       return {
         result: parsed.result,

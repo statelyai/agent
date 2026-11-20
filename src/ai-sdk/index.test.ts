@@ -85,6 +85,68 @@ describe("createAiSdkExecutors with core runAgent", () => {
       modelCalls: 1,
     });
   });
+
+  test("an agent.act loop that a state exit ends reports every request's usage", async () => {
+    const step = (toolName: string, input: object) => ({
+      content: [
+        {
+          type: "tool-call" as const,
+          toolCallId: `call-${toolName}`,
+          toolName,
+          input: JSON.stringify(input),
+        },
+      ],
+      finishReason: { unified: "tool-calls" as const, raw: "tool_calls" },
+      usage: {
+        inputTokens: { total: 2, noCache: 2, cacheRead: 0, cacheWrite: 0 },
+        outputTokens: { total: 1, text: 1, reasoning: 0 },
+      },
+      warnings: [],
+    });
+    const steps = [
+      step("send_event_ADD", { item: "apple" }),
+      step("send_event_ADD", { item: "pear" }),
+      step("send_event_CHECKOUT", {}),
+    ];
+    const model = new MockLanguageModelV3({ doGenerate: async () => steps.shift()! });
+    const agent = setupAgent({
+      context: z.object({ items: z.array(z.string()) }),
+      input: z.object({}),
+      events: { ADD: z.object({ item: z.string() }), CHECKOUT: z.object({}) },
+      models: { m: model },
+    });
+    const machine = agent.createMachine({
+      context: { items: [] },
+      initial: "shopping",
+      states: {
+        shopping: {
+          invoke: { src: "agent.act", input: { model: "m", prompt: "Shop." } },
+          on: {
+            ADD: ({ context, event }) => ({
+              context: { items: [...context.items, event.item] },
+            }),
+            CHECKOUT: { target: "paid" },
+          },
+        },
+        paid: { type: "final" },
+      },
+    });
+
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, { executors: createAiSdkExecutors({ models: { m: model } }) }),
+      { input: {} },
+    );
+
+    expect(result.status).toBe("done");
+    expect(result.snapshot.context.items).toEqual(["apple", "pear"]);
+    expect(model.doGenerateCalls).toHaveLength(3);
+    expect(result.usage).toMatchObject({
+      modelCalls: 3,
+      inputTokens: 6,
+      outputTokens: 3,
+      totalTokens: 9,
+    });
+  });
 });
 
 describe("toAiSdkTools", () => {
@@ -442,6 +504,49 @@ describe("onResult metadata enrichment", () => {
     expect(result.toolResults).toEqual([]);
     expect(result.messages).toHaveLength(1);
     expect(result.raw).toBeDefined();
+  });
+
+  test("a structured tool loop whose final output fails to parse reports every response's usage", async () => {
+    const { MockLanguageModelV3 } = await import("ai/test");
+    const { tool } = await import("ai");
+    const { createAiSdkExecutors } = await import("./index.js");
+
+    const usage = {
+      inputTokens: { total: 2, noCache: 2, cacheRead: 0, cacheWrite: 0 },
+      outputTokens: { total: 1, text: 1, reasoning: 0 },
+    };
+    const responses = [
+      {
+        content: [
+          { type: "tool-call" as const, toolCallId: "c1", toolName: "lookup", input: "{}" },
+        ],
+        finishReason: { unified: "tool-calls" as const, raw: "tool_calls" },
+        usage,
+        warnings: [],
+      },
+      {
+        content: [{ type: "text" as const, text: "not json" }],
+        finishReason: { unified: "stop" as const, raw: "stop" },
+        usage,
+        warnings: [],
+      },
+    ];
+    const model = new MockLanguageModelV3({ doGenerate: async () => responses.shift()! });
+    const lookup = tool({ inputSchema: z.object({}), execute: async () => "found" });
+
+    const executors = createAiSdkExecutors({ models: { m: model } });
+    await expect(
+      executors.generateText({
+        model: "m",
+        prompt: "hi",
+        tools: { lookup },
+        maxSteps: 2,
+        outputSchema: z.object({ title: z.string() }),
+      } as never),
+    ).rejects.toMatchObject({
+      modelCalls: 2,
+      usage: { inputTokens: 4, outputTokens: 2, totalTokens: 6 },
+    });
   });
 
   test("decide returns usage/finishReason alongside the chosen event", async () => {
