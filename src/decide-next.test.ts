@@ -10,6 +10,7 @@ import {
 } from "./decision.js";
 import { createAgentRuntime, runToQuiescence } from "./run-agent.js";
 import { createAgentSchemas, setupAgent } from "./setup-agent.js";
+import { initialAgentStep } from "./steps.js";
 
 // A plain XState machine: no setupAgent, no agent.* anywhere.
 const desk = createMachine({
@@ -222,6 +223,187 @@ describe("decideNext on a plain machine", () => {
   });
 });
 
+describe("decideNext request options", () => {
+  test("forwards `metadata` to the request and keys each attempt under `callKey`", async () => {
+    const snapshot = createActor(desk).start().getSnapshot();
+    const keys: Array<string | undefined> = [];
+    const decide: AgentDecisionExecutor = async (request, info) => {
+      keys.push(info?.callKey);
+      return {
+        event: keys.length === 1 ? { type: "desk.refund", amount: 80 } : { type: "desk.escalate" },
+      };
+    };
+
+    const result = await decideNext(snapshot, {
+      decide,
+      model: "quick",
+      allowedEvents: "desk.*",
+      payloads,
+      metadata: { facts: { requested: 80 } },
+      callKey: "desk:case-1",
+    });
+
+    expect(result.request.metadata).toEqual({ facts: { requested: 80 } });
+    expect(keys).toEqual(["desk:case-1.0", "desk:case-1.1"]);
+  });
+
+  test("without `callKey`, the executor gets none", async () => {
+    const snapshot = createActor(desk).start().getSnapshot();
+    const keys: Array<string | undefined> = [];
+    const decide: AgentDecisionExecutor = async (request, info) => {
+      keys.push(info?.callKey);
+      return { event: { type: "desk.escalate" } };
+    };
+
+    const result = await decideNext(snapshot, { decide, model: "quick", allowedEvents: "desk.*" });
+
+    expect(result.request.metadata).toBeUndefined();
+    expect(keys).toEqual([undefined]);
+  });
+});
+
+// A plain machine whose state handles a whole namespace with one wildcard handler.
+const wildcardDesk = createMachine({
+  schemas: {
+    events: {
+      "desk.refund": z.object({ amount: z.number() }),
+      "desk.close": z.object({}),
+      reset: z.object({}),
+    },
+  },
+  initial: "reviewing",
+  states: {
+    reviewing: { on: { "desk.*": { target: "handled" }, reset: { target: "reviewing" } } },
+    handled: { type: "final" },
+  },
+});
+
+describe("decideNext with a wildcard handler", () => {
+  test("offers the registered event types the wildcard matches", async () => {
+    const snapshot = createActor(wildcardDesk).start().getSnapshot();
+    const { decide, requests } = scripted([(request) => request.options![0]!.event]);
+
+    const result = await decideNext(snapshot, {
+      decide,
+      model: "quick",
+      allowedEvents: ["desk.*"],
+      payloads: () => ({ "desk.refund": [{ amount: 20 }] }),
+    });
+
+    expect(requests[0]!.events.map((event) => event.type)).toEqual(["desk.refund", "desk.close"]);
+    expect(requests[0]!.options!.map((option) => option.event)).toEqual([
+      { amount: 20, type: "desk.refund" },
+      { type: "desk.close" },
+    ]);
+    expect(result.event).toEqual({ amount: 20, type: "desk.refund" });
+  });
+
+  test("expanded types keep their event schemas and the wildcard transition's description", async () => {
+    const described = createMachine({
+      schemas: { events: { "desk.refund": z.object({ amount: z.number() }) } },
+      initial: "reviewing",
+      states: {
+        reviewing: { on: { "desk.*": { target: "handled", description: "Settle the case" } } },
+        handled: { type: "final" },
+      },
+    });
+    const snapshot = createActor(described).start().getSnapshot();
+    const { decide, requests } = scripted([(request) => request.options![0]!.event]);
+
+    await decideNext(snapshot, {
+      decide,
+      model: "quick",
+      allowedEvents: ["desk.*"],
+      payloads: () => ({ "desk.refund": [{ amount: 20 }] }),
+    });
+
+    expect(requests[0]!.events[0]!.inputSchema).toBeDefined();
+    expect(requests[0]!.options![0]!.description).toContain("Settle the case");
+  });
+
+  test("an exact handler's description wins over a wildcard declared before it", async () => {
+    const both = createMachine({
+      schemas: { events: { "desk.refund": z.object({}), "desk.close": z.object({}) } },
+      initial: "reviewing",
+      states: {
+        reviewing: {
+          on: {
+            "desk.*": { target: "handled", description: "Settle the case" },
+            "desk.refund": { target: "handled", description: "Refund the order" },
+          },
+        },
+        handled: { type: "final" },
+      },
+    });
+    const snapshot = createActor(both).start().getSnapshot();
+    const { decide, requests } = scripted([(request) => request.options![0]!.event]);
+
+    await decideNext(snapshot, { decide, model: "quick", allowedEvents: ["desk.*"] });
+
+    const descriptions = Object.fromEntries(
+      requests[0]!.options!.map((option) => [option.event.type, option.description]),
+    );
+    expect(descriptions["desk.refund"]).toContain("Refund the order");
+    expect(descriptions["desk.close"]).toContain("Settle the case");
+  });
+
+  test("an exact handler with no description does not take the wildcard's", async () => {
+    const both = createMachine({
+      schemas: { events: { "desk.refund": z.object({}) } },
+      initial: "reviewing",
+      states: {
+        reviewing: {
+          on: {
+            "desk.*": { target: "handled", description: "Settle the case" },
+            "desk.refund": { target: "handled" },
+          },
+        },
+        handled: { type: "final" },
+      },
+    });
+    const snapshot = createActor(both).start().getSnapshot();
+    const { decide, requests } = scripted([(request) => request.options![0]!.event]);
+
+    await decideNext(snapshot, { decide, model: "quick", allowedEvents: ["desk.*"] });
+
+    expect(requests[0]!.options![0]!.description).not.toContain("Settle the case");
+  });
+
+  test("a wildcard handler a person sends offers none of the types it matches", async () => {
+    const human = createMachine({
+      schemas: {
+        events: {
+          "desk.refund": z.object({ amount: z.number() }),
+          "desk.close": z.object({}),
+          reset: z.object({}),
+        },
+        meta: z.object({ actor: z.literal("human").optional() }),
+      },
+      initial: "reviewing",
+      states: {
+        reviewing: {
+          on: {
+            "desk.*": { target: "handled", meta: { actor: "human" } },
+            reset: { target: "reviewing" },
+          },
+        },
+        handled: {},
+      },
+    });
+    const snapshot = createActor(human).start().getSnapshot();
+    const { decide, requests } = scripted([(request) => request.options![0]!.event]);
+
+    const result = await decideNext(snapshot, {
+      decide,
+      model: "quick",
+      allowedEvents: ["desk.*", "reset"],
+    });
+
+    expect(requests[0]!.options!.map((option) => option.event)).toEqual([{ type: "reset" }]);
+    expect(result.withheld).toEqual([{ type: "desk.refund" }, { type: "desk.close" }]);
+  });
+});
+
 describe("agent.decide with payloads under the runtime", () => {
   const schemas = createAgentSchemas({
     context: z.object({ limit: z.number(), refunded: z.number() }),
@@ -369,6 +551,121 @@ describe("agent.decide with payloads under the runtime", () => {
     expect(result.snapshot.value).toBe("failed");
     expect(requests).toHaveLength(2);
     expect(requests[1]!.attempts[0]!.reason).toContain("matched no offered option");
+  });
+});
+
+describe("agent.decide with a wildcard handler under the runtime", () => {
+  const schemas = createAgentSchemas({
+    context: z.object({ error: z.string().optional(), code: z.string().optional() }),
+    input: z.object({}),
+    events: {
+      "desk.refund": z.object({ amount: z.number() }),
+      "desk.close": z.object({}),
+      reset: z.object({}),
+    },
+  });
+
+  const wildcardMachine = (input: Record<string, unknown>, initial = "deciding") =>
+    setupAgent({ schemas }).createMachine({
+      context: {},
+      initial,
+      states: {
+        deciding: {
+          invoke: {
+            src: "agent.decide",
+            input: { model: "quick", ...input } as never,
+            onError: {
+              target: "failed",
+              context: ({ event }) => ({
+                error: (event.error as Error).message,
+                code: (event.error as { code?: string }).code,
+              }),
+            },
+          },
+          on: { "desk.*": { target: "handled" } },
+        },
+        // Handles nothing under `desk.`, so `allowedEvents: ["desk.*"]` has no candidate.
+        idle: {
+          invoke: {
+            src: "agent.decide",
+            input: { model: "quick", ...input } as never,
+            onError: {
+              target: "failed",
+              context: ({ event }) => ({
+                error: (event.error as Error).message,
+                code: (event.error as { code?: string }).code,
+              }),
+            },
+          },
+          on: { reset: { target: "handled" } },
+        },
+        handled: { type: "final" },
+        failed: { type: "final" },
+      },
+    });
+
+  test("a step request's closed choice offers what the runtime offers", () => {
+    const step = initialAgentStep(
+      wildcardMachine({ allowedEvents: ["desk.*"], payloads: { "desk.refund": [{ amount: 20 }] } }),
+      {},
+    );
+    const request = step.requests[0] as { options?: Array<{ event: unknown }> };
+
+    expect(request.options?.map((option) => option.event)).toEqual([
+      { amount: 20, type: "desk.refund" },
+      { type: "desk.close" },
+    ]);
+  });
+
+  test("a closed choice offers the registered types the wildcard matches", async () => {
+    const { decide, requests } = scripted([(request) => request.options![0]!.event]);
+    const result = await runToQuiescence(
+      createAgentRuntime(
+        wildcardMachine({
+          allowedEvents: ["desk.*"],
+          payloads: { "desk.refund": [{ amount: 20 }] },
+        }),
+        { executors: { generateText: async () => ({ result: {} }), decide } },
+      ),
+      { input: {} },
+    );
+
+    expect(requests[0]!.options!.map((option) => option.event)).toEqual([
+      { amount: 20, type: "desk.refund" },
+      { type: "desk.close" },
+    ]);
+    expect(result.snapshot.value).toBe("handled");
+  });
+
+  test("an open choice offers the matching types, never the pattern", async () => {
+    const { decide, requests } = scripted([() => ({ type: "desk.close" })]);
+    const result = await runToQuiescence(
+      createAgentRuntime(wildcardMachine({ allowedEvents: ["desk.*"] }), {
+        executors: { generateText: async () => ({ result: {} }), decide },
+      }),
+      { input: {} },
+    );
+
+    expect(requests[0]!.events.map((event) => event.type)).toEqual(["desk.refund", "desk.close"]);
+    expect(result.snapshot.value).toBe("handled");
+  });
+
+  test("no accepted event type fails with the reason, before any model call", async () => {
+    const { decide, requests } = scripted([() => ({ type: "desk.close" })]);
+    const result = await runToQuiescence(
+      createAgentRuntime(wildcardMachine({ allowedEvents: ["desk.*"] }, "idle"), {
+        executors: { generateText: async () => ({ result: {} }), decide },
+      }),
+      { input: {} },
+    );
+
+    expect(requests).toHaveLength(0);
+    expect(result.snapshot.value).toBe("failed");
+    const context = result.snapshot.context as { code?: string; error?: string };
+    expect(context.code).toBe("decision-exhausted");
+    expect(context.error).toContain("accepts no event type");
+    expect(context.error).toContain("'desk.*'");
+    expect(context.error).toContain("event schemas");
   });
 });
 

@@ -98,6 +98,25 @@ function matchesEventPattern(eventType: string, pattern: string): boolean {
 }
 
 /**
+ * True when xstate routes `eventType` to a transition keyed `descriptor`: the
+ * same rule as xstate's own (unexported) `matchesEventDescriptor`. `'desk.*'`
+ * matches `'desk'`, `'desk.refund'` and `'desk.case.close'`; `'*'` matches
+ * every type.
+ */
+/** @internal */
+export function matchesHandlerDescriptor(eventType: string, descriptor: string): boolean {
+  if (descriptor === eventType || descriptor === "*") return true;
+  if (!descriptor.endsWith(".*")) return false;
+  const descriptorTokens = descriptor.split(".");
+  const eventTokens = eventType.split(".");
+  for (let index = 0; index < descriptorTokens.length; index++) {
+    if (descriptorTokens[index] === "*") return index === descriptorTokens.length - 1;
+    if (descriptorTokens[index] !== eventTokens[index]) return false;
+  }
+  return true;
+}
+
+/**
  * Event types reserved for delivery by the library (`@agent.*`). A machine
  * may declare transitions on them,
  * but they are never model-facing: {@link getAcceptedEvents} drops them before
@@ -233,6 +252,11 @@ export function parseAgentEvent<TSource extends AnyStateMachine | AnyMachineSnap
  * any `allowedEvents` matching — a machine that handles `'@agent.usage'` still
  * never offers it to a model.
  *
+ * A partial wildcard handler (`on: { 'desk.*': ... }`) lists the event types
+ * registered in `events`/`schemas` (else the machine's own event schemas) that
+ * it matches, by xstate's rule; with none registered, it lists the pattern
+ * itself, which a model cannot choose.
+ *
  * Pass `actor: "agent"` for the list a model may choose from: it also drops an
  * event the state handles through a transition tagged `meta: { actor: "human" }`.
  */
@@ -244,8 +268,10 @@ export function getAcceptedEvents(
   } = {},
 ): AgentEventDescriptor[] {
   const humanEventTypes: ReadonlySet<string> =
-    options.actor === "agent" ? getHumanEventTypes(snapshot) : new Set();
-  return describeEventTransitions(getNextTransitions(snapshot), humanEventTypes, options);
+    options.actor === "agent"
+      ? getHumanEventTypes(snapshot, options.events ?? options.schemas?.events)
+      : new Set();
+  return describeEventTransitions(snapshot, getNextTransitions(snapshot), humanEventTypes, options);
 }
 
 /**
@@ -253,7 +279,7 @@ export function getAcceptedEvents(
  * now, plus every event the invoking state node can accept while it stays
  * active (its own and its ancestors' handlers, and all of its descendants').
  * An event is left out when every one of those handlers is tagged
- * `meta: { actor: "human" }`. Filters and tool names match
+ * `meta: { actor: "human" }`. Filters, wildcard expansion and tool names match
  * {@link getAcceptedEvents}. @internal
  */
 export function getActEvents(
@@ -275,17 +301,21 @@ export function getActEvents(
     collect(node, true);
     for (let parent = node.parent; parent; parent = parent.parent) collect(parent, false);
   }
+  const schemas = options.events ?? options.schemas?.events;
   const humanOnly = new Set<string>();
   const agentSendable = new Set<string>();
   for (const transition of transitions) {
     const human = (transition.meta as { actor?: unknown } | undefined)?.actor === "human";
-    (human ? humanOnly : agentSendable).add(transition.eventType);
+    const into = human ? humanOnly : agentSendable;
+    into.add(transition.eventType);
+    for (const type of expandHandlerType(snapshot, transition.eventType, schemas)) into.add(type);
   }
   for (const eventType of agentSendable) humanOnly.delete(eventType);
-  return describeEventTransitions(transitions, humanOnly, options);
+  return describeEventTransitions(snapshot, transitions, humanOnly, options);
 }
 
 function describeEventTransitions(
+  snapshot: AnyMachineSnapshot,
   transitions: readonly AnyTransitionDefinition[],
   excludedEventTypes: ReadonlySet<string>,
   options: Pick<AgentRequestOptions, "events" | "schemas"> & { eventTypes?: readonly string[] },
@@ -293,15 +323,28 @@ function describeEventTransitions(
   const eventTypes = options.eventTypes;
   const seen = new Set<string>();
   const usedToolNames = new Set<string>();
+  const schemas = options.events ?? options.schemas?.events;
 
   return transitions.flatMap((transitionDefinition) => {
-    const eventType = transitionDefinition.eventType;
+    const handlerType = transitionDefinition.eventType;
+    if (!handlerType) return [];
+    // A wildcard transition tagged `meta: { actor: "human" }` covers what it expands to.
+    const humanHandler = excludedEventTypes.has(handlerType);
+    return expandHandlerType(snapshot, handlerType, schemas).flatMap((eventType) =>
+      describeAcceptedEvent(eventType, humanHandler, eventType !== handlerType),
+    );
+  });
 
+  function describeAcceptedEvent(
+    eventType: string,
+    humanHandler: boolean,
+    expanded: boolean,
+  ): AgentEventDescriptor[] {
     if (
-      !eventType ||
       eventType === "*" ||
       eventType.startsWith("xstate.") ||
       isReservedAgentEvent(eventType) ||
+      humanHandler ||
       excludedEventTypes.has(eventType) ||
       (eventTypes && !eventTypes.some((pattern) => matchesEventPattern(eventType, pattern))) ||
       seen.has(eventType)
@@ -313,7 +356,15 @@ function describeEventTransitions(
     const defaultToolName = sanitizeEventToolName(eventType);
     const toolName = disambiguateEventToolName(defaultToolName, eventType, usedToolNames);
 
-    const inputSchema = (options.events ?? options.schemas?.events)?.[eventType];
+    // A type a wildcard expanded to keeps the schema it was found in, which
+    // may be the machine's own when no `schemas` option is passed.
+    const inputSchema =
+      schemas?.[eventType] ??
+      (expanded
+        ? (snapshot.machine.schemas?.events as Record<string, StandardSchemaV1> | undefined)?.[
+            eventType
+          ]
+        : undefined);
 
     return [
       {
@@ -322,7 +373,30 @@ function describeEventTransitions(
         ...(inputSchema ? { inputSchema } : {}),
       },
     ];
-  });
+  }
+}
+
+/**
+ * The event types a handler keyed `handlerType` accepts: a partial wildcard
+ * (`'desk.*'`) stands for the registered event types it matches, read from
+ * `schemas`, else the machine's own. With none registered, or for any other
+ * handler, the key itself.
+ */
+function expandHandlerType(
+  snapshot: AnyMachineSnapshot,
+  handlerType: string,
+  schemas?: Record<string, unknown>,
+): string[] {
+  if (handlerType === "*" || !handlerType.endsWith(".*")) return [handlerType];
+  // A supplied registry (the root's, for an invoked child) and the machine's own.
+  const registered = new Set([
+    ...Object.keys(schemas ?? {}),
+    ...Object.keys((snapshot.machine.schemas?.events as Record<string, unknown> | undefined) ?? {}),
+  ]);
+  const matched = [...registered].filter(
+    (type) => !isEventPattern(type) && matchesHandlerDescriptor(type, handlerType),
+  );
+  return matched.length ? matched : [handlerType];
 }
 
 /**
@@ -330,16 +404,24 @@ function describeEventTransitions(
  * `meta: { actor: "human" }`: a person sends them, so no model is offered them.
  * @internal
  */
-export function getHumanEventTypes(snapshot: AnyMachineSnapshot): ReadonlySet<string> {
-  let types = humanEventTypesBySnapshot.get(snapshot);
+export function getHumanEventTypes(
+  snapshot: AnyMachineSnapshot,
+  events?: Record<string, unknown>,
+): ReadonlySet<string> {
+  // Cached per snapshot only without a registry: a registry changes what a
+  // wildcard expands to.
+  let types = events ? undefined : humanEventTypesBySnapshot.get(snapshot);
   if (!types) {
     types = new Set();
     for (const transition of getNextTransitions(snapshot)) {
       if ((transition.meta as { actor?: unknown } | undefined)?.actor === "human") {
         types.add(transition.eventType);
+        for (const type of expandHandlerType(snapshot, transition.eventType, events)) {
+          types.add(type);
+        }
       }
     }
-    humanEventTypesBySnapshot.set(snapshot, types);
+    if (!events) humanEventTypesBySnapshot.set(snapshot, types);
   }
   return types;
 }

@@ -43,6 +43,7 @@ import {
   getAcceptedEvents,
   getActEvents,
   getHumanEventTypes,
+  isEventPattern,
   type AgentSchemas,
 } from "./events.js";
 import {
@@ -1582,7 +1583,8 @@ function bindActLogic(runCtx: RunAgentBindContext): ActLogic {
         const before = actorRef.getSnapshot() as AnyMachineSnapshot;
         let accepted: boolean;
         try {
-          accepted = !getHumanEventTypes(before).has(type) && before.can(event);
+          accepted =
+            !getHumanEventTypes(before, runCtx.schemas?.events).has(type) && before.can(event);
         } catch {
           accepted = false;
         }
@@ -1861,7 +1863,10 @@ function bindDecisionLogic(logic: DecisionLogic, runCtx: RunAgentBindContext): D
       const agentCan = (event: ChosenEvent): boolean => {
         if (!actorRef) return true;
         const snapshot = actorRef.getSnapshot() as AnyMachineSnapshot;
-        return !getHumanEventTypes(snapshot).has(event.type) && snapshot.can(event);
+        return (
+          !getHumanEventTypes(snapshot, runCtx.schemas?.events).has(event.type) &&
+          snapshot.can(event)
+        );
       };
 
       const lowered = logic.request(input as never);
@@ -1892,9 +1897,30 @@ function bindDecisionLogic(logic: DecisionLogic, runCtx: RunAgentBindContext): D
       }
       // After the options: a closed choice builds them from `events`, so a
       // person's event still lands in `withheld`.
+      // A pattern left unexpanded (no registered type matches it) is no event a model can send.
       if (actorRef) {
-        const humanEventTypes = getHumanEventTypes(actorRef.getSnapshot() as AnyMachineSnapshot);
-        request.events = events.filter((event) => !humanEventTypes.has(event.type));
+        const humanEventTypes = getHumanEventTypes(
+          actorRef.getSnapshot() as AnyMachineSnapshot,
+          runCtx.schemas?.events,
+        );
+        request.events = events.filter(
+          (event) => !humanEventTypes.has(event.type) && !isEventPattern(event.type),
+        );
+      }
+      // No candidate at all: say why, rather than exhaust with no attempts.
+      if (actorRef && request.events.length === 0) {
+        const allowed = declaredEventTypes?.map((type) => `'${type}'`).join(", ") ?? "any";
+        // The same error as exhausted retries, so a host branching on
+        // `decision-exhausted` keeps handling it; the message says why.
+        const error = new AgentDecisionExhaustedError([]);
+        error.message =
+          `Decision '${request.name}' has no event to offer: the current state accepts no event ` +
+          `type matching allowedEvents (${allowed}) that a model may send; no model call was made. ` +
+          "A wildcard handler such as `on: { 'desk.*': ... }` accepts only the matching event " +
+          "types registered in the machine's event schemas.";
+        runCtx.emitTrace?.({ type: "request.start", request }, self);
+        runCtx.emitTrace?.({ type: "request.error", request, error }, self);
+        throw error;
       }
       // Nothing to choose from: fail without a model call, the same way
       // exhausted retries fail, so the invoke's onError handles it.
