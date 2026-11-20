@@ -263,9 +263,10 @@ function loweredEventTypes(machine: AnyStateMachine, path: string): string[] {
   const types = new Set<string>();
   for (let current = node; current; current = current.parent) {
     for (const [type, transitions] of current.transitions) {
-      // Human events are never offered to the model (see getHumanEventTypes).
+      // An event with any human-tagged branch is never offered to the model
+      // (see getHumanEventTypes).
       if (
-        !transitions.every((t) => (t.meta as { actor?: unknown } | undefined)?.actor === "human")
+        !transitions.some((t) => (t.meta as { actor?: unknown } | undefined)?.actor === "human")
       ) {
         types.add(type);
       }

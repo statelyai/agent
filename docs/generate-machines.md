@@ -40,10 +40,10 @@ The `lint` gate adds these checks over the config's state graph to `lintAgentMac
 | ----------------------------- | --------------------------------------------------------------------------------------------------------------------- |
 | `unreachable-state`           | a state that is not an initial state and that no transition from a reachable state targets                            |
 | `state-cannot-finish`         | a reachable state with no path to a final state through events, `after`, `always`, choice branches, or invoke results |
-| `decide-event-unhandled`      | an `allowedEvents` entry that neither the deciding state nor an ancestor handles                                      |
+| `decide-event-unhandled`      | an `allowedEvents` entry that no state handles: not the deciding state, an ancestor, or another parallel region       |
 | `decide-event-without-schema` | an event a decision may send with no `schemas.events` entry, so its payload reaches the machine unvalidated           |
 
-Guards are ignored, so the graph checks report a state only when no path exists at all. A config with no final state is treated as a long-running service and skips `state-cannot-finish`. An `agent.decide` or `agent.act` invoke with no `allowedEvents` may send every non-human event its state handles, so each of those needs a schema. Give an event with no payload `{ "type": "object", "properties": {} }`.
+Guards are ignored, so the graph checks report a state only when no path exists at all. A config with no final state is treated as a long-running service and skips `state-cannot-finish`. An `agent.decide` or `agent.act` invoke with no `allowedEvents` may send every non-human event its state handles, so each of those needs a schema. An event is human when any of its transitions is tagged `meta: { actor: "human" }`. A wildcard entry such as `"desk.*"` stands for every matching event the deciding state or an ancestor handles. A `{{ }}` template in `allowedEvents` resolves at run time, so the decision checks skip that invoke. Give an event with no payload `{ "type": "object", "properties": {} }`.
 
 Run the gates on the config the model returned:
 

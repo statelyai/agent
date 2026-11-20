@@ -726,6 +726,211 @@ describe("verifyAgentConfig config graph checks", () => {
       ok: true,
     });
   });
+  test("decide-event-unhandled: a templated allowedEvents is not read as an event name", async () => {
+    const config = (allowedEvents: unknown) => ({
+      initial: "triage",
+      schemas: { events: { APPROVE: empty } },
+      states: {
+        triage: {
+          invoke: {
+            src: "agent.decide",
+            input: { model: MODEL, prompt: "Decide.", allowedEvents },
+            onError: { target: "done" },
+          },
+          on: { APPROVE: { target: "done" } },
+        },
+        done: fin,
+      },
+    });
+    for (const allowedEvents of ["{{ input.events }}", ["APPROVE", "{{ input.extra }}"]]) {
+      expect(lintGate(await verifyAgentConfig(config(allowedEvents), { compileSchema }))).toEqual({
+        name: "lint",
+        ok: true,
+      });
+    }
+    // A templated payloads list may close the choice; it is unknown here.
+    const templatedPayloads = config(["APPROVE"]);
+    delete (templatedPayloads.schemas.events as Record<string, unknown>).APPROVE;
+    Object.assign(templatedPayloads.states.triage.invoke.input, {
+      payloads: "{{ input.payloads }}",
+    });
+    expect(lintGate(await verifyAgentConfig(templatedPayloads, { compileSchema }))).toEqual({
+      name: "lint",
+      ok: true,
+    });
+  });
+
+  test("decide-event-without-schema: a wildcard allowedEvents entry checks the events it admits", async () => {
+    const config = {
+      initial: "routing",
+      schemas: { events: { "desk.assign": empty } as Record<string, unknown> },
+      states: {
+        routing: {
+          invoke: {
+            src: "agent.decide",
+            input: { model: MODEL, prompt: "Route.", allowedEvents: ["desk.*"] },
+            onError: { target: "done" },
+          },
+          on: { "desk.assign": { target: "done" }, "desk.close": { target: "done" } },
+        },
+        done: fin,
+      },
+    };
+    const detail = lintGate(await verifyAgentConfig(config, { compileSchema }))!.detail!;
+    expect(detail).toContain("decide-event-without-schema at 'routing'");
+    expect(detail).toContain("send 'desk.close'");
+    expect(detail).not.toContain("send 'desk.assign'");
+
+    config.schemas.events["desk.close"] = empty;
+    expect(lintGate(await verifyAgentConfig(config, { compileSchema }))).toEqual({
+      name: "lint",
+      ok: true,
+    });
+  });
+
+  test("unreachable-state: entering one parallel region enters its sibling regions", async () => {
+    const config = {
+      id: "m",
+      initial: "idle",
+      schemas: { events: { GO: empty, FINISH: empty, STOP: empty } },
+      states: {
+        idle: { on: { GO: { target: "job.worker" } } },
+        job: {
+          type: "parallel",
+          states: {
+            worker: {
+              initial: "running",
+              states: { running: { on: { FINISH: { target: "#m.done" } } } },
+            },
+            monitor: {
+              initial: "watching",
+              states: { watching: { on: { STOP: { target: "#m.done" } } } },
+            },
+          },
+        },
+        done: fin,
+      },
+    };
+    expect(lintGate(await verifyAgentConfig(config, { compileSchema }))).toEqual({
+      name: "lint",
+      ok: true,
+    });
+  });
+
+  test("state-cannot-finish: a sibling region's exit from the parallel state counts as a way out", async () => {
+    const config = {
+      id: "job",
+      initial: "running",
+      schemas: { events: { FINISH: empty } },
+      states: {
+        running: {
+          type: "parallel",
+          states: {
+            worker: {
+              initial: "working",
+              states: { working: { on: { FINISH: { target: "#job.done" } } } },
+            },
+            monitor: {},
+          },
+        },
+        done: fin,
+      },
+    };
+    expect(lintGate(await verifyAgentConfig(config, { compileSchema }))).toEqual({
+      name: "lint",
+      ok: true,
+    });
+  });
+
+  test("state-cannot-finish: completion propagates through nested parallel states", async () => {
+    const region = { initial: "finished", states: { finished: fin } };
+    const config = {
+      initial: "outer",
+      states: {
+        outer: {
+          type: "parallel",
+          onDone: { target: "done" },
+          states: {
+            inner: {
+              type: "parallel",
+              states: {
+                left: {
+                  initial: "working",
+                  states: { working: { after: { "10": { target: "finished" } } }, finished: fin },
+                },
+                right: region,
+              },
+            },
+            other: region,
+          },
+        },
+        done: fin,
+      },
+    };
+    expect(lintGate(await verifyAgentConfig(config, { compileSchema }))).toEqual({
+      name: "lint",
+      ok: true,
+    });
+  });
+
+  test("state-cannot-finish: a transition that resets to the root counts as a way out", async () => {
+    const config = {
+      id: "retry",
+      initial: "trying",
+      schemas: { events: { OK: empty, FAIL: empty } },
+      states: {
+        trying: { on: { OK: { target: "done" }, FAIL: { target: "failed" } } },
+        failed: { after: { "1000": { target: "#retry" } } },
+        done: fin,
+      },
+    };
+    expect(lintGate(await verifyAgentConfig(config, { compileSchema }))).toEqual({
+      name: "lint",
+      ok: true,
+    });
+  });
+
+  test("decide-event-without-schema: an event with any human-tagged branch is not a candidate", async () => {
+    const config = leadConfig();
+    delete config.states.scoring.invoke.input.allowedEvents;
+    config.states.scoring.on.SKIP = [
+      { guard: "{{ context.manual }}", target: "done", meta: { actor: "human" } },
+      { target: "done" },
+    ];
+    expect(lintGate(await verifyAgentConfig(config, { compileSchema }))).toEqual({
+      name: "lint",
+      ok: true,
+    });
+  });
+
+  test("decide-event-unhandled: a handler in a sibling parallel region counts", async () => {
+    const config = {
+      id: "desk",
+      initial: "open",
+      schemas: { events: { ESCALATE: empty, DONE: empty } },
+      states: {
+        open: {
+          type: "parallel",
+          states: {
+            agent: {
+              invoke: {
+                src: "agent.decide",
+                input: { model: MODEL, prompt: "Escalate?", allowedEvents: ["ESCALATE"] },
+                onError: { target: "#desk.closed" },
+              },
+              on: { DONE: { target: "#desk.closed" } },
+            },
+            supervisor: { on: { ESCALATE: { target: "#desk.closed" } } },
+          },
+        },
+        closed: fin,
+      },
+    };
+    expect(lintGate(await verifyAgentConfig(config, { compileSchema }))).toEqual({
+      name: "lint",
+      ok: true,
+    });
+  });
 });
 
 test("verifyAgentConfig returns one explore report per input", async () => {
