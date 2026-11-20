@@ -700,16 +700,15 @@ describe("canReach — states passed through", () => {
   });
 
   test("the last region to finish a parallel state with onDone is reachable", async () => {
+    // r1 starts final, so r2's final state completes the parallel state and is
+    // only ever passed through.
     const machine = createMachine({
       initial: "work",
       states: {
         work: {
           type: "parallel",
           states: {
-            r1: {
-              initial: "s",
-              states: { s: { on: { A: { target: "d" } } }, d: { type: "final" } },
-            },
+            r1: { initial: "d", states: { d: { type: "final" } } },
             r2: {
               initial: "s",
               states: { s: { on: { B: { target: "d" } } }, d: { type: "final" } },
@@ -720,13 +719,14 @@ describe("canReach — states passed through", () => {
         end: { type: "final" },
       },
     });
-    const both = await canReach(machine, (snapshot) =>
-      snapshot.matches({ work: { r1: "d", r2: "d" } }),
-    );
-    // A predicate sees settled snapshots only; the state target sees transits.
-    expect(both).toMatchObject({ reachable: false, complete: true });
-    expect(await canReach(machine, "work.r2.d")).toMatchObject({ reachable: true, complete: true });
-    expect(await canReach(machine, "work.r1.d")).toMatchObject({ reachable: true, complete: true });
+    expect(
+      await canReach(machine, (snapshot) => snapshot.matches({ work: { r2: "d" } })),
+    ).toMatchObject({ reachable: false, complete: true });
+    expect(await canReach(machine, "work.r2.d")).toMatchObject({
+      reachable: true,
+      complete: true,
+      witness: [{ type: "B" }],
+    });
   });
 
   test("a transient state nothing transits stays unreachable", async () => {
