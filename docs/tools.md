@@ -264,6 +264,12 @@ function isJson(value: unknown, parents: object[] = []): boolean {
   );
 }
 
+/** The SDK's output for a tool without `toModelOutput`: a string as text, anything else as JSON. */
+function defaultOutput(value: unknown) {
+  if (typeof value === "string") return { type: "text", value } as const;
+  return { type: "json", value: JSON.parse(JSON.stringify(value) ?? "null") } as const;
+}
+
 async function answerApprovals(messages: ModelMessage[]) {
   const first = await generateText({ model, tools, messages });
   const requests = first.content.filter((part) => part.type === "tool-approval-request");
@@ -275,16 +281,16 @@ async function answerApprovals(messages: ModelMessage[]) {
   //    whose parsed input is not a plain JSON object (an input schema turned
   //    a string into a `Date` or a `Set`, say, or the input is `null` or an
   //    array) stays out of the machine, and step 3 answers it as failed.
-  const argsOf = (input: unknown) => (input === undefined ? {} : input);
+  //    The SDK parses an empty argument string as `{}` before the schema runs.
   const calls = requests
     .filter(({ toolCall }) => {
-      const args = argsOf(toolCall.input);
-      return typeof args === "object" && args !== null && !Array.isArray(args) && isJson(args);
+      const { input } = toolCall;
+      return typeof input === "object" && input !== null && !Array.isArray(input) && isJson(input);
     })
     .map(({ toolCall }) => ({
       id: toolCall.toolCallId,
       tool: toolCall.toolName,
-      args: argsOf(toolCall.input),
+      args: toolCall.input,
     }));
 
   // 2. Run the approval loop above with a runTool actor that calls
@@ -318,8 +324,7 @@ async function answerApprovals(messages: ModelMessage[]) {
                 input: toolCall.input,
                 output: entry.value,
               })
-            : // The SDK's default: the output as a JSON value (a `Date` becomes a string).
-              { type: "json", value: JSON.parse(JSON.stringify(entry.value ?? null)) },
+            : defaultOutput(entry.value),
     });
   }
   const toolMessage: ModelMessage = { role: "tool", content };
