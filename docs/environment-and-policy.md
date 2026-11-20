@@ -129,7 +129,7 @@ The expected outcome per scenario is a label people write. The score never comes
 
 ## The improvement loop
 
-> **Experimental:** self-improvement is experimental. The gates are stable, but the round itself may change, and on a loop with no decision point it mostly proposes wording, cap, and approval-rule changes. Code-level causes come back as change requests for a person.
+> **Experimental:** self-improvement is experimental. The gates are stable, but the round itself may change, and on a loop with no decision point the changes are mostly wording, caps, and approval rules. Code-level causes come back as change requests for a person.
 
 ```text
 traces → objective → diagnose → propose a policy diff → verifyAgentConfig → replay train → replay held-out → promote or discard
@@ -164,8 +164,7 @@ Self-improvement is an experimental pattern with stable gates. The library suppl
 
 ### Machines with no decision point
 
-A pure environment still improves through its approval rules and caps. [`proposeApprovalRules` and `proposeCaps`](evals.md#proposals-from-traces) read many runs' traces and propose an `allow` or `deny` rule per tool-and-arguments pattern and a value per cap.
-They are proposals for a person to review; nothing promotes them.
+A pure environment still improves through its approval rules, caps, and prompts. Diagnose from traces, let a person or a model write the change, and gate it with `canReach` and `compareRuns`: see [Changes from traces](evals.md#changes-from-traces).
 
 ## When not to split
 
