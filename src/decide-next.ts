@@ -13,6 +13,7 @@ import {
   getHumanEventTypes,
   isEventPattern,
   type EventFromSnapshot,
+  matchesHandlerDescriptor,
 } from "./events.js";
 import type { DecisionStrategy } from "./decision-strategy.js";
 import { isRecord } from "./internal/is-record.js";
@@ -38,6 +39,19 @@ export interface DecideNextOptions<TSnapshot extends AnyMachineSnapshot = AnyMac
   prompt?: string;
   /** Semantic request name, for traces and scripted executors. Default `'decideNext'`. */
   name?: string;
+  /**
+   * Passed through as `request.metadata`, as `agent.decide` input's
+   * `metadata` is. {@link createPolicyDecider}'s default policy input reads
+   * `metadata.facts`.
+   */
+  metadata?: Record<string, unknown>;
+  /**
+   * The decision's idempotency key, unique per decision and the same when a
+   * crashed host asks again. Each attempt's executor `info.callKey` is
+   * `${callKey}.${attempt}`, as under `agent.decide`. {@link createPolicyDecider}
+   * with a `store` names each policy thread from it. Default: none.
+   */
+  callKey?: string;
   /**
    * Describe what each option changes: the state value and the changed
    * top-level context keys, computed with xstate's pure `transition()`.
@@ -147,6 +161,7 @@ export async function decideNext<TSnapshot extends AnyMachineSnapshot>(
     system: options.system,
     prompt: options.prompt,
     input: { value: snapshot.value, context: snapshot.context },
+    ...(options.metadata !== undefined ? { metadata: options.metadata } : {}),
     events,
     options: offered,
     withheld,
@@ -173,6 +188,7 @@ export async function decideNext<TSnapshot extends AnyMachineSnapshot>(
       maxRetries: options.maxRetries,
       signal: options.signal,
       canTake: (chosen) => safeCan(snapshot, chosen),
+      ...(options.callKey !== undefined ? { callKey: options.callKey } : {}),
     },
   );
   return { event: event as EventFromSnapshot<TSnapshot>, attempts, request, withheld };
@@ -193,12 +209,22 @@ function describeOption(
   schema: StandardSchemaV1 | undefined,
   lookahead: boolean | readonly string[] | undefined,
 ): string {
-  const what =
-    getNextTransitions(snapshot).find(
-      (candidate) => candidate.eventType === event.type && candidate.description,
-    )?.description ??
-    schemaDescription(schema) ??
-    event.type;
+  // The handler xstate routes the event to: child states before parents
+  // (getNextTransitions' order), and within one state an exact handler before
+  // a matching partial wildcard. The `*` catch-all describes nothing.
+  const routed = getNextTransitions(snapshot).filter(
+    (candidate) =>
+      candidate.eventType !== "*" && matchesHandlerDescriptor(event.type, candidate.eventType),
+  );
+  const first = routed[0];
+  const fromSource = routed.filter((candidate) => candidate.source === first?.source);
+  // An exact handler routes before any wildcard in its state, so only its
+  // branches describe the event when it has one.
+  const exact = fromSource.filter((candidate) => candidate.eventType === event.type);
+  const handler = (exact.length > 0 ? exact : fromSource).find(
+    (candidate) => candidate.description,
+  );
+  const what = handler?.description ?? schemaDescription(schema) ?? event.type;
   const fields = Object.entries(event)
     .filter(([key]) => key !== "type")
     .map(([key, value]) => `${key}: ${short(value)}`);
