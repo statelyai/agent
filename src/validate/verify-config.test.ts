@@ -580,6 +580,14 @@ describe("verifyAgentConfig config graph checks", () => {
     expect(detail).not.toContain("'SKIP'");
   });
 
+  test("decide-event-without-schema: an inherited property name is not a schema", async () => {
+    const config = leadConfig();
+    delete config.states.scoring.invoke.input.allowedEvents;
+    Object.assign(config.states.scoring.on, { toString: { target: "done" } });
+    const detail = lintGate(await verifyAgentConfig(config, { compileSchema }))!.detail!;
+    expect(detail).toContain("send 'toString'");
+  });
+
   test("decide-event-without-schema: an event the decide input lists payloads for passes", async () => {
     const config = leadConfig();
     delete config.schemas.events.HOT;
@@ -980,6 +988,46 @@ describe("verifyAgentConfig config graph checks", () => {
       const gate = lintGate(await verifyAgentConfig(config, { compileSchema }))!;
       expect(gate.detail ?? "").not.toContain("p.c.stuck");
     }
+  });
+
+  test("state-cannot-finish: a sibling region's reentering move into a third region resets this one", async () => {
+    const config = {
+      id: "m",
+      initial: "p",
+      schemas: { events: { GO: empty, EXIT: empty, JUMP: empty } },
+      states: {
+        p: {
+          type: "parallel",
+          states: {
+            a: { initial: "working", states: { working: {}, finished: fin } },
+            b: {
+              initial: "idle",
+              states: {
+                idle: { on: { JUMP: { target: "#m.p.a.finished", reenter: true } } },
+              } as Record<string, Record<string, unknown>>,
+            },
+            c: {
+              initial: "start",
+              states: {
+                start: { on: { GO: { target: "stuck" }, EXIT: { target: "#m.done" } } },
+                stuck: {},
+              },
+            },
+          },
+        },
+        done: fin,
+      },
+    };
+    // `reenter: true` makes `p` the domain, so every region restarts, `c` at `start`.
+    expect(lintGate(await verifyAgentConfig(config, { compileSchema }))).toEqual({
+      name: "lint",
+      ok: true,
+    });
+
+    // Without it, the move exits region `a` only and `c` stays stuck.
+    config.states.p.states.b.states.idle = { on: { JUMP: { target: "#m.p.a.finished" } } };
+    const detail = lintGate(await verifyAgentConfig(config, { compileSchema }))!.detail!;
+    expect(detail).toContain("state-cannot-finish at 'p.c.stuck'");
   });
 
   test("state-cannot-finish: a sibling region's reset of the parallel state counts as a way out", async () => {

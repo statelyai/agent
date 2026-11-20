@@ -94,6 +94,8 @@ interface Edges {
   active: Map<GraphNode, GraphNode[]>;
   /** Targets of a compound or parallel state's own `onDone`, taken when it completes. */
   done: Map<GraphNode, GraphNode[]>;
+  /** Per source, the targets of its `reenter: true` transitions. */
+  reenter: Map<GraphNode, Set<GraphNode>>;
 }
 
 /** Every transition target as a node, or `undefined` when any target does not resolve. */
@@ -102,7 +104,7 @@ function buildEdges(
   root: GraphNode,
   byPath: Map<string, GraphNode>,
 ): Edges | undefined {
-  const edges: Edges = { active: new Map(), done: new Map() };
+  const edges: Edges = { active: new Map(), done: new Map(), reenter: new Map() };
   let resolved = true;
   const resolve = (from: GraphNode, target: string): GraphNode | undefined => {
     if (target.startsWith("#")) {
@@ -121,6 +123,10 @@ function buildEdges(
       toList(transition.target).flatMap((target) => {
         const node = typeof target === "string" ? resolve(from, target) : undefined;
         if (!node) resolved = false;
+        if (node && transition.reenter === true) {
+          if (!edges.reenter.has(from)) edges.reenter.set(from, new Set());
+          edges.reenter.get(from)!.add(node);
+        }
         return node ? [node] : [];
       }),
     );
@@ -274,8 +280,9 @@ function finishingStates(
   };
   // A transition from a state in another region of a parallel ancestor moves
   // this state when it leaves the parallel state, targets the parallel state
-  // itself (which reenters every region), or targets this state's own region.
-  // One that targets a third region leaves this region where it is.
+  // itself (which reenters every region), targets this state's own region, or
+  // sets `reenter: true` (its domain is then the whole parallel state). One
+  // that targets a third region without `reenter` leaves this region where it is.
   const siblingRegionExits = (node: GraphNode): boolean =>
     ancestors(node).some(
       (at) =>
@@ -288,7 +295,10 @@ function finishingStates(
                 within(state, region) &&
                 [...edges.active.get(state)!, ...edges.done.get(state)!].some(
                   (target) =>
-                    (target === at.parent || !within(target, at.parent!) || within(target, at)) &&
+                    (target === at.parent ||
+                      !within(target, at.parent!) ||
+                      within(target, at) ||
+                      !!edges.reenter.get(state)?.has(target)) &&
                     live.has(target),
                 ),
             ),
@@ -442,7 +452,7 @@ function checkDecisionEvents(
 
       for (const type of candidates) {
         if (withheld(type)) continue;
-        if (type in schemas) continue;
+        if (Object.hasOwn(schemas, type)) continue;
         // A decide payloads map closes the choice: the model picks one of
         // the listed payloads, or a bare `{ type }` for an event the map does
         // not list, and the runtime rejects added fields. A templated payloads
