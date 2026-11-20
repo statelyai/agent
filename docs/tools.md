@@ -253,10 +253,13 @@ import { generateText, type ModelMessage } from "ai";
 
 const first = await generateText({ model, tools, messages });
 const requests = first.content.filter((part) => part.type === "tool-approval-request");
+// Stop here when `requests` is empty: `first` is the final answer.
 
 // 1. Map the unexecuted calls to the machine input. The person approves the
 //    JSON form of the arguments; the tool runs with the input the SDK parsed,
 //    which an input schema may have transformed (a string to a `Date`, say).
+//    `JSON.stringify` throws on a value JSON cannot hold, such as a `BigInt`:
+//    answer that call as failed before the loop starts.
 const calls = requests.map(({ toolCall }) => ({
   id: toolCall.toolCallId,
   tool: toolCall.toolName,
@@ -302,6 +305,8 @@ await generateText({
 ```
 
 `results` is in proposal order, so `results[index]` answers `requests[index]`. Persist `result.output.rules` and pass them as `rules` in the next turn's input.
+
+The snapshot holds only the JSON arguments. The tool message needs `requests` and `first.response.messages`, and `runTool` needs the parsed input. A host that can restart while a call waits for approval stores `requests` and `first.response.messages` with the snapshot, using a serializer that keeps transformed values (a `Date`, a `BigInt`), and rebuilds `runTool` from them on resume.
 
 ## Related
 
