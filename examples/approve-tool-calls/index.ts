@@ -50,18 +50,29 @@ const resultSchema = z.object({
 });
 export type CallResult = z.infer<typeof resultSchema>;
 
-/** JSON with object keys sorted at every level, so key order does not change the result. Array order still counts. */
-function canonicalJson(value: unknown): string {
-  return JSON.stringify(value, (_key, item: unknown) =>
-    item && typeof item === "object" && !Array.isArray(item)
-      ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
-      : item,
+/**
+ * Structural equality: object key order does not count, array order does, and
+ * `NaN`, `null`, and `undefined` are three different values.
+ */
+function sameValue(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) return true;
+  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  return (
+    aKeys.length === bKeys.length &&
+    aKeys.every(
+      (key) =>
+        Object.hasOwn(b, key) &&
+        sameValue((a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key]),
+    )
   );
 }
 
 /** A rule matches a call with the same tool and the same arguments, in any key order. */
 export function ruleMatches(rule: ApprovalRule, call: ProposedCall): boolean {
-  return rule.tool === call.tool && canonicalJson(rule.args) === canonicalJson(call.args);
+  return rule.tool === call.tool && sameValue(rule.args, call.args);
 }
 
 /** The host's tool runner. The default only echoes the call, so importing this file runs nothing. */

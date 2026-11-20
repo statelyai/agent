@@ -203,9 +203,17 @@ reviewing: {
   },
 },
 running: {
-  invoke: { src: "runTool", input: ({ context }) => ({ call: context.calls[context.cursor] }), onDone: "next" },
+  invoke: {
+    src: "runTool",
+    input: ({ context }) => ({ call: context.calls[context.cursor] }),
+    // Advance past the call, so a rule it just created does not run it again.
+    onDone: ({ context, output }) => ({ target: "next", context: executed(context, output) }),
+    onError: ({ context, event }) => ({ target: "next", context: failed(context, event.error) }),
+  },
 },
 ```
+
+`denied`, `executed`, and `failed` append the call's result and advance `cursor`. The example spells them out.
 
 The run loop resumes the persisted snapshot with each answer:
 
@@ -270,7 +278,7 @@ const toolMessage: ModelMessage = {
               toolName: toolCall.toolName,
               output:
                 entry.status === "executed"
-                  ? { type: "json", value: entry.value }
+                  ? { type: "json", value: entry.value ?? null }
                   : { type: "error-text", value: entry.reason },
             },
           ]

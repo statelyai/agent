@@ -60,6 +60,28 @@ describe("approve-tool-calls", () => {
         },
       ),
     ).toBe(false);
+    for (const [ruleValue, callValue] of [
+      [Number.NaN, null],
+      [null, undefined],
+      [Number.POSITIVE_INFINITY, null],
+    ]) {
+      expect(
+        ruleMatches(
+          { tool: "fetch", args: { limit: ruleValue } },
+          { id: "f1", tool: "fetch", args: { limit: callValue } },
+        ),
+      ).toBe(false);
+    }
+    expect(
+      ruleMatches(
+        { tool: "fetch", args: { limit: Number.NaN } },
+        {
+          id: "f2",
+          tool: "fetch",
+          args: { limit: Number.NaN },
+        },
+      ),
+    ).toBe(true);
   });
 
   test("calls run in proposal order and a failure does not stop the batch", async () => {
