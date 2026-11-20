@@ -699,7 +699,7 @@ describe("verifyAgentConfig config graph checks", () => {
     );
   });
 
-  test("decide-event-unhandled: a handler on an ancestor or a wildcard counts", async () => {
+  test("decide-event-unhandled: a handler on an ancestor counts; a wildcard handler does not admit an exact entry", async () => {
     const config = {
       id: "mod",
       initial: "review",
@@ -707,7 +707,10 @@ describe("verifyAgentConfig config graph checks", () => {
       states: {
         review: {
           initial: "labeling",
-          on: { ALLOW: { target: "allowed" }, "mod.*": { target: "allowed" } },
+          on: {
+            ALLOW: { target: "allowed" },
+            "mod.*": { target: "allowed" },
+          } as Record<string, unknown>,
           states: {
             labeling: {
               invoke: {
@@ -721,6 +724,14 @@ describe("verifyAgentConfig config graph checks", () => {
         allowed: fin,
       },
     };
+    // The runtime offers the 'mod.*' descriptor only to an entry it matches,
+    // and 'mod.*' does not match the exact entry 'mod.flag'.
+    const detail = lintGate(await verifyAgentConfig(config, { compileSchema }))!.detail!;
+    expect(detail).toContain("decide-event-unhandled at 'review.labeling'");
+    expect(detail).toContain("lists 'mod.flag'");
+    expect(detail).not.toContain("lists 'ALLOW'");
+
+    config.states.review.on["mod.flag"] = { target: "allowed" };
     expect(lintGate(await verifyAgentConfig(config, { compileSchema }))).toEqual({
       name: "lint",
       ok: true,
@@ -931,6 +942,232 @@ describe("verifyAgentConfig config graph checks", () => {
       ok: true,
     });
   });
+
+  test("unreachable-state: a transition into one region's child does not default-enter that region", async () => {
+    const config = {
+      id: "m",
+      initial: "idle",
+      schemas: { events: { GO: empty, NEXT: empty, FINISH: empty, STOP: empty } },
+      states: {
+        idle: { on: { GO: { target: "job.worker.ready" } } },
+        job: {
+          type: "parallel",
+          states: {
+            worker: {
+              initial: "starting",
+              states: {
+                starting: { on: { NEXT: { target: "ready" } } },
+                ready: { on: { FINISH: { target: "#m.done" } } },
+              },
+            },
+            monitor: {
+              initial: "watching",
+              states: { watching: { on: { STOP: { target: "#m.done" } } } },
+            },
+          },
+        },
+        done: fin,
+      },
+    };
+    const detail = lintGate(await verifyAgentConfig(config, { compileSchema }))!.detail!;
+    expect(detail).toContain("unreachable-state at 'job.worker.starting'");
+    expect(detail).not.toContain("'job.monitor");
+
+    // Targeting the region itself still enters its initial child.
+    config.states.idle.on.GO.target = "job.worker";
+    expect(lintGate(await verifyAgentConfig(config, { compileSchema }))).toEqual({
+      name: "lint",
+      ok: true,
+    });
+  });
+
+  test("state-cannot-finish: a sibling region's move into a third region is no way out", async () => {
+    const config = {
+      id: "m",
+      initial: "p",
+      schemas: { events: { A_DONE: empty, JUMP: empty } },
+      states: {
+        p: {
+          type: "parallel",
+          onDone: { target: "done" },
+          states: {
+            a: {
+              initial: "working",
+              states: { working: { on: { A_DONE: { target: "finished" } } }, finished: fin },
+            },
+            b: {
+              initial: "idle",
+              states: { idle: { on: { JUMP: { target: "#m.p.a.finished" } } } },
+            },
+            c: {
+              initial: "stuck",
+              states: { stuck: {} } as Record<string, unknown>,
+            },
+          },
+        },
+        done: fin,
+      },
+    };
+    const detail = lintGate(await verifyAgentConfig(config, { compileSchema }))!.detail!;
+    expect(detail).toContain("state-cannot-finish at 'p.c.stuck'");
+
+    // A sibling's transition that moves this region, or leaves the parallel state, counts.
+    config.states.p.states.c.states.freed = { after: { "10": { target: "#m.done" } } };
+    for (const target of ["#m.p.c.freed", "#m.done"]) {
+      config.states.p.states.b.states.idle.on.JUMP.target = target;
+      const gate = lintGate(await verifyAgentConfig(config, { compileSchema }))!;
+      expect(gate.detail ?? "").not.toContain("p.c.stuck");
+    }
+  });
+
+  /** A desk with two parallel regions: the agent decides; a supervisor escalates. */
+  function deskConfig() {
+    return {
+      id: "desk",
+      initial: "open",
+      schemas: { events: { ESCALATE: empty, DONE: empty } } as Record<string, any>,
+      states: {
+        open: {
+          type: "parallel",
+          states: {
+            agent: {
+              invoke: {
+                src: "agent.decide",
+                input: { model: MODEL, prompt: "Decide." } as Record<string, unknown>,
+                onError: { target: "#desk.closed" },
+              },
+              on: { DONE: { target: "#desk.closed" } } as Record<string, unknown>,
+            },
+            supervisor: {
+              on: { ESCALATE: { target: "#desk.closed" } } as Record<string, unknown>,
+            },
+          },
+        },
+        closed: fin,
+      },
+    };
+  }
+
+  test("decide-event-without-schema: omitted and wildcard allowedEvents check sibling region events", async () => {
+    const omitted = deskConfig();
+    delete omitted.schemas.events.ESCALATE;
+    let detail = lintGate(await verifyAgentConfig(omitted, { compileSchema }))!.detail!;
+    expect(detail).toContain("decide-event-without-schema at 'open.agent'");
+    expect(detail).toContain("send 'ESCALATE'");
+
+    const wildcard = deskConfig();
+    wildcard.schemas.events = { "desk.done": empty };
+    wildcard.states.open.states.agent.invoke.input.allowedEvents = ["desk.*"];
+    wildcard.states.open.states.agent.on = { "desk.done": { target: "#desk.closed" } };
+    wildcard.states.open.states.supervisor.on = { "desk.escalate": { target: "#desk.closed" } };
+    detail = lintGate(await verifyAgentConfig(wildcard, { compileSchema }))!.detail!;
+    expect(detail).toContain("send 'desk.escalate'");
+    expect(detail).not.toContain("send 'desk.done'");
+  });
+
+  test("decide-event-unhandled: a handler on a child of the deciding state counts", async () => {
+    const config = {
+      id: "m",
+      initial: "review",
+      schemas: { events: { APPROVE: empty, CANCEL: empty } as Record<string, unknown> },
+      states: {
+        review: {
+          initial: "labeling",
+          invoke: {
+            src: "agent.decide",
+            input: { model: MODEL, prompt: "Approve?", allowedEvents: ["APPROVE"] },
+            onError: { target: "done" },
+          },
+          on: { CANCEL: { target: "done" } },
+          states: { labeling: { on: { APPROVE: { target: "#m.done" } } } },
+        },
+        done: fin,
+      },
+    };
+    expect(lintGate(await verifyAgentConfig(config, { compileSchema }))).toEqual({
+      name: "lint",
+      ok: true,
+    });
+
+    delete config.schemas.events.APPROVE;
+    const detail = lintGate(await verifyAgentConfig(config, { compileSchema }))!.detail!;
+    expect(detail).toContain("decide-event-without-schema at 'review'");
+    expect(detail).toContain("send 'APPROVE'");
+  });
+
+  test("decide-event-without-schema: a human-tagged wildcard handler does not exempt an exact event", async () => {
+    const config = (on: Record<string, unknown>) => ({
+      initial: "routing",
+      schemas: { events: {} },
+      states: {
+        routing: {
+          invoke: {
+            src: "agent.decide",
+            input: { model: MODEL, prompt: "Route.", allowedEvents: ["desk.close"] },
+            onError: { target: "done" },
+          },
+          on,
+        },
+        done: fin,
+      },
+    });
+    const detail = lintGate(
+      await verifyAgentConfig(
+        config({
+          "desk.close": { target: "done" },
+          "desk.*": { target: "done", meta: { actor: "human" } },
+        }),
+        { compileSchema },
+      ),
+    )!.detail!;
+    expect(detail).toContain("decide-event-without-schema at 'routing'");
+    expect(detail).toContain("send 'desk.close'");
+
+    // A human-tagged exact handler withholds the event, so it needs no schema.
+    const human = lintGate(
+      await verifyAgentConfig(
+        config({ "desk.close": { target: "done", meta: { actor: "human" } } }),
+        { compileSchema },
+      ),
+    )!;
+    expect(human.detail ?? "").not.toContain("decide-event-without-schema");
+  });
+
+  test("decide-event-without-schema: payloads null is not a template", async () => {
+    const config = leadConfig();
+    delete config.schemas.events.HOT;
+    config.states.scoring.invoke.input.payloads = null;
+    const detail = lintGate(await verifyAgentConfig(config, { compileSchema }))!.detail!;
+    expect(detail).toContain("decide-event-without-schema at 'scoring'");
+    expect(detail).toContain("send 'HOT'");
+  });
+
+  test("decide-event-without-schema: agent.act payloads do not close the choice", async () => {
+    const config = {
+      initial: "editing",
+      schemas: { events: {} },
+      states: {
+        editing: {
+          invoke: {
+            src: "agent.act",
+            input: {
+              model: MODEL,
+              prompt: "Edit the draft.",
+              allowedEvents: ["SAVE"],
+              payloads: { SAVE: [{ text: "draft" }] },
+            },
+            onDone: { target: "done" },
+            onError: { target: "done" },
+          },
+          on: { SAVE: { target: "done" } },
+        },
+        done: fin,
+      },
+    };
+    const detail = lintGate(await verifyAgentConfig(config, { compileSchema }))!.detail!;
+    expect(detail).toContain("decide-event-without-schema at 'editing'");
+    expect(detail).toContain("agent.act send 'SAVE'");
+  });
 });
 
 test("verifyAgentConfig returns one explore report per input", async () => {
@@ -939,4 +1176,23 @@ test("verifyAgentConfig returns one explore report per input", async () => {
   expect(result.explore).toHaveLength(2);
   expect(result.explore![0]!.terminals.map((t) => t.state)).toContain("approved");
   expect(result.explore![1]!.terminals.map((t) => t.state)).toEqual(["denied"]);
+});
+
+test("verifyAgentConfig omits explore reports when an input throws, and still checks later inputs", async () => {
+  const result = await verifyAgentConfig(
+    refundConfig(),
+    options({
+      guards: {
+        isLarge: ({ context }) => {
+          if (context.amount === 0) throw new Error("no amount");
+          return context.amount > 100;
+        },
+      },
+      explore: { inputs: [{ amount: 0 }, { amount: 5 }], terminals: ["idle"] },
+    }),
+  );
+  expect(result.explore).toBeUndefined();
+  const detail = result.gates.at(-1)!.detail!;
+  expect(detail).toContain("input 0: exploration threw");
+  expect(detail).toContain("input 1: ");
 });

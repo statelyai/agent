@@ -199,7 +199,7 @@ One queued answer per invoke: the fan-out makes three `generateConfig` calls, so
 - **All candidates are rejected, and the repair fixes it.** `repairs === 1`, and `matchesTrajectory` pins the path through `repairing` and back into `parsing`.
 - **No repair ever parses.** The run ends in `failed` with `repairs === maxRepairs`, `config` is `null`, and `result.usage.modelCalls` is `3 + maxRepairs`, which is the assertion that the cap held. `repairs` counts rounds that produced a candidate to re-parse: a repair _call_ that fails goes straight to `failed` through `repairing`'s `onError` without spending a round, so that path ends with `repairs` below `maxRepairs`.
 
-`assertAgentMachine(machine)` covers the structure statically: a decision can deliver its events, and an invoke with no `onError` gets a warning. Lint does not check that a state is reachable. [`canReach`](verify.md#reachability-checks) covers that dynamically. Exploration tracks every invoke a state is still waiting on, so it walks straight through the three-way fan-out, and a canned `parseConfig` failure drives the loop to the end of its repair budget.
+`assertAgentMachine(machine)` covers the structure statically: it fails when a decision cannot deliver its events. It fails on errors only. An invoke with no `onError` gets a warning when no handler on its state, an ancestor, or the root catches actor errors. Read warnings with `lintAgentMachine(machine)`, or fail on them with `assertAgentMachine(machine, { warnings: true })`. Lint does not check that a state is reachable. [`canReach`](verify.md#reachability-checks) covers that dynamically. Exploration tracks every invoke a state is still waiting on, so it walks straight through the three-way fan-out, and a canned `parseConfig` failure drives the loop to the end of its repair budget.
 
 ```ts no-check
 const canned = {
@@ -217,7 +217,7 @@ expect((await canReach(machine, "done", canned)).reachable).toBe(true);
 
 ## Generated machine configs
 
-When the model's output is a workflow config, `verifyAgentConfig` from `@statelyai/agent/validate` is the validator. It runs the schema check (`validateAgentConfig`), the vocabulary, the lowering, lint over the machine and the config's state graph, and path exploration, and its failed gate's `detail` is the repair prompt. See [Generating machines with an LLM](generate-machines.md).
+When the model's output is a workflow config, `verifyAgentConfig` from `@statelyai/agent/validate` is the validator. It runs the schema check (`validateAgentConfig`), the lowering, and lint over the machine and the config's state graph. The vocabulary gate runs only when `allow` is given, and path exploration runs only when `explore` is given, so a call with only `compileSchema` checks neither. Its failed gate's `detail` is the repair prompt. See [Generating machines with an LLM](generate-machines.md).
 
 ## Evaluating the generate request live
 

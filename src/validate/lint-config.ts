@@ -168,26 +168,35 @@ function checkGraph(
   // Reachability over-approximates: guards are ignored, every edge is taken,
   // and a history state stands for its parent's default entry.
   const reached = new Set<GraphNode>();
-  const entered = new Set<GraphNode>();
+  const defaultEntered = new Set<GraphNode>();
   const queue: GraphNode[] = [];
-  const enter = (node: GraphNode) => {
-    if (entered.has(node)) return;
-    entered.add(node);
-    for (let at: GraphNode | undefined = node; at && at !== root; at = at.parent) {
-      if (!reached.has(at)) {
-        reached.add(at);
-        queue.push(at);
-      }
-      // Entering one region of a parallel state enters every other region.
-      if (at.parent && isParallel(at.parent)) {
-        for (const region of at.parent.children) enter(region);
-      }
-    }
+  const reach = (node: GraphNode) => {
+    if (node === root || reached.has(node)) return;
+    reached.add(node);
+    queue.push(node);
+  };
+  // Entering a state with no explicit target below it enters its default children.
+  const enterDefault = (node: GraphNode) => {
+    if (defaultEntered.has(node)) return;
+    defaultEntered.add(node);
+    reach(node);
     const below =
       isHistory(node) && node.parent ? defaultChildren(node.parent) : defaultChildren(node);
-    for (const child of below) enter(child);
+    for (const child of below) enterDefault(child);
   };
-  for (const child of defaultChildren(root)) enter(child);
+  // Entering a target enters its ancestors, and default-enters every other
+  // region of a parallel ancestor. The region holding the target enters the
+  // target, not its own initial child.
+  const enter = (target: GraphNode) => {
+    for (let at: GraphNode | undefined = target; at && at !== root; at = at.parent) {
+      reach(at);
+      if (at.parent && isParallel(at.parent)) {
+        for (const region of at.parent.children) if (region !== at) enterDefault(region);
+      }
+    }
+    enterDefault(target);
+  };
+  enterDefault(root);
   while (queue.length) {
     const node = queue.pop()!;
     for (const target of [...edges.active.get(node)!, ...edges.done.get(node)!]) enter(target);
@@ -236,9 +245,8 @@ function checkGraph(
  * The states from which some path ends the machine, as a fixpoint. Generous
  * where the config is ambiguous, so a reported state truly has no way out:
  * guards are ignored, an ancestor's transitions count for its descendants, a
- * sibling region's transition out of its region counts for every state in a
- * parallel state, and a parallel state counts as completing when any one
- * region can.
+ * sibling region's transition out of the parallel state counts for every state
+ * in it, and a parallel state counts as completing when any one region can.
  */
 function finishingStates(
   root: GraphNode,
@@ -264,8 +272,9 @@ function finishingStates(
     if (anyLive(edges.done.get(done))) return true;
     return isParallel(done.parent!) && completes(done.parent!);
   };
-  // A transition from any state in another region of a parallel ancestor that
-  // leaves that region also moves this state.
+  // A transition from a state in another region of a parallel ancestor moves
+  // this state when it leaves the parallel state or targets this state's own
+  // region. One that targets a third region leaves this region where it is.
   const siblingRegionExits = (node: GraphNode): boolean =>
     ancestors(node).some(
       (at) =>
@@ -277,7 +286,8 @@ function finishingStates(
               (state) =>
                 within(state, region) &&
                 [...edges.active.get(state)!, ...edges.done.get(state)!].some(
-                  (target) => !within(target, region) && live.has(target),
+                  (target) =>
+                    (!within(target, at.parent!) || within(target, at)) && live.has(target),
                 ),
             ),
         ),
@@ -305,7 +315,11 @@ function finishingStates(
 
 // ─── decision events ───
 
-/** The `on` keys of `states`, with whether any transition on the key is tagged `actor: "human"` (the runtime then never offers it; see `getHumanEventTypes`). */
+/**
+ * The `on` keys of `states`, with whether any transition on the key is tagged
+ * `actor: "human"`. The runtime withholds an event type whose exact key has a
+ * human-tagged transition (see `getHumanEventTypes`).
+ */
 function handledEvents(states: GraphNode[]): Map<string, boolean> {
   const handled = new Map<string, boolean>();
   for (const at of states) {
@@ -328,6 +342,8 @@ const isLiteralEventList = (value: unknown) =>
   value === undefined ||
   toList(value).every((entry) => typeof entry === "string" && !entry.includes("{{"));
 
+const isTemplate = (value: unknown) => typeof value === "string" && value.includes("{{");
+
 const isOfferable = (type: string) =>
   !isEventPattern(type) && !type.startsWith("xstate.") && !type.startsWith("@agent.");
 
@@ -347,52 +363,58 @@ function checkDecisionEvents(
       // A templated list resolves at run time, so its events are unknown here.
       if (!isLiteralEventList(allowedEvents)) continue;
 
-      const scope: GraphNode[] = [];
-      for (let at: GraphNode | undefined = node; at; at = at.parent) scope.push(at);
-      // States in other regions of a parallel ancestor may be active too; the
-      // runtime offers the events they handle.
-      const concurrent = scope.flatMap((at) =>
-        at.parent && isParallel(at.parent)
-          ? at.parent.children.filter((region) => region !== at).flatMap(descendants)
-          : [],
-      );
-      const own = [...handledEvents(scope).keys()].filter(isOfferable);
-      const offered = [...handledEvents([...scope, ...concurrent])];
+      // The runtime offers events from the whole active configuration: this
+      // state, its ancestors, its descendants, and the other regions of a
+      // parallel ancestor.
+      const active = [...descendants(node)];
+      for (let at: GraphNode | undefined = node; at; at = at.parent) {
+        if (at !== node) active.push(at);
+        if (at.parent && isParallel(at.parent)) {
+          active.push(...at.parent.children.filter((region) => region !== at).flatMap(descendants));
+        }
+      }
+      const handled = handledEvents(active);
+      const offerable = [...handled.keys()].filter(isOfferable);
 
-      // The events the model may send: the listed ones, with each pattern
-      // expanded over the events this state and its ancestors handle, or
-      // every such event when the list is omitted.
+      // The events the model may send. The runtime offers a handled event
+      // type when an entry matches it (`matchesEventPattern(type, entry)`),
+      // so an exact entry needs a handler with that exact key, and a pattern
+      // stands for the handled types it matches. An omitted list admits
+      // every handled type.
       const listed = allowedEvents === undefined ? undefined : (toList(allowedEvents) as string[]);
-      const candidates = new Set(
-        listed
-          ? listed.flatMap((entry) =>
-              isEventPattern(entry)
-                ? own.filter((type) => matchesEventPattern(type, entry))
-                : [entry],
-            )
-          : own,
-      );
-
-      for (const type of candidates) {
-        const handlers = offered.filter(([key]) => matchesEventPattern(type, key));
-        if (handlers.length === 0) {
-          diagnostics.push({
-            code: "decide-event-unhandled",
-            severity: "error",
-            path: node.path,
-            message:
-              `State '${node.path}' lists '${type}' in ${src} allowedEvents, but neither ` +
-              `'${node.path}' nor an ancestor handles it, so the model is never offered it. Add an ` +
-              `'on.${type}' transition, or remove '${type}' from allowedEvents.`,
-          });
+      const candidates = new Set<string>();
+      for (const entry of listed ?? ["*"]) {
+        if (isEventPattern(entry)) {
+          for (const type of offerable) if (matchesEventPattern(type, entry)) candidates.add(type);
           continue;
         }
+        if (handled.has(entry)) {
+          // A reserved type is never offered; the runtime drops it unmatched.
+          if (isOfferable(entry)) candidates.add(entry);
+          continue;
+        }
+        diagnostics.push({
+          code: "decide-event-unhandled",
+          severity: "error",
+          path: node.path,
+          message:
+            `State '${node.path}' lists '${entry}' in ${src} allowedEvents, but neither ` +
+            `'${node.path}' nor an ancestor handles it, so the model is never offered it. Add an ` +
+            `'on.${entry}' transition, or remove '${entry}' from allowedEvents.`,
+        });
+      }
+
+      for (const type of candidates) {
         // A human event is never offered (`decide-allows-human-event`).
-        if (handlers.some(([, human]) => human)) continue;
-        // Listed payloads close the choice: the model picks one of them. A
-        // templated payloads value resolves at run time and may list any event.
-        if (type in schemas || (payloads !== undefined && !isPlainObject(payloads))) continue;
-        if (isPlainObject(payloads) && payloads[type] !== undefined) continue;
+        if (handled.get(type)) continue;
+        if (type in schemas) continue;
+        // Listed decide payloads close the choice: the model picks one of
+        // them. A templated payloads value resolves at run time and may list
+        // any event. `agent.act` ignores payloads.
+        if (src === DECIDE_ACTOR) {
+          if (isTemplate(payloads)) continue;
+          if (isPlainObject(payloads) && payloads[type] != null) continue;
+        }
         diagnostics.push({
           code: "decide-event-without-schema",
           severity: "error",

@@ -450,7 +450,9 @@ async function checkExplore(
   const allowed: readonly string[] = terminals;
   const maxDepth = options.maxDepth ?? 8;
   const problems = new Set<string>();
-  const reports: AgentPathReport[] = [];
+  // Reports are returned only when every input produced one; after a throw,
+  // later inputs are still checked but their reports are not kept.
+  let reports: AgentPathReport[] | undefined = [];
   for (const [index, input] of inputs.entries()) {
     const at = inputs.length > 1 ? `input ${index}: ` : "";
     let report;
@@ -458,9 +460,10 @@ async function checkExplore(
       report = await explorePaths(machine, { ...rest, input });
     } catch (error) {
       problems.add(`${at}exploration threw: ${errorMessage(error)}`);
+      reports = undefined;
       continue;
     }
-    reports.push(report);
+    reports?.push(report);
     for (const terminal of report.terminals) {
       if (allowed.includes(terminal.status)) continue;
       const trail = `path [${terminal.path
@@ -511,7 +514,7 @@ async function checkExplore(
   }
   return {
     problems: [...problems],
-    ...(reports.length === inputs.length ? { reports } : {}),
+    ...(reports ? { reports } : {}),
   };
 }
 
