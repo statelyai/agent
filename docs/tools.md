@@ -205,10 +205,12 @@ const batch = createApprovalBatchMachine({
       tools[input.call.name].execute(input.call.args, { toolCallId: input.call.id, messages }),
   }),
 });
-// askPerson is your approval UI: it shows the choices and returns the event the person picked.
+// askPerson is your approval UI: it shows each awaiting call's name and arguments
+// next to its choices, and returns the event the person picked.
 let done = await runAgent(batch, { input: { calls } });
 while (done.status === "idle") {
-  const event = await askPerson(getInteraction(done.snapshot)?.choices ?? []);
+  const awaiting = done.snapshot.context.awaiting;
+  const event = await askPerson(awaiting, getInteraction(done.snapshot)?.choices ?? []);
   done = await runAgent(batch, { snapshot: done.persist(), event });
 }
 
