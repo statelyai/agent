@@ -185,6 +185,7 @@ A tool with `needsApproval: true` comes back from `generateText` unexecuted, as 
 
 ```ts no-check
 import { generateText, type ModelMessage } from "ai";
+import { getInteraction, runAgent } from "@statelyai/agent";
 
 const first = await generateText({ model, tools, messages });
 const requests = first.content.filter((part) => part.type === "tool-approval-request");
@@ -204,7 +205,14 @@ const batch = createApprovalBatchMachine({
       tools[input.call.name].execute(input.call.args, { toolCallId: input.call.id, messages }),
   }),
 });
-const done = await runBatchToDone(batch, { calls }); // host-specific: approval UI, persistence
+// askPerson is your approval UI: it shows each awaiting call's name and arguments
+// next to its choices, and returns the event the person picked.
+let done = await runAgent(batch, { input: { calls } });
+while (done.status === "idle") {
+  const awaiting = done.snapshot.context.awaiting;
+  const event = await askPerson(awaiting, getInteraction(done.snapshot)?.choices ?? []);
+  done = await runAgent(batch, { snapshot: done.persist(), event });
+}
 
 // 3. Feed the results back as one tool message, and continue.
 const toolMessage: ModelMessage = {
@@ -237,7 +245,7 @@ await generateText({
 });
 ```
 
-`results` is in input order, so `results[index]` answers `requests[index]`. Persist `done.output.approveAlways` and have `policy` allow those tool names on later turns.
+`results` is in input order, so `results[index]` answers `requests[index]`. Persist `done.output.approveAlways` and have `policy` allow a later call only when its tool name and arguments match a stored rule. Allowing by tool name alone approves every argument that tool accepts.
 
 ## Related
 
