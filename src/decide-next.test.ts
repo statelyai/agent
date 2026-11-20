@@ -346,6 +346,28 @@ describe("decideNext with a wildcard handler", () => {
     expect(descriptions["desk.close"]).toContain("Settle the case");
   });
 
+  test("an exact handler with no description does not take the wildcard's", async () => {
+    const both = createMachine({
+      schemas: { events: { "desk.refund": z.object({}) } },
+      initial: "reviewing",
+      states: {
+        reviewing: {
+          on: {
+            "desk.*": { target: "handled", description: "Settle the case" },
+            "desk.refund": { target: "handled" },
+          },
+        },
+        handled: { type: "final" },
+      },
+    });
+    const snapshot = createActor(both).start().getSnapshot();
+    const { decide, requests } = scripted([(request) => request.options![0]!.event]);
+
+    await decideNext(snapshot, { decide, model: "quick", allowedEvents: ["desk.*"] });
+
+    expect(requests[0]!.options![0]!.description).not.toContain("Settle the case");
+  });
+
   test("a wildcard handler a person sends offers none of the types it matches", async () => {
     const human = createMachine({
       schemas: {

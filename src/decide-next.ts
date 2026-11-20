@@ -218,9 +218,12 @@ function describeOption(
   );
   const first = routed[0];
   const fromSource = routed.filter((candidate) => candidate.source === first?.source);
-  const handler =
-    fromSource.find((candidate) => candidate.eventType === event.type && candidate.description) ??
-    fromSource.find((candidate) => candidate.description);
+  // An exact handler routes before any wildcard in its state, so only its
+  // branches describe the event when it has one.
+  const exact = fromSource.filter((candidate) => candidate.eventType === event.type);
+  const handler = (exact.length > 0 ? exact : fromSource).find(
+    (candidate) => candidate.description,
+  );
   const what = handler?.description ?? schemaDescription(schema) ?? event.type;
   const fields = Object.entries(event)
     .filter(([key]) => key !== "type")
