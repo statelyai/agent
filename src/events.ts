@@ -267,7 +267,9 @@ export function getAcceptedEvents(
 ): AgentEventDescriptor[] {
   const eventTypes = options.eventTypes;
   const humanEventTypes: ReadonlySet<string> =
-    options.actor === "agent" ? getHumanEventTypes(snapshot) : new Set();
+    options.actor === "agent"
+      ? getHumanEventTypes(snapshot, options.events ?? options.schemas?.events)
+      : new Set();
   const seen = new Set<string>();
   const usedToolNames = new Set<string>();
 
@@ -336,10 +338,12 @@ function expandHandlerType(
   schemas?: Record<string, unknown>,
 ): string[] {
   if (handlerType === "*" || !handlerType.endsWith(".*")) return [handlerType];
-  const registered = Object.keys(
-    schemas ?? (snapshot.machine.schemas?.events as Record<string, unknown> | undefined) ?? {},
-  );
-  const matched = registered.filter(
+  // A supplied registry (the root's, for an invoked child) and the machine's own.
+  const registered = new Set([
+    ...Object.keys(schemas ?? {}),
+    ...Object.keys((snapshot.machine.schemas?.events as Record<string, unknown> | undefined) ?? {}),
+  ]);
+  const matched = [...registered].filter(
     (type) => !isEventPattern(type) && matchesHandlerDescriptor(type, handlerType),
   );
   return matched.length ? matched : [handlerType];
@@ -350,17 +354,24 @@ function expandHandlerType(
  * `meta: { actor: "human" }`: a person sends them, so no model is offered them.
  * @internal
  */
-export function getHumanEventTypes(snapshot: AnyMachineSnapshot): ReadonlySet<string> {
-  let types = humanEventTypesBySnapshot.get(snapshot);
+export function getHumanEventTypes(
+  snapshot: AnyMachineSnapshot,
+  events?: Record<string, unknown>,
+): ReadonlySet<string> {
+  // Cached per snapshot only without a registry: a registry changes what a
+  // wildcard expands to.
+  let types = events ? undefined : humanEventTypesBySnapshot.get(snapshot);
   if (!types) {
     types = new Set();
     for (const transition of getNextTransitions(snapshot)) {
       if ((transition.meta as { actor?: unknown } | undefined)?.actor === "human") {
         types.add(transition.eventType);
-        for (const type of expandHandlerType(snapshot, transition.eventType)) types.add(type);
+        for (const type of expandHandlerType(snapshot, transition.eventType, events)) {
+          types.add(type);
+        }
       }
     }
-    humanEventTypesBySnapshot.set(snapshot, types);
+    if (!events) humanEventTypesBySnapshot.set(snapshot, types);
   }
   return types;
 }

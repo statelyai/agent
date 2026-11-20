@@ -1835,7 +1835,10 @@ function bindDecisionLogic(logic: DecisionLogic, runCtx: RunAgentBindContext): D
       const agentCan = (event: ChosenEvent): boolean => {
         if (!actorRef) return true;
         const snapshot = actorRef.getSnapshot() as AnyMachineSnapshot;
-        return !getHumanEventTypes(snapshot).has(event.type) && snapshot.can(event);
+        return (
+          !getHumanEventTypes(snapshot, runCtx.schemas?.events).has(event.type) &&
+          snapshot.can(event)
+        );
       };
 
       const lowered = logic.request(input as never);
@@ -1868,7 +1871,10 @@ function bindDecisionLogic(logic: DecisionLogic, runCtx: RunAgentBindContext): D
       // person's event still lands in `withheld`.
       // A pattern left unexpanded (no registered type matches it) is no event a model can send.
       if (actorRef) {
-        const humanEventTypes = getHumanEventTypes(actorRef.getSnapshot() as AnyMachineSnapshot);
+        const humanEventTypes = getHumanEventTypes(
+          actorRef.getSnapshot() as AnyMachineSnapshot,
+          runCtx.schemas?.events,
+        );
         request.events = events.filter(
           (event) => !humanEventTypes.has(event.type) && !isEventPattern(event.type),
         );

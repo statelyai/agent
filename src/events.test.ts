@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
-import { createActor, createMachine } from "xstate";
+import { createActor, createMachine, type AnyStateMachine } from "xstate";
 import {
   AgentInvalidEventPayloadError,
   getAcceptedEvents,
@@ -111,6 +111,38 @@ describe("getAcceptedEvents with a wildcard handler", () => {
     expect(getAcceptedEvents(snapshot)).toEqual([
       expect.objectContaining({ type: "desk.refund", inputSchema: refund }),
     ]);
+  });
+
+  test("expands against the machine's own types as well as a supplied registry", () => {
+    const snapshot = wildcard({ "desk.close": z.object({}) });
+
+    expect(
+      getAcceptedEvents(snapshot, { events: { other: z.object({}) } }).map((event) => event.type),
+    ).toEqual(["desk.close"]);
+  });
+
+  test("a human-tagged wildcard withholds what it expands to in a supplied registry", () => {
+    const snapshot = createActor(
+      createMachine({
+        schemas: { events: { reset: z.object({}) } },
+        initial: "open",
+        states: {
+          open: {
+            on: {
+              "desk.secure.*": { target: "open", meta: { actor: "human" } },
+              "desk.*": { target: "open" },
+            },
+          },
+        },
+      } as never) as AnyStateMachine,
+    )
+      .start()
+      .getSnapshot();
+    const events = { "desk.secure.approve": z.object({}), "desk.refund": z.object({}) };
+
+    expect(
+      getAcceptedEvents(snapshot, { actor: "agent", events }).map((event) => event.type),
+    ).toEqual(["desk.refund"]);
   });
 
   test("narrows the expansion with `eventTypes`", () => {

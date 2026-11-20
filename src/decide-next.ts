@@ -209,15 +209,19 @@ function describeOption(
   schema: StandardSchemaV1 | undefined,
   lookahead: boolean | readonly string[] | undefined,
 ): string {
-  const what =
-    getNextTransitions(snapshot).find(
-      (candidate) =>
-        candidate.description !== undefined &&
-        candidate.eventType !== "*" &&
-        matchesHandlerDescriptor(event.type, candidate.eventType),
-    )?.description ??
-    schemaDescription(schema) ??
-    event.type;
+  // The handler xstate routes the event to: child states before parents
+  // (getNextTransitions' order), and within one state an exact handler before
+  // a matching partial wildcard. The `*` catch-all describes nothing.
+  const routed = getNextTransitions(snapshot).filter(
+    (candidate) =>
+      candidate.eventType !== "*" && matchesHandlerDescriptor(event.type, candidate.eventType),
+  );
+  const first = routed[0];
+  const fromSource = routed.filter((candidate) => candidate.source === first?.source);
+  const handler =
+    fromSource.find((candidate) => candidate.eventType === event.type && candidate.description) ??
+    fromSource.find((candidate) => candidate.description);
+  const what = handler?.description ?? schemaDescription(schema) ?? event.type;
   const fields = Object.entries(event)
     .filter(([key]) => key !== "type")
     .map(([key, value]) => `${key}: ${short(value)}`);

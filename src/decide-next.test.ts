@@ -320,6 +320,32 @@ describe("decideNext with a wildcard handler", () => {
     expect(requests[0]!.options![0]!.description).toContain("Settle the case");
   });
 
+  test("an exact handler's description wins over a wildcard declared before it", async () => {
+    const both = createMachine({
+      schemas: { events: { "desk.refund": z.object({}), "desk.close": z.object({}) } },
+      initial: "reviewing",
+      states: {
+        reviewing: {
+          on: {
+            "desk.*": { target: "handled", description: "Settle the case" },
+            "desk.refund": { target: "handled", description: "Refund the order" },
+          },
+        },
+        handled: { type: "final" },
+      },
+    });
+    const snapshot = createActor(both).start().getSnapshot();
+    const { decide, requests } = scripted([(request) => request.options![0]!.event]);
+
+    await decideNext(snapshot, { decide, model: "quick", allowedEvents: ["desk.*"] });
+
+    const descriptions = Object.fromEntries(
+      requests[0]!.options!.map((option) => [option.event.type, option.description]),
+    );
+    expect(descriptions["desk.refund"]).toContain("Refund the order");
+    expect(descriptions["desk.close"]).toContain("Settle the case");
+  });
+
   test("a wildcard handler a person sends offers none of the types it matches", async () => {
     const human = createMachine({
       schemas: {
