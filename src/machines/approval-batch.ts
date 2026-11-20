@@ -118,6 +118,17 @@ function settledResult(
   return Object.hasOwn(results, id) ? results[id] : undefined;
 }
 
+// Two approve-always rules with equal arguments are one rule. Arguments that
+// do not serialize (a BigInt, a cycle) compare by reference.
+function sameArgs(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  try {
+    return JSON.stringify(a) === JSON.stringify(b);
+  } catch {
+    return false;
+  }
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -393,11 +404,10 @@ export function createApprovalBatchMachine(
         type === "REJECT" && event.reason !== undefined ? { type, reason: event.reason } : { type },
       );
       const awaiting = context.awaiting.filter((candidate) => candidate.id !== call.id);
-      const args = JSON.stringify(call.args);
       const approveAlways =
         type === "APPROVE_ALWAYS" &&
         !context.approveAlways.some(
-          (rule) => rule.name === call.name && JSON.stringify(rule.args) === args,
+          (rule) => rule.name === call.name && sameArgs(rule.args, call.args),
         )
           ? [...context.approveAlways, { name: call.name, args: call.args }]
           : context.approveAlways;
@@ -414,8 +424,9 @@ export function createApprovalBatchMachine(
   const machineConfig = {
     id: "approval-batch",
     // Stamped by the runtime onto snapshots/logs instead of the structural hash;
-    // bumped only on a topology change a snapshot could not resume into.
-    version: "1",
+    // bumped on a topology change a snapshot could not resume into, or a change
+    // to what replaying a log produces. "2": approve-always rules carry `args`.
+    version: "2",
     context: ({ input }: { input: ApprovalBatchInput }) => {
       const ids = new Set(input.calls.map((call) => call.id));
       if (ids.size !== input.calls.length) {

@@ -1,5 +1,5 @@
-import { describe, expect, test } from "vitest";
-import { createAsyncLogic, type AnyStateMachine } from "xstate";
+import { describe, expect, test, vi } from "vitest";
+import { createActor, createAsyncLogic, type AnyStateMachine } from "xstate";
 import { createAgentRuntime, getInteraction } from "../index.js";
 import { runToQuiescence } from "../run-agent.js";
 import { canReach, explorePaths, lintAgentMachine } from "../testing/index.js";
@@ -73,6 +73,30 @@ describe("createApprovalBatchMachine", () => {
         { id: "c3", status: "rejected", reason: "denied by policy" },
       ],
       approveAlways: [{ name: "write", args: { path: "b.txt" } }],
+    });
+  });
+
+  test("verdicts on calls whose arguments do not serialize settle the call", async () => {
+    const { execute } = recordingExecute();
+    const machine = createApprovalBatchMachine({ execute });
+    const cyclic: Record<string, unknown> = {};
+    cyclic["self"] = cyclic;
+    const batch: ProposedCall[] = [
+      { id: "b1", name: "lookup", args: { recordId: 123n } },
+      { id: "b2", name: "lookup", args: cyclic },
+    ];
+    const actor = createActor(machine, { input: { calls: batch } });
+    actor.start();
+    await vi.waitFor(() => expect(actor.getSnapshot().context.awaiting).toHaveLength(2));
+    actor.send({ type: "REJECT", callId: "b1" });
+    actor.send({ type: "APPROVE_ALWAYS", callId: "b2" });
+    await vi.waitFor(() => expect(actor.getSnapshot().status).toBe("done"));
+    expect(actor.getSnapshot().output).toMatchObject({
+      results: [
+        { id: "b1", status: "rejected" },
+        { id: "b2", status: "executed" },
+      ],
+      approveAlways: [{ name: "lookup", args: cyclic }],
     });
   });
 
