@@ -135,7 +135,14 @@ const MAX_DETAIL_LINES = 10;
  * - `lint`: `lintAgentMachine`, plus checks over the config's state graph:
  *   every state is reachable, every reachable state can still reach a final
  *   state, and every event a decision may send is handled and has a payload
- *   schema (errors fail; warnings fail with `lint.warnings`).
+ *   schema (errors fail; warnings fail with `lint.warnings`). A passing gate
+ *   does not prove these properties:
+ *   - A config with no final state skips the finishing check.
+ *   - A config with a target that cannot be resolved statically skips both
+ *     graph checks (reachable, can finish).
+ *   - Both decision checks skip a decision whose `allowedEvents` is a
+ *     `{{ }}` template. The schema check also skips an `agent.decide` closed
+ *     choice (a `payloads` map) and a templated `payloads`.
  * - `explore`: `explorePaths` from each `explore.inputs` entry; every terminal
  *   must be one of `explore.terminals`, no cap (`maxPaths`, `maxNodes`) or
  *   `budget` may cut it short, every event's payloads must be tried (`unexpandedEvents`), and

@@ -4,7 +4,7 @@
  * config lowers. The `lint` gate of `verifyAgentConfig` runs these next to
  * `lintAgentMachine`.
  */
-import { isEventPattern, matchesEventPattern } from "../events.js";
+import { isEventPattern, matchesEventPattern, matchesHandlerDescriptor } from "../events.js";
 import { ACT_ACTOR, DECIDE_ACTOR } from "../text-logic.js";
 import type { AgentWorkflowConfig } from "../workflow-config.js";
 
@@ -317,9 +317,24 @@ function finishingStates(
 
 // ─── decision events ───
 
-/** The `on` keys of `states`: the event types they handle. */
-const handledEvents = (states: GraphNode[]): Set<string> =>
-  new Set(states.flatMap((at) => Object.keys((at.state.on ?? {}) as Record<string, unknown>)));
+/**
+ * The event types `states` handle: their `on` keys, plus the registered types
+ * a partial wildcard key (`'desk.*'`) matches, as the runtime expands it
+ * (see `expandHandlerType`).
+ */
+const handledEvents = (states: GraphNode[], registered: readonly string[]): Set<string> =>
+  new Set(
+    states.flatMap((at) =>
+      Object.keys((at.state.on ?? {}) as Record<string, unknown>).flatMap((key) => [
+        key,
+        ...(key !== "*" && key.endsWith(".*")
+          ? registered.filter(
+              (type) => !isEventPattern(type) && matchesHandlerDescriptor(type, key),
+            )
+          : []),
+      ]),
+    ),
+  );
 
 /** True when `node`'s own `on.<type>` has a transition tagged `actor: "human"`. */
 const humanOn = (node: GraphNode, type: string) =>
@@ -384,7 +399,7 @@ function checkDecisionEvents(
         }
       }
       active.push(...ancestors, ...regions.flatMap(descendants));
-      const handled = handledEvents(active);
+      const handled = handledEvents(active, Object.keys(schemas));
       // A human event is never offered (`decide-allows-human-event`), but only
       // a configuration that holds the human handler withholds it. Exempt a
       // type only when every configuration active with this state does.
@@ -396,9 +411,9 @@ function checkDecisionEvents(
 
       // The events the model may send. The runtime offers a handled event
       // type when an entry matches it (`matchesEventPattern(type, entry)`),
-      // so an exact entry needs a handler with that exact key, and a pattern
-      // stands for the handled types it matches. An omitted list admits
-      // every handled type.
+      // so an exact entry needs a handler with that exact key or a wildcard
+      // handler that expands to it, and a pattern stands for the handled
+      // types it matches. An omitted list admits every handled type.
       const listed = allowedEvents === undefined ? undefined : (toList(allowedEvents) as string[]);
       const candidates = new Set<string>();
       for (const entry of listed ?? ["*"]) {
@@ -425,13 +440,11 @@ function checkDecisionEvents(
       for (const type of candidates) {
         if (withheld(type)) continue;
         if (type in schemas) continue;
-        // Listed decide payloads close the choice: the model picks one of
-        // them. A templated payloads value resolves at run time and may list
-        // any event. `agent.act` ignores payloads.
-        if (src === DECIDE_ACTOR) {
-          if (isTemplate(payloads)) continue;
-          if (isPlainObject(payloads) && payloads[type] != null) continue;
-        }
+        // A decide payloads map closes the choice: the model picks one of
+        // the listed payloads, or a bare `{ type }` for an event the map does
+        // not list, and the runtime rejects added fields. A templated payloads
+        // value resolves at run time. `agent.act` ignores payloads.
+        if (src === DECIDE_ACTOR && (isTemplate(payloads) || isPlainObject(payloads))) continue;
         diagnostics.push({
           code: "decide-event-without-schema",
           severity: "error",

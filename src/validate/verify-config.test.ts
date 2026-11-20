@@ -590,6 +590,17 @@ describe("verifyAgentConfig config graph checks", () => {
     });
   });
 
+  test("decide-event-without-schema: a decide payloads map closes the choice for unlisted events too", async () => {
+    // The runtime offers HOT as a bare `{ type: "HOT" }` option and rejects added fields.
+    const config = leadConfig();
+    delete config.schemas.events.HOT;
+    config.states.scoring.invoke.input.payloads = { COLD: [{ score: 1 }] };
+    expect(lintGate(await verifyAgentConfig(config, { compileSchema }))).toEqual({
+      name: "lint",
+      ok: true,
+    });
+  });
+
   /** A content moderation (trial S8): the model labels a post. */
   function moderationConfig() {
     return {
@@ -628,7 +639,7 @@ describe("verifyAgentConfig config graph checks", () => {
     );
   });
 
-  test("decide-event-unhandled: a handler on an ancestor counts; a wildcard handler does not admit an exact entry", async () => {
+  test("decide-event-unhandled: a handler on an ancestor counts; a wildcard handler admits the registered types it matches", async () => {
     const config = {
       id: "mod",
       initial: "review",
@@ -653,18 +664,19 @@ describe("verifyAgentConfig config graph checks", () => {
         allowed: fin,
       },
     };
-    // The runtime offers the 'mod.*' descriptor only to an entry it matches,
-    // and 'mod.*' does not match the exact entry 'mod.flag'.
-    const detail = lintGate(await verifyAgentConfig(config, { compileSchema }))!.detail!;
-    expect(detail).toContain("decide-event-unhandled at 'review.labeling'");
-    expect(detail).toContain("lists 'mod.flag'");
-    expect(detail).not.toContain("lists 'ALLOW'");
-
-    config.states.review.on["mod.flag"] = { target: "allowed" };
+    // The runtime expands the 'mod.*' handler to the registered 'mod.flag'.
     expect(lintGate(await verifyAgentConfig(config, { compileSchema }))).toEqual({
       name: "lint",
       ok: true,
     });
+
+    // 'mod.other' has no exact handler and is not registered, so 'mod.*' does not expand to it.
+    config.states.review.states.labeling.invoke.input.allowedEvents.push("mod.other");
+    const detail = lintGate(await verifyAgentConfig(config, { compileSchema }))!.detail!;
+    expect(detail).toContain("decide-event-unhandled at 'review.labeling'");
+    expect(detail).toContain("lists 'mod.other'");
+    expect(detail).not.toContain("lists 'mod.flag'");
+    expect(detail).not.toContain("lists 'ALLOW'");
   });
   test("decide-event-unhandled: a templated allowedEvents is not read as an event name", async () => {
     const config = (allowedEvents: unknown) => ({
@@ -1198,5 +1210,7 @@ test("verifyAgentConfig omits explore reports when an input throws, and still ch
   expect(result.explore).toBeUndefined();
   const detail = result.gates.at(-1)!.detail!;
   expect(detail).toContain("input 0: exploration threw");
-  expect(detail).toContain("input 1: ");
+  expect(detail).toContain("input 1: path [");
+  expect(detail).toContain(`ends 'done' in state "denied"; every path must end 'idle'`);
+  expect(detail).not.toContain("input 1: exploration threw");
 });
