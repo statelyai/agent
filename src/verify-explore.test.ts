@@ -727,6 +727,8 @@ describe("canReach — states passed through", () => {
       complete: true,
       witness: [{ type: "B" }],
     });
+    const report = await explorePaths(machine);
+    expect(report.reachedStates).toEqual(expect.arrayContaining([{ work: { r1: "d", r2: "d" } }]));
   });
 
   test("a transient state nothing transits stays unreachable", async () => {
