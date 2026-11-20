@@ -85,7 +85,9 @@ describe("approve-tool-calls", () => {
     // Development builds freeze context; production builds do not. Without a
     // copy, a runner that mutates its input would change what was approved.
     const paused = await runAgent(approveToolCallsMachine, {
-      input: { calls: [{ id: "w1", tool: "writeFile", args: { path: "a", dryRun: true } }] },
+      input: {
+        calls: [{ id: "w1", tool: "writeFile", args: { path: "a", opts: { dryRun: true } } }],
+      },
     });
     const result = await runAgent(approveToolCallsMachine, {
       snapshot: paused.persist(),
@@ -93,8 +95,9 @@ describe("approve-tool-calls", () => {
       actors: { runTool: createAsyncLogic({ run: async () => "ok" }) },
     });
     const { calls, rules } = result.snapshot.context;
-    expect(rules).toEqual([{ tool: "writeFile", args: { path: "a", dryRun: true } }]);
+    expect(rules).toEqual([{ tool: "writeFile", args: { path: "a", opts: { dryRun: true } } }]);
     expect(rules[0]!.args).not.toBe(calls[0]!.args);
+    expect(rules[0]!.args["opts"]).not.toBe(calls[0]!.args["opts"]);
   });
 
   test("calls run in proposal order and a failure does not stop the batch", async () => {
