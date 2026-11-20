@@ -949,6 +949,81 @@ describe("verifyAgentConfig config graph checks", () => {
     }
   });
 
+  test("state-cannot-finish: a sibling region's reset of the parallel state counts as a way out", async () => {
+    const config = {
+      id: "m",
+      initial: "p",
+      schemas: { events: { GO: empty, A_DONE: empty, RESET: empty } },
+      states: {
+        p: {
+          type: "parallel",
+          states: {
+            a: {
+              initial: "start",
+              states: {
+                start: { on: { GO: { target: "stuck" }, A_DONE: { target: "#m.done" } } },
+                stuck: {} as Record<string, unknown>,
+              },
+            },
+            b: {
+              initial: "idle",
+              states: { idle: { on: { RESET: { target: "#m.p" } } } },
+            },
+          },
+        },
+        done: fin,
+      },
+    };
+    // Targeting `p` from region `b` exits and reenters `p`, so `a` restarts at `start`.
+    expect(lintGate(await verifyAgentConfig(config, { compileSchema }))).toEqual({
+      name: "lint",
+      ok: true,
+    });
+
+    // Targeting region `b` itself stays inside `b` and leaves `a` stuck.
+    config.states.p.states.b.states.idle.on.RESET.target = "#m.p.b";
+    const detail = lintGate(await verifyAgentConfig(config, { compileSchema }))!.detail!;
+    expect(detail).toContain("state-cannot-finish at 'p.a.stuck'");
+  });
+
+  test("decide-event-without-schema: a human handler in an inactive child does not exempt the event", async () => {
+    const config = {
+      id: "m",
+      initial: "review",
+      schemas: { events: {} as Record<string, unknown> },
+      states: {
+        review: {
+          initial: "automatic",
+          invoke: {
+            src: "agent.decide",
+            input: { model: MODEL, prompt: "Approve?", allowedEvents: ["APPROVE"] },
+            onError: { target: "done" },
+          },
+          on: { APPROVE: { target: "done" } },
+          states: {
+            automatic: { after: { "10": { target: "manual" } } },
+            manual: {
+              on: { APPROVE: { target: "#m.done", meta: { actor: "human" } } },
+            } as Record<string, unknown>,
+          },
+        },
+        done: fin,
+      },
+    };
+    // While `automatic` is active, `review`'s APPROVE is offered to the model.
+    let detail = lintGate(await verifyAgentConfig(config, { compileSchema }))!.detail!;
+    expect(detail).toContain("decide-event-without-schema at 'review'");
+    expect(detail).toContain("send 'APPROVE'");
+
+    // A human handler on every child withholds APPROVE in every configuration.
+    config.states.review.states.automatic = {
+      on: { APPROVE: { target: "#m.done", meta: { actor: "human" } } },
+      after: { "10": { target: "manual" } },
+    } as typeof config.states.review.states.automatic;
+    const gate = lintGate(await verifyAgentConfig(config, { compileSchema }))!;
+    expect(gate.detail ?? "").not.toContain("decide-event-without-schema");
+  });
+
   /** A desk with two parallel regions: the agent decides; a supervisor escalates. */
   function deskConfig() {
     return {

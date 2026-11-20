@@ -273,8 +273,9 @@ function finishingStates(
     return isParallel(done.parent!) && completes(done.parent!);
   };
   // A transition from a state in another region of a parallel ancestor moves
-  // this state when it leaves the parallel state or targets this state's own
-  // region. One that targets a third region leaves this region where it is.
+  // this state when it leaves the parallel state, targets the parallel state
+  // itself (which reenters every region), or targets this state's own region.
+  // One that targets a third region leaves this region where it is.
   const siblingRegionExits = (node: GraphNode): boolean =>
     ancestors(node).some(
       (at) =>
@@ -287,7 +288,8 @@ function finishingStates(
                 within(state, region) &&
                 [...edges.active.get(state)!, ...edges.done.get(state)!].some(
                   (target) =>
-                    (!within(target, at.parent!) || within(target, at)) && live.has(target),
+                    (target === at.parent || !within(target, at.parent!) || within(target, at)) &&
+                    live.has(target),
                 ),
             ),
         ),
@@ -315,24 +317,30 @@ function finishingStates(
 
 // ─── decision events ───
 
+/** The `on` keys of `states`: the event types they handle. */
+const handledEvents = (states: GraphNode[]): Set<string> =>
+  new Set(states.flatMap((at) => Object.keys((at.state.on ?? {}) as Record<string, unknown>)));
+
+/** True when `node`'s own `on.<type>` has a transition tagged `actor: "human"`. */
+const humanOn = (node: GraphNode, type: string) =>
+  nodes(((node.state.on ?? {}) as Record<string, unknown>)[type]).some(
+    (t) => (t.meta as ConfigNode | undefined)?.actor === "human",
+  );
+
 /**
- * The `on` keys of `states`, with whether any transition on the key is tagged
- * `actor: "human"`. The runtime withholds an event type whose exact key has a
- * human-tagged transition (see `getHumanEventTypes`).
+ * True when every configuration of `node`'s subtree, entered at `node`, holds
+ * a human-tagged `on.<type>`: `node` itself, every child of a compound state,
+ * or any region of a parallel state. The runtime withholds an event type when
+ * its exact key has a human-tagged transition in the active configuration
+ * (see `getHumanEventTypes`).
  */
-function handledEvents(states: GraphNode[]): Map<string, boolean> {
-  const handled = new Map<string, boolean>();
-  for (const at of states) {
-    for (const [type, transitions] of Object.entries(
-      (at.state.on ?? {}) as Record<string, unknown>,
-    )) {
-      const human = nodes(transitions).some(
-        (t) => (t.meta as ConfigNode | undefined)?.actor === "human",
-      );
-      handled.set(type, (handled.get(type) ?? false) || human);
-    }
-  }
-  return handled;
+function alwaysHuman(node: GraphNode, type: string): boolean {
+  if (humanOn(node, type)) return true;
+  const children = node.children.filter((child) => !isHistory(child));
+  if (children.length === 0) return false;
+  return isParallel(node)
+    ? children.some((child) => alwaysHuman(child, type))
+    : children.every((child) => alwaysHuman(child, type));
 }
 
 const descendants = (node: GraphNode): GraphNode[] => [node, ...node.children.flatMap(descendants)];
@@ -367,13 +375,23 @@ function checkDecisionEvents(
       // state, its ancestors, its descendants, and the other regions of a
       // parallel ancestor.
       const active = [...descendants(node)];
+      const ancestors: GraphNode[] = [];
+      const regions: GraphNode[] = [];
       for (let at: GraphNode | undefined = node; at; at = at.parent) {
-        if (at !== node) active.push(at);
+        if (at !== node) ancestors.push(at);
         if (at.parent && isParallel(at.parent)) {
-          active.push(...at.parent.children.filter((region) => region !== at).flatMap(descendants));
+          regions.push(...at.parent.children.filter((region) => region !== at));
         }
       }
+      active.push(...ancestors, ...regions.flatMap(descendants));
       const handled = handledEvents(active);
+      // A human event is never offered (`decide-allows-human-event`), but only
+      // a configuration that holds the human handler withholds it. Exempt a
+      // type only when every configuration active with this state does.
+      const withheld = (type: string) =>
+        alwaysHuman(node, type) ||
+        ancestors.some((at) => humanOn(at, type)) ||
+        regions.some((region) => alwaysHuman(region, type));
       const offerable = [...handled.keys()].filter(isOfferable);
 
       // The events the model may send. The runtime offers a handled event
@@ -405,8 +423,7 @@ function checkDecisionEvents(
       }
 
       for (const type of candidates) {
-        // A human event is never offered (`decide-allows-human-event`).
-        if (handled.get(type)) continue;
+        if (withheld(type)) continue;
         if (type in schemas) continue;
         // Listed decide payloads close the choice: the model picks one of
         // them. A templated payloads value resolves at run time and may list
