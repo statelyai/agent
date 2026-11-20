@@ -36,11 +36,11 @@ describe("approve-tool-calls", () => {
     expect(result.rules).toEqual([{ tool: "runCommand", args: { cmd: "npm test" } }]);
   });
 
-  test("the prompt shows nested arguments and literal braces as the runner gets them", async () => {
+  test("the prompt shows nested arguments, literal braces, and repeated spaces as the runner gets them", async () => {
     const call: ProposedCall = {
       id: "w1",
       tool: "writeFile",
-      args: { path: "a.txt", opts: { dryRun: false }, note: "keep {this}" },
+      args: { path: "a.txt", opts: { dryRun: false }, note: "keep {this}", cmd: "a  b" },
     };
     const received: unknown[] = [];
     const result = await runApproveToolCallsExample({
@@ -49,7 +49,7 @@ describe("approve-tool-calls", () => {
       run: async ({ args }) => received.push(args),
     });
     expect(result.asked).toEqual([
-      'Run writeFile(path="a.txt", opts={"dryRun":false}, note="keep {this}")?',
+      'Run writeFile(path="a.txt", opts={"dryRun":false}, note="keep {this}", cmd="a  b")?',
     ]);
     expect(received).toEqual([call.args]);
   });

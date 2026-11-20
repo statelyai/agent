@@ -254,7 +254,8 @@ export async function runApproveToolCallsExample(options: RunApproveToolCallsOpt
   let result = await runAgent(approveToolCallsMachine, { input: { calls, rules }, actors });
   for (const verdict of verdicts) {
     if (result.status !== "idle") break;
-    asked.push(getInteraction(result.snapshot)?.label ?? "");
+    // Keep the arguments exact: repeated spaces in a value are part of it.
+    asked.push(getInteraction(result.snapshot, { preserveWhitespace: true })?.label ?? "");
     const snapshot = JSON.parse(JSON.stringify(result.persist()));
     result = await runAgent(approveToolCallsMachine, { snapshot, event: verdict, actors });
   }

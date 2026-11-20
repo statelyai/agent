@@ -220,7 +220,8 @@ The run loop resumes the persisted snapshot with each answer:
 ```ts no-check
 let result = await runAgent(approveToolCallsMachine, { input: { calls, rules }, actors: { runTool } });
 while (result.status === "idle") {
-  const event = await askPerson(getInteraction(result.snapshot)); // your approval UI
+  // preserveWhitespace keeps argument values exact in the prompt.
+  const event = await askPerson(getInteraction(result.snapshot, { preserveWhitespace: true })); // your approval UI
   result = await runAgent(approveToolCallsMachine, { snapshot: result.persist(), event, actors: { runTool } });
 }
 ```
