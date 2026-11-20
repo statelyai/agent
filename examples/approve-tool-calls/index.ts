@@ -151,7 +151,9 @@ export const approveToolCallsMachine = agentSetup.createMachine({
           meta: human,
           context: ({ context }) => {
             const { tool, args } = context.calls[context.cursor]!;
-            return { rules: [...context.rules, { tool, args }] };
+            // A copy: xstate freezes context only in development builds, and a
+            // runner that mutates its input must not change what was approved.
+            return { rules: [...context.rules, { tool, args: structuredClone(args) }] };
           },
         },
         DENY: {
