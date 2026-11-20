@@ -101,7 +101,8 @@ function matchesEventPattern(eventType: string, pattern: string): boolean {
  * matches `'desk'`, `'desk.refund'` and `'desk.case.close'`; `'*'` matches
  * every type.
  */
-function matchesHandlerDescriptor(eventType: string, descriptor: string): boolean {
+/** @internal */
+export function matchesHandlerDescriptor(eventType: string, descriptor: string): boolean {
   if (descriptor === eventType || descriptor === "*") return true;
   if (!descriptor.endsWith(".*")) return false;
   const descriptorTokens = descriptor.split(".");
@@ -278,11 +279,15 @@ export function getAcceptedEvents(
     // A wildcard transition tagged `meta: { actor: "human" }` covers what it expands to.
     const humanHandler = humanEventTypes.has(handlerType);
     return expandHandlerType(snapshot, handlerType, schemas).flatMap((eventType) =>
-      describeAcceptedEvent(eventType, humanHandler),
+      describeAcceptedEvent(eventType, humanHandler, eventType !== handlerType),
     );
   });
 
-  function describeAcceptedEvent(eventType: string, humanHandler: boolean): AgentEventDescriptor[] {
+  function describeAcceptedEvent(
+    eventType: string,
+    humanHandler: boolean,
+    expanded: boolean,
+  ): AgentEventDescriptor[] {
     if (
       eventType === "*" ||
       eventType.startsWith("xstate.") ||
@@ -299,7 +304,15 @@ export function getAcceptedEvents(
     const defaultToolName = sanitizeEventToolName(eventType);
     const toolName = disambiguateEventToolName(defaultToolName, eventType, usedToolNames);
 
-    const inputSchema = schemas?.[eventType];
+    // A type a wildcard expanded to keeps the schema it was found in, which
+    // may be the machine's own when no `schemas` option is passed.
+    const inputSchema =
+      schemas?.[eventType] ??
+      (expanded
+        ? (snapshot.machine.schemas?.events as Record<string, StandardSchemaV1> | undefined)?.[
+            eventType
+          ]
+        : undefined);
 
     return [
       {

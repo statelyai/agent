@@ -297,6 +297,29 @@ describe("decideNext with a wildcard handler", () => {
     expect(result.event).toEqual({ amount: 20, type: "desk.refund" });
   });
 
+  test("expanded types keep their event schemas and the wildcard transition's description", async () => {
+    const described = createMachine({
+      schemas: { events: { "desk.refund": z.object({ amount: z.number() }) } },
+      initial: "reviewing",
+      states: {
+        reviewing: { on: { "desk.*": { target: "handled", description: "Settle the case" } } },
+        handled: { type: "final" },
+      },
+    });
+    const snapshot = createActor(described).start().getSnapshot();
+    const { decide, requests } = scripted([(request) => request.options![0]!.event]);
+
+    await decideNext(snapshot, {
+      decide,
+      model: "quick",
+      allowedEvents: ["desk.*"],
+      payloads: () => ({ "desk.refund": [{ amount: 20 }] }),
+    });
+
+    expect(requests[0]!.events[0]!.inputSchema).toBeDefined();
+    expect(requests[0]!.options![0]!.description).toContain("Settle the case");
+  });
+
   test("a wildcard handler a person sends offers none of the types it matches", async () => {
     const human = createMachine({
       schemas: {

@@ -13,6 +13,7 @@ import {
   getHumanEventTypes,
   isEventPattern,
   type EventFromSnapshot,
+  matchesHandlerDescriptor,
 } from "./events.js";
 import type { DecisionStrategy } from "./decision-strategy.js";
 import { isRecord } from "./internal/is-record.js";
@@ -210,7 +211,10 @@ function describeOption(
 ): string {
   const what =
     getNextTransitions(snapshot).find(
-      (candidate) => candidate.eventType === event.type && candidate.description,
+      (candidate) =>
+        candidate.description !== undefined &&
+        candidate.eventType !== "*" &&
+        matchesHandlerDescriptor(event.type, candidate.eventType),
     )?.description ??
     schemaDescription(schema) ??
     event.type;

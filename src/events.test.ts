@@ -104,6 +104,15 @@ describe("getAcceptedEvents with a wildcard handler", () => {
     expect(snapshot.can({ type: "desktop" })).toBe(false);
   });
 
+  test("an expanded type carries the event schema it was found in", () => {
+    const refund = z.object({ amount: z.number() });
+    const snapshot = wildcard({ "desk.refund": refund });
+
+    expect(getAcceptedEvents(snapshot)).toEqual([
+      expect.objectContaining({ type: "desk.refund", inputSchema: refund }),
+    ]);
+  });
+
   test("narrows the expansion with `eventTypes`", () => {
     const snapshot = wildcard({ "desk.refund": z.object({}), "desk.close": z.object({}) });
 
