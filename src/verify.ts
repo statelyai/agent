@@ -2878,7 +2878,10 @@ function explore(
       if ((stateTarget || !awaitsKids(current, kids)) && stops(current, kids)) {
         return { step: current, hit: true };
       }
-      if (current.done) {
+      // An errored machine runs nothing more, as a live actor does. Its
+      // snapshot still lists the other regions' invokes, but none of them
+      // can settle it.
+      if (current.done || current.snapshot.status === "error") {
         return { step: current };
       }
       const request = current.requests.find(

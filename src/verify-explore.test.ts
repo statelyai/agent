@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
-import { createAsyncLogic, createMachine, type AnyStateMachine } from "xstate";
+import { createActor, createAsyncLogic, createMachine, type AnyStateMachine } from "xstate";
 import { setupAgent } from "./index.js";
 import { canReach, explorePaths } from "./testing/index.js";
 import { isExplorationComplete } from "./verify.js";
@@ -186,6 +186,130 @@ describe("explorePaths — errors arrays", () => {
       [{ type: "xstate.error.actor", actorId: "decide", error: "b" }],
       [{ type: "PICK" }],
     ]);
+  });
+});
+
+// Two regions, each waiting on its own invoke; neither invoke has an `onError`.
+function createParallelMachine(fail: { a?: boolean; b?: boolean } = {}) {
+  const agent = setupAgent({
+    context: z.object({}),
+    actors: {
+      a: createAsyncLogic<object>({
+        run: async () => {
+          if (fail.a) throw new Error("a");
+          return {};
+        },
+      }),
+      b: createAsyncLogic<object>({
+        run: async () => {
+          if (fail.b) throw new Error("b");
+          return {};
+        },
+      }),
+    },
+  });
+  const region = (src: "a" | "b") => ({
+    initial: "s",
+    states: {
+      s: { invoke: { id: src, src, onDone: { target: "d" } } },
+      d: { type: "final" as const },
+    },
+  });
+  return agent.createMachine({
+    context: {},
+    initial: "p",
+    states: {
+      p: {
+        type: "parallel",
+        states: { r1: region("a"), r2: region("b") },
+        onDone: { target: "z" },
+      },
+      z: { type: "final" },
+    },
+  });
+}
+
+describe("explorePaths — unhandled errors in parallel regions", () => {
+  const errorA = new Error("a");
+  const errorB = new Error("b");
+  const options = {
+    outputs: { a: [{}], b: [{}] },
+    errors: { a: errorA, b: errorB },
+    maxDepth: 4,
+  };
+
+  test("a region's unhandled rejection ends the path in an error terminal", async () => {
+    const report = await explorePaths(createParallelMachine(), options);
+    expect(report.terminals).toEqual([
+      {
+        status: "error",
+        path: [{ type: "xstate.error.actor", actorId: "a" }],
+        state: { p: { r1: "s", r2: "s" } },
+        error: errorA,
+      },
+      {
+        status: "error",
+        path: [
+          { type: "xstate.done.actor", actorId: "a", output: {} },
+          { type: "xstate.error.actor", actorId: "b" },
+        ],
+        state: { p: { r1: "d", r2: "s" } },
+        error: errorB,
+      },
+      {
+        status: "done",
+        path: [
+          { type: "xstate.done.actor", actorId: "a", output: {} },
+          { type: "xstate.done.actor", actorId: "b", output: {} },
+        ],
+        state: "z",
+      },
+    ]);
+    expect(isExplorationComplete(report)).toBe(true);
+  });
+
+  test("each error terminal matches the live actor's error", async () => {
+    const report = await explorePaths(createParallelMachine(), options);
+    const live = async (fail: { a?: boolean; b?: boolean }) => {
+      const actor = createActor(createParallelMachine(fail));
+      const errored = new Promise<void>((resolve) => actor.subscribe({ error: () => resolve() }));
+      actor.start();
+      await errored;
+      const snapshot = actor.getSnapshot();
+      return {
+        status: snapshot.status,
+        state: snapshot.value,
+        message: (snapshot.error as Error).message,
+      };
+    };
+    const explored = report.terminals
+      .filter((terminal) => terminal.status === "error")
+      .map((terminal) => ({
+        status: terminal.status,
+        state: terminal.state,
+        message: (terminal.error as Error).message,
+      }));
+    expect(explored).toEqual([await live({ a: true }), await live({ b: true })]);
+  });
+
+  test("canReach sees the error terminal and finishes the search", async () => {
+    const failed = await canReach(
+      createParallelMachine(),
+      (snapshot) => snapshot.status === "error",
+      options,
+    );
+    expect(failed).toMatchObject({
+      reachable: true,
+      witness: [{ type: "xstate.error.actor", actorId: "a" }],
+    });
+    // `a` only fails, so `z` is out of reach. The failure ends the only path
+    // at its first event, so one level of depth proves it.
+    const unreachable = await canReach(createParallelMachine(), "z", {
+      outputs: { b: [{}] },
+      errors: { a: errorA, b: errorB },
+      maxDepth: 1,
+    });
+    expect(unreachable).toMatchObject({ reachable: false, complete: true });
   });
 });
 
