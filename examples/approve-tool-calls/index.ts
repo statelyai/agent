@@ -34,11 +34,13 @@ import {
 const callSchema = z.object({
   id: z.string(),
   tool: z.string(),
-  args: z.record(z.string(), z.unknown()),
+  // JSON only, as a model's tool call sends: no `NaN`, `Date`, or sparse array
+  // that `sameValue` could confuse with a different argument.
+  args: z.record(z.string(), z.json()),
 });
 export type ProposedCall = z.infer<typeof callSchema>;
 
-const ruleSchema = z.object({ tool: z.string(), args: z.record(z.string(), z.unknown()) });
+const ruleSchema = z.object({ tool: z.string(), args: z.record(z.string(), z.json()) });
 export type ApprovalRule = z.infer<typeof ruleSchema>;
 
 const resultSchema = z.object({
@@ -51,8 +53,8 @@ const resultSchema = z.object({
 export type CallResult = z.infer<typeof resultSchema>;
 
 /**
- * Structural equality: object key order does not count, array order does, and
- * `NaN`, `null`, and `undefined` are three different values.
+ * Structural equality over JSON values: object key order does not count, and
+ * array order does.
  */
 function sameValue(a: unknown, b: unknown): boolean {
   if (Object.is(a, b)) return true;
