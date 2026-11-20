@@ -3,6 +3,7 @@ import { canReach } from "@statelyai/agent/testing";
 import {
   approveToolCallsMachine,
   runApproveToolCallsExample,
+  ruleMatches,
   type ApprovalRule,
   type ProposedCall,
 } from "./index.js";
@@ -22,8 +23,8 @@ describe("approve-tool-calls", () => {
 
     expect(ran).toEqual(["c1", "c2"]);
     expect(result.asked).toEqual([
-      'Run runCommand({"cmd":"npm test"})?',
-      'Run runCommand({"cmd":"rm -rf ~"})?',
+      'Run runCommand(cmd="npm test")?',
+      'Run runCommand(cmd="rm -rf ~")?',
     ]);
     expect(result.results.map(({ id, status, by }) => ({ id, status, by }))).toEqual([
       { id: "c1", status: "executed", by: "person" },
@@ -31,6 +32,34 @@ describe("approve-tool-calls", () => {
       { id: "c3", status: "denied", by: undefined },
     ]);
     expect(result.rules).toEqual([{ tool: "runCommand", args: { cmd: "npm test" } }]);
+  });
+
+  test("a rule matches the same arguments in any key order", async () => {
+    const write: ProposedCall = {
+      id: "w2",
+      tool: "writeFile",
+      args: { content: "hello", path: "a.txt", meta: { b: 1, a: [1, 2] } },
+    };
+    const result = await runApproveToolCallsExample({
+      calls: [write],
+      rules: [
+        { tool: "writeFile", args: { path: "a.txt", meta: { a: [1, 2], b: 1 }, content: "hello" } },
+      ],
+      verdicts: [],
+    });
+    expect(result.results.map(({ status, by }) => ({ status, by }))).toEqual([
+      { status: "executed", by: "rule" },
+    ]);
+    expect(
+      ruleMatches(
+        { tool: "writeFile", args: { meta: { a: [2, 1] } } },
+        {
+          id: "w3",
+          tool: "writeFile",
+          args: { meta: { a: [1, 2] } },
+        },
+      ),
+    ).toBe(false);
   });
 
   test("calls run in proposal order and a failure does not stop the batch", async () => {

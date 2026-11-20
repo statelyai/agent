@@ -176,13 +176,14 @@ Model the tool loop as machine states when it needs states of its own:
 Approval is not a library feature. It is a state that waits for a person's event, plus a rule check in context. [examples/approve-tool-calls](https://github.com/statelyai/agent/blob/next/examples/approve-tool-calls/index.ts) gates one model turn's tool calls this way:
 
 - **Calls and rules in context.** The proposed calls, a `cursor`, and the approve-always rules persist with the snapshot.
-- **Proposal order.** `next` looks at the call at `cursor`. A rule that matches the call runs it; otherwise the machine waits in `reviewing`.
+- **Proposal order.** `next` is a choice state over the call at `cursor`. A rule that matches the call runs it; otherwise the machine waits in `reviewing`.
 - **Events a person sends.** `APPROVE`, `APPROVE_ALWAYS`, and `DENY` are tagged `meta: { actor: "human" }`, so no model-facing decision offers them. `reviewing` declares a `meta.interaction`, so `runAgent` settles `idle` there.
-- **Narrow rules.** `APPROVE_ALWAYS` stores the call's tool and arguments. A later call, in this batch or a later one, matches only with the same tool and the same arguments.
+- **Narrow rules.** `APPROVE_ALWAYS` stores the call's tool and arguments. A later call, in this batch or a later one, matches only with the same tool and the same arguments. Key order in the arguments does not matter.
 
 ```ts no-check
 next: {
-  always: ({ context }) => {
+  type: "choice",
+  choice: ({ context }) => {
     const call = context.calls[context.cursor];
     if (!call) return { target: "done" };
     if (context.rules.some((rule) => ruleMatches(rule, call))) return { target: "running" };
@@ -190,7 +191,7 @@ next: {
   },
 },
 reviewing: {
-  meta: { interaction: { label: "Run {pending}?", events: { APPROVE: "Approve", APPROVE_ALWAYS: "Always", DENY: "Deny" } } },
+  meta: { interaction: { label: describeCall, events: { APPROVE: "Approve", APPROVE_ALWAYS: "Always", DENY: "Deny" } } },
   on: {
     APPROVE: { target: "running", meta: { actor: "human" } },
     APPROVE_ALWAYS: {

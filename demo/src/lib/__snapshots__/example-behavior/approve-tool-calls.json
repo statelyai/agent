@@ -1,0 +1,99 @@
+{
+  "npm test twice, then rm -rf ~": [
+    {
+      "sent": "start {\"calls\":[{\"id\":\"c1\",\"tool\":\"runCommand\",\"args\":{\"cmd\":\"npm test\"}},{\"id\":\"c2\",\"tool\":\"runCommand\",\"args\":{\"cmd\":\"npm test\"}},{\"id\":\"c3\",\"tool\":\"runCommand\",\"args\":{\"cmd\":\"rm -rf ~\"}}]}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"reviewing\""
+      ],
+      "response": "",
+      "idle": {
+        "prompt": "Run runCommand(cmd=\"npm test\")?",
+        "events": [
+          "APPROVE",
+          "APPROVE_ALWAYS",
+          "DENY"
+        ],
+        "textEvent": "DENY.reason"
+      }
+    },
+    {
+      "sent": "{\"type\":\"APPROVE\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"reviewing\"",
+        "transition APPROVE -> \"running\"",
+        "transition xstate.done.actor -> \"reviewing\""
+      ],
+      "response": "**Results**\n\n```json\n[\n  {\n    \"id\": \"c1\",\n    \"status\": \"executed\",\n    \"by\": \"person\",\n    \"value\": {\n      \"echoed\": {\n        \"id\": \"c1\",\n        \"tool\": \"runCommand\",\n        \"args\": {\n          \"cmd\": \"npm test\"\n        }\n      }\n    }\n  }\n]\n```",
+      "idle": {
+        "prompt": "Run runCommand(cmd=\"npm test\")?",
+        "events": [
+          "APPROVE",
+          "APPROVE_ALWAYS",
+          "DENY"
+        ],
+        "textEvent": "DENY.reason"
+      }
+    },
+    {
+      "sent": "{\"type\":\"APPROVE\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"reviewing\"",
+        "transition APPROVE -> \"running\"",
+        "transition xstate.done.actor -> \"reviewing\""
+      ],
+      "response": "**Results**\n\n```json\n[\n  {\n    \"id\": \"c1\",\n    \"status\": \"executed\",\n    \"by\": \"person\",\n    \"value\": {\n      \"echoed\": {\n        \"id\": \"c1\",\n        \"tool\": \"runCommand\",\n        \"args\": {\n          \"cmd\": \"npm test\"\n        }\n      }\n    }\n  },\n  {\n    \"id\": \"c2\",\n    \"status\": \"executed\",\n    \"by\": \"person\",\n    \"value\": {\n      \"echoed\": {\n        \"id\": \"c2\",\n        \"tool\": \"runCommand\",\n        \"args\": {\n          \"cmd\": \"npm test\"\n        }\n      }\n    }\n  }\n]\n```",
+      "idle": {
+        "prompt": "Run runCommand(cmd=\"rm -rf ~\")?",
+        "events": [
+          "APPROVE",
+          "APPROVE_ALWAYS",
+          "DENY"
+        ],
+        "textEvent": "DENY.reason"
+      }
+    },
+    {
+      "sent": "{\"type\":\"APPROVE\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"reviewing\"",
+        "transition APPROVE -> \"running\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "**Results**\n\n```json\n[\n  {\n    \"id\": \"c1\",\n    \"status\": \"executed\",\n    \"by\": \"person\",\n    \"value\": {\n      \"echoed\": {\n        \"id\": \"c1\",\n        \"tool\": \"runCommand\",\n        \"args\": {\n          \"cmd\": \"npm test\"\n        }\n      }\n    }\n  },\n  {\n    \"id\": \"c2\",\n    \"status\": \"executed\",\n    \"by\": \"person\",\n    \"value\": {\n      \"echoed\": {\n        \"id\": \"c2\",\n        \"tool\": \"runCommand\",\n        \"args\": {\n          \"cmd\": \"npm test\"\n        }\n      }\n    }\n  },\n  {\n    \"id\": \"c3\",\n    \"status\": \"executed\",\n    \"by\": \"person\",\n    \"value\": {\n      \"echoed\": {\n        \"id\": \"c3\",\n        \"tool\": \"runCommand\",\n        \"args\": {\n          \"cmd\": \"rm -rf ~\"\n        }\n      }\n    }\n  }\n]\n```"
+    }
+  ],
+  "A read covered by a rule, then a write": [
+    {
+      "sent": "start {\"calls\":[{\"id\":\"c1\",\"tool\":\"readFile\",\"args\":{\"path\":\"src/index.ts\"}},{\"id\":\"c2\",\"tool\":\"writeFile\",\"args\":{\"path\":\"src/index.ts\",\"content\":\"...\"}}],\"rules\":[{\"tool\":\"readFile\",\"args\":{\"path\":\"src/index.ts\"}}]}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"running\"",
+        "transition xstate.done.actor -> \"reviewing\""
+      ],
+      "response": "**By**\n\nperson\n\n**Results**\n\n```json\n[\n  {\n    \"id\": \"c1\",\n    \"status\": \"executed\",\n    \"by\": \"rule\",\n    \"value\": {\n      \"echoed\": {\n        \"id\": \"c1\",\n        \"tool\": \"readFile\",\n        \"args\": {\n          \"path\": \"src/index.ts\"\n        }\n      }\n    }\n  }\n]\n```",
+      "idle": {
+        "prompt": "Run writeFile(path=\"src/index.ts\", content=\"...\")?",
+        "events": [
+          "APPROVE",
+          "APPROVE_ALWAYS",
+          "DENY"
+        ],
+        "textEvent": "DENY.reason"
+      }
+    },
+    {
+      "sent": "{\"type\":\"APPROVE\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"reviewing\"",
+        "transition APPROVE -> \"running\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "**Results**\n\n```json\n[\n  {\n    \"id\": \"c1\",\n    \"status\": \"executed\",\n    \"by\": \"rule\",\n    \"value\": {\n      \"echoed\": {\n        \"id\": \"c1\",\n        \"tool\": \"readFile\",\n        \"args\": {\n          \"path\": \"src/index.ts\"\n        }\n      }\n    }\n  },\n  {\n    \"id\": \"c2\",\n    \"status\": \"executed\",\n    \"by\": \"person\",\n    \"value\": {\n      \"echoed\": {\n        \"id\": \"c2\",\n        \"tool\": \"writeFile\",\n        \"args\": {\n          \"path\": \"src/index.ts\",\n          \"content\": \"...\"\n        }\n      }\n    }\n  }\n]\n```\n\n**Rules**\n\n```json\n[\n  {\n    \"tool\": \"readFile\",\n    \"args\": {\n      \"path\": \"src/index.ts\"\n    }\n  }\n]\n```"
+    }
+  ]
+}

@@ -50,9 +50,18 @@ const resultSchema = z.object({
 });
 export type CallResult = z.infer<typeof resultSchema>;
 
-/** A rule matches a call with the same tool and the same arguments. */
+/** JSON with object keys sorted at every level, so key order does not change the result. Array order still counts. */
+function canonicalJson(value: unknown): string {
+  return JSON.stringify(value, (_key, item: unknown) =>
+    item && typeof item === "object" && !Array.isArray(item)
+      ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+      : item,
+  );
+}
+
+/** A rule matches a call with the same tool and the same arguments, in any key order. */
 export function ruleMatches(rule: ApprovalRule, call: ProposedCall): boolean {
-  return rule.tool === call.tool && JSON.stringify(rule.args) === JSON.stringify(call.args);
+  return rule.tool === call.tool && canonicalJson(rule.args) === canonicalJson(call.args);
 }
 
 /** The host's tool runner. The default only echoes the call, so importing this file runs nothing. */
@@ -68,8 +77,6 @@ const agentSetup = setupAgent({
     rules: z.array(ruleSchema),
     cursor: z.number(),
     results: z.array(resultSchema),
-    /** What the person reviews: the pending call as text. */
-    pending: z.string(),
     /** Who approved the call at `cursor`. */
     by: z.enum(["rule", "person"]),
   }),
@@ -92,28 +99,32 @@ export const approveToolCallsMachine = agentSetup.createMachine({
     rules: input.rules ?? [],
     cursor: 0,
     results: [],
-    pending: "",
     by: "person" as const,
   }),
   initial: "next",
   states: {
     next: {
-      always: ({ context }) => {
+      type: "choice",
+      choice: ({ context }) => {
         const call = context.calls[context.cursor];
         if (!call) return { target: "done" };
         if (context.rules.some((rule) => ruleMatches(rule, call))) {
           return { target: "running", context: { by: "rule" as const } };
         }
-        return {
-          target: "reviewing",
-          context: { pending: `${call.tool}(${JSON.stringify(call.args)})`, by: "person" as const },
-        };
+        return { target: "reviewing", context: { by: "person" as const } };
       },
     },
     reviewing: {
       meta: {
         interaction: {
-          label: "Run {pending}?",
+          label: ({ context }) => {
+            const call = context.calls[context.cursor]!;
+            // The result is still interpolated, so keep `{` and `}` out of it.
+            const args = Object.entries(call.args).map(
+              ([key, value]) => `${key}=${JSON.stringify(value)}`,
+            );
+            return `Run ${call.tool}(${args.join(", ")})?`;
+          },
           events: {
             APPROVE: { label: "Approve", style: "primary" },
             APPROVE_ALWAYS: { label: "Always approve this call" },
