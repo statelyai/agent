@@ -264,10 +264,18 @@ function isJson(value: unknown, parents: object[] = []): boolean {
   );
 }
 
-/** The SDK's output for a tool without `toModelOutput`: a string as text, anything else as JSON. */
+/**
+ * The SDK's output for a tool without `toModelOutput`: a string as text,
+ * anything else as JSON. An output JSON cannot hold (a `BigInt`) is reported
+ * as an error, since the tool has already run.
+ */
 function defaultOutput(value: unknown) {
   if (typeof value === "string") return { type: "text", value } as const;
-  return { type: "json", value: JSON.parse(JSON.stringify(value) ?? "null") } as const;
+  try {
+    return { type: "json", value: JSON.parse(JSON.stringify(value) ?? "null") } as const;
+  } catch (error) {
+    return { type: "error-text", value: `output is not JSON: ${String(error)}` } as const;
+  }
 }
 
 async function answerApprovals(messages: ModelMessage[]) {
