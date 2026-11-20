@@ -13,7 +13,7 @@ An agent machine is [data](machines-as-data.md), so a model can write one. A gen
 
 - The config's shape is fixed by a JSON Schema that ships with the package. Expressions are dot paths, not code, so a generated config cannot do anything a hand-authored machine could not do.
 - `verifyAgentConfig` runs every pre-run gate in one call and returns a record per gate. It is exported from `@statelyai/agent/validate`, which uses `ajv` as an optional peer dependency, so install `ajv` to use it.
-- The gates check the config's shape, the names it references, the lowering, Agent lint, and every explored path. Use [`canReach` and `explorePaths`](verify.md) directly for other reachability questions.
+- The gates check the config's shape, the names it references, the lowering, Agent lint and the config's state graph, and every explored path. Use [`canReach` and `explorePaths`](verify.md) directly for other reachability questions.
 - Replay against real scenarios and scoring are domain-specific. They stay with the caller, after the gates pass.
 
 ## The loop
@@ -24,13 +24,26 @@ generate → verifyAgentConfig (validate → vocabulary → lower → lint → e
 
 <!-- viz: generation pipeline: generate -> verifyAgentConfig gates (validate -> vocabulary -> lower -> lint -> explore) -> run, with each failing gate feeding back into generate as a repair prompt, capped at 3 attempts -->
 
-| Gate         | Checks with                                    | Fails on                                                                                                                              |
-| ------------ | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `validate`   | `validateAgentConfig`                          | malformed config shape                                                                                                                |
-| `vocabulary` | the `allow` lists                              | an invoke src, guard, action, `agent.decide` event, or model ref outside the vocabulary                                               |
-| `lower`      | `setupAgent.fromConfig`                        | unresolved named guards/actions, `onDone` on a decision                                                                               |
-| `lint`       | `lintAgentMachine`                             | decisions with no handled events; warnings too with `lint: { warnings: true }`                                                        |
-| `explore`    | `explorePaths`, once per `explore.inputs` item | a path ending outside `explore.terminals`, a loop past `maxDepth`, a `maxPaths`/`maxNodes` cap, untried payloads (`unexpandedEvents`) |
+| Gate         | Checks with                                    | Fails on                                                                                                                                                                                         |
+| ------------ | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `validate`   | `validateAgentConfig`                          | malformed config shape                                                                                                                                                                           |
+| `vocabulary` | the `allow` lists                              | an invoke src, guard, action, `agent.decide` event, or model ref outside the vocabulary                                                                                                          |
+| `lower`      | `setupAgent.fromConfig`                        | unresolved named guards/actions, `onDone` on a decision                                                                                                                                          |
+| `lint`       | `lintAgentMachine`, config graph checks        | decisions with no handled events, unreachable states, states that cannot reach a final state, decision events with no handler or no payload schema; warnings too with `lint: { warnings: true }` |
+| `explore`    | `explorePaths`, once per `explore.inputs` item | a path ending outside `explore.terminals`, a loop past `maxDepth`, a `maxPaths`/`maxNodes` cap, untried payloads (`unexpandedEvents`)                                                            |
+
+A workflow with a legitimate loop (a resent code, a requested change, a chat follow-up) needs `explore.dedupeBy`, or every pass around the loop is a new path and exploration hits `maxDepth`. With `dedupeBy`, exploration visits each projected snapshot once, so it no longer reports a loop that never ends. The `lint` gate covers that case from the config graph: `state-cannot-finish` names every reachable state with no path to a final state.
+
+The `lint` gate adds these checks over the config's state graph to `lintAgentMachine`. Each is an error.
+
+| Code                          | Fails on                                                                                                              |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `unreachable-state`           | a state that is not an initial state and that no transition from a reachable state targets                            |
+| `state-cannot-finish`         | a reachable state with no path to a final state through events, `after`, `always`, choice branches, or invoke results |
+| `decide-event-unhandled`      | an `allowedEvents` entry that neither the deciding state nor an ancestor handles                                      |
+| `decide-event-without-schema` | an event a decision may send with no `schemas.events` entry, so its payload reaches the machine unvalidated           |
+
+Guards are ignored, so the graph checks report a state only when no path exists at all. A config with no final state is treated as a long-running service and skips `state-cannot-finish`. An `agent.decide` or `agent.act` invoke with no `allowedEvents` may send every non-human event its state handles, so each of those needs a schema. Give an event with no payload `{ "type": "object", "properties": {} }`.
 
 Run the gates on the config the model returned:
 
@@ -68,6 +81,8 @@ The result behaves as follows.
 - `result.gates` lists the gates that ran, in order. Each is `{ name, ok, detail? }`. The gates stop at the first failure, so a failing gate is always the last entry.
 - `detail` names the offending path, state, or name, one problem per line. A passing `lint` gate carries its warnings in `detail`.
 - `result.config` is the typed config once `validate` passes. `result.machine` is the lowered machine once `lower` passes.
+- `result.explore` holds one `explorePaths` report per `explore.inputs` entry once the `explore` gate runs, so extra checks can read the explored paths without exploring again.
+- `lint.terminalStates` lists non-final states that may wait forever on purpose, such as a case parked for a person who may never act. `state-cannot-finish` treats them as finishing.
 - A config that throws while lowering is reported as a failed `lower` gate. `verifyAgentConfig` does not throw on a bad config.
 - An omitted `allow` key is unrestricted. Omit `allow` to skip the `vocabulary` gate, and omit `explore` to skip the `explore` gate. An empty `explore.inputs` list fails the `explore` gate.
 - An invoke can name only an `agent.*` builtin or a key the config declares under `requests` or `actors`. Any other src fails the `lower` gate, even when `actors` binds it. `allow.requests` limits the declared request keys, and `allow.actors` limits the declared actor keys. With `allow.actors` listed, every non-builtin src must be in `allow.actors` or `allow.requests`, or be a declared request when `allow.requests` is omitted.
@@ -99,7 +114,9 @@ To improve a generated policy from its run traces, use [`improve-machine`](https
 Generated machines have these constraints.
 
 - Named guards and actions are resolved by the host. A config cannot carry functions. A model can emit `guard: "isReady"`, but the implementation lives in the `guards` option passed to `fromConfig(...)`, and an unresolved name throws at build time. List the names your host implements in the prompt, or forbid named references entirely.
-- Schema validity is not semantic validity. The schema constrains shape, not meaning. A config can validate and still reference a request that does not exist, or route to a state that does not make progress. The `vocabulary`, `lint`, and `explore` gates cover those cases.
+- Schema validity is not semantic validity. The schema constrains shape, not meaning. A config can validate and still reference a request that does not exist, or route to a state with no way out. The `vocabulary` gate covers names, and `lint` covers states that are unreachable or have no path to a final state.
+- A path to a final state is not a guarantee that a run takes it. An unguarded retry loop with an exit passes `lint`, and with `dedupeBy` it passes `explore` too. Bound loops with a counter and a guard, or unroll a fixed number of attempts.
+- Domain rules stay with the caller. A refund issued without an amount guard passes every gate. Check rules like that with [`canReach`](verify.md#reachability-checks) after the gates pass.
 - Exploration covers the inputs you give it. List inputs that reach every branch you care about in `explore.inputs`.
 - Model refs resolve at run time, in the host. `allow.models` restricts them to literal strings you list; tool names stay unchecked. Generated machines carry string refs, so pass `createAiSdkExecutors({ resolveModel })`. See [Models and providers](models-and-providers.md). The ref `"openai/gpt-6-luna"` used on this page is illustrative. Substitute your provider's current models.
 
