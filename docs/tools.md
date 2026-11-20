@@ -251,67 +251,82 @@ A tool with `needsApproval: true` comes back from `generateText` unexecuted, as 
 ```ts no-check
 import { generateText, type ModelMessage } from "ai";
 
-const first = await generateText({ model, tools, messages });
-const requests = first.content.filter((part) => part.type === "tool-approval-request");
-// With no approval requests, no call waits for a person: continue your usual
-// tool loop instead.
+/** A plain JSON value. A `Date`, `Set`, `Map`, or `BigInt` has no exact JSON form. */
+function isJson(value: unknown): boolean {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return true;
+  if (typeof value === "number") return Number.isFinite(value);
+  if (Array.isArray(value)) return Array.from(value).every(isJson);
+  return (
+    typeof value === "object" &&
+    Object.getPrototypeOf(value) === Object.prototype &&
+    Object.values(value).every(isJson)
+  );
+}
 
-// 1. Map the unexecuted calls to the machine input. The person approves the
-//    JSON form of the arguments; the tool runs with the input the SDK parsed,
-//    which an input schema may have transformed (a string to a `Date`, say).
-//    A call whose input JSON cannot hold (a `BigInt`) stays out of the
-//    machine, and step 3 answers it as failed.
-const calls = requests.flatMap(({ toolCall }) => {
-  try {
-    const args = JSON.parse(JSON.stringify(toolCall.input ?? {}));
-    return [{ id: toolCall.toolCallId, tool: toolCall.toolName, args }];
-  } catch {
-    return [];
+async function answerApprovals(messages: ModelMessage[]) {
+  const first = await generateText({ model, tools, messages });
+  const requests = first.content.filter((part) => part.type === "tool-approval-request");
+  // No call waits for a person: hand `first` to your usual tool loop.
+  if (requests.length === 0) return first;
+
+  // 1. Map the unexecuted calls to the machine input. A person approves the
+  //    arguments, and a rule matches them later, so they must be exact. A call
+  //    whose parsed input is not plain JSON (an input schema turned a string
+  //    into a `Date` or a `Set`, say) stays out of the machine, and step 3
+  //    answers it as failed.
+  const calls = requests
+    .filter(({ toolCall }) => isJson(toolCall.input ?? {}))
+    .map(({ toolCall }) => ({
+      id: toolCall.toolCallId,
+      tool: toolCall.toolName,
+      args: toolCall.input ?? {},
+    }));
+
+  // 2. Run the approval loop above with a runTool actor that calls
+  //    tools[call.tool].execute with call.args.
+
+  // 3. Answer every request in one tool message, matching each result by call
+  //    id. An executed result goes through the tool's own `toModelOutput`, as
+  //    the SDK does when it runs a tool.
+  const results = new Map(result.output.results.map((entry) => [entry.id, entry]));
+  const content = [];
+  for (const { approvalId, toolCall } of requests) {
+    const entry = results.get(toolCall.toolCallId) ?? {
+      status: "failed",
+      reason: "input is not plain JSON",
+    };
+    const approved = entry.status !== "denied";
+    content.push({ type: "tool-approval-response", approvalId, approved, reason: entry.reason });
+    if (!approved) continue;
+    const toModelOutput = tools[toolCall.toolName]?.toModelOutput;
+    content.push({
+      type: "tool-result",
+      toolCallId: toolCall.toolCallId,
+      toolName: toolCall.toolName,
+      output:
+        entry.status === "failed"
+          ? { type: "error-text", value: entry.reason }
+          : toModelOutput
+            ? await toModelOutput({
+                toolCallId: toolCall.toolCallId,
+                input: toolCall.input,
+                output: entry.value,
+              })
+            : { type: "json", value: entry.value ?? null },
+    });
   }
-});
-
-// 2. Run the approval loop above with a runTool actor that calls
-//    tools[call.tool].execute with the parsed input of the request whose
-//    toolCall.toolCallId is call.id.
-
-// 3. Feed the results back as one tool message, and continue. An executed
-//    result goes through the tool's own `toModelOutput`, as the SDK does when
-//    it runs a tool.
-const results = new Map(result.output.results.map((entry) => [entry.id, entry]));
-const content = [];
-for (const { approvalId, toolCall } of requests) {
-  const entry = results.get(toolCall.toolCallId) ?? { status: "failed", reason: "input is not JSON" };
-  const approved = entry.status !== "denied";
-  content.push({ type: "tool-approval-response", approvalId, approved, reason: entry.reason });
-  if (!approved) continue;
-  const toModelOutput = tools[toolCall.toolName]?.toModelOutput;
-  content.push({
-    type: "tool-result",
-    toolCallId: toolCall.toolCallId,
-    toolName: toolCall.toolName,
-    output:
-      entry.status === "failed"
-        ? { type: "error-text", value: entry.reason }
-        : toModelOutput
-          ? await toModelOutput({
-              toolCallId: toolCall.toolCallId,
-              input: toolCall.input,
-              output: entry.value,
-            })
-          : { type: "json", value: entry.value ?? null },
+  const toolMessage: ModelMessage = { role: "tool", content };
+  return generateText({
+    model,
+    tools,
+    messages: [...messages, ...first.response.messages, toolMessage],
   });
 }
-const toolMessage: ModelMessage = { role: "tool", content };
-await generateText({
-  model,
-  tools,
-  messages: [...messages, ...first.response.messages, toolMessage],
-});
 ```
 
-Each result is matched to its request by call id. Persist `result.output.rules` and pass them as `rules` in the next turn's input.
+Persist `result.output.rules` and pass them as `rules` in the next turn's input.
 
-A host that can restart while a call waits for approval stores the snapshot, `requests`, and `first.response.messages` together, with a serializer that keeps non-JSON values (a `Date`, a `BigInt`), and rebuilds `runTool` from `requests` on resume. The tool message needs `requests` and the messages, `runTool` needs the parsed input, and the snapshot's `results` hold each tool's raw output, which `toModelOutput` reads.
+A host that can restart while a call waits for approval stores the snapshot, `requests`, and `first.response.messages` together, and resumes the approval loop from them. The tool message needs `requests` and the messages. The snapshot's `results` hold each tool's raw output, which `toModelOutput` reads, so the serializer must keep non-JSON outputs (a `Date`, a `BigInt`), or `runTool` must return JSON.
 
 ## Related
 
