@@ -721,7 +721,11 @@ export function createTanStackAiExecutors<TModels extends TanStackAiModelMap>(
       // A structured output the model DID close, but only because it stopped
       // mid-thought, is not something to hand a machine as a final answer.
       if (run.finishReason === "length") {
-        throw withModelCalls(truncated(request, info, run.structured ?? run.text), run.modelCalls);
+        throw withModelCalls(
+          truncated(request, info, run.structured ?? run.text),
+          run.modelCalls,
+          run.usage,
+        );
       }
       let parsed: ReturnType<typeof parseProviderOutput>;
       try {
@@ -730,7 +734,7 @@ export function createTanStackAiExecutors<TModels extends TanStackAiModelMap>(
           run.structured !== undefined ? run.structured : JSON.parse(run.text),
         );
       } catch (error) {
-        throw withModelCalls(error, run.modelCalls);
+        throw withModelCalls(error, run.modelCalls, run.usage);
       }
       return {
         result: parsed.result,
