@@ -389,7 +389,7 @@ hand-authored machines that use `enq.emit(...)`.
 
 <!-- describeMachine from src/describe-machine.ts -->
 
-`describeMachine(machine, { snapshot?, source?, helpers? })` renders any machine, from a config or from TypeScript, as plain text a model can read. Use it as the prompt for a model that proposes an improved machine, or as extra context for a decider.
+`describeMachine(machine, { snapshot?, source?, helpers?, format? })` renders any machine, from a config or from TypeScript, as plain text a model can read. Use it as the prompt for a model that proposes an improved machine, or as extra context for a decider.
 
 ```ts
 import { describeMachine } from "@statelyai/agent";
@@ -428,6 +428,69 @@ Events:
 - **Helpers:** pass the functions transitions call by name, such as `helpers: { withinLimit }`, to print each one's source in a `Helpers` section. A guard passed into a machine factory is then readable from the same text.
 
 The output is deterministic. The same machine always produces the same text.
+
+### Mermaid diagrams
+
+`format: "mermaid"` renders the machine as a Mermaid `stateDiagram-v2` diagram instead of text. It reads the same transitions as the text, including the targets of transitions written as functions, and needs no network connection. GitHub renders a fenced `mermaid` block in Markdown, so the output can go in a README, an issue, or a pull request.
+
+```ts
+import { describeMachine, setupAgent } from "@statelyai/agent";
+import { z } from "zod";
+
+const agent = setupAgent({
+  context: z.object({ attempts: z.number() }),
+  events: { UPLOADED: z.object({}), FAILED: z.object({}) },
+});
+
+const uploadMachine = agent.createMachine({
+  id: "upload",
+  context: { attempts: 0 },
+  initial: "uploading",
+  states: {
+    uploading: {
+      on: {
+        UPLOADED: { target: "processing" },
+        FAILED: ({ context }) =>
+          context.attempts < 3
+            ? { target: "uploading", context: { attempts: context.attempts + 1 } }
+            : { target: "failed" },
+      },
+      after: { 30000: { target: "failed" } },
+    },
+    processing: { always: () => ({ target: "done" }) },
+    done: { type: "final" },
+    failed: { type: "final" },
+  },
+});
+
+const diagram = describeMachine(uploadMachine, { format: "mermaid" });
+```
+
+`diagram` is:
+
+```text
+stateDiagram-v2
+  [*] --> uploading
+  uploading
+  processing
+  done
+  failed
+  done --> [*]
+  failed --> [*]
+  uploading --> processing : UPLOADED
+  uploading --> uploading : FAILED?
+  uploading --> failed : FAILED?
+  uploading --> failed : after 30s
+  processing --> done : always
+```
+
+- **States:** every state node. A compound or parallel state is a `state id { ... }` block, with `--` between parallel regions. A choice state is a `<<choice>>` node. A history state is a node labeled `H` (shallow) or `H*` (deep) with the `history` class. `[*] -->` marks each initial state and `--> [*]` each final state. When a transition targets the machine itself, the machine is a `state <machine id> { ... }` block.
+- **Edges:** one per target. The label is the event type, `always`, `after <delay>`, `onDone`, or `<id> done` and `<id> error` for an invoke (its `src` when it has no `id`). A guard follows in brackets (`[context.approved]`). A `choice` branch without a guard is labeled `else`.
+- **Transition functions:** one edge per target the source can return. A `?` after the label marks a function that can pick among several targets, stay, or return no transition, as `FAILED?` does above.
+- **Unknown targets:** a target the source does not spell out goes to a dashed `?` node. A target that names no state node goes to a dashed node labeled with the target and `?`. No transition with a target is left out.
+- **Ids:** a state's id is its key, or its path joined with `_` when another state has the same key. Characters Mermaid cannot read in an id become `_`, and the key stays as the label: `state "first step" as first_step`. A choice node shows no label, so a note keeps its key: `note right of first_step : first step`. Ids avoid words Mermaid reads as keywords (`state`, `note`, `href`, `scale`) and the ids Mermaid gives `[*]` markers (`root_start`, `<id>_end`). Labels write `#`, `:`, `;`, `"`, `<`, and `>` as Mermaid entity codes.
+- **Snapshot:** pass `snapshot` to give the active states the `active` class.
+- **Other transitions:** a transition on the machine itself leaves an `any state` node. A transition with no target changes no state and draws no edge. `source` and `helpers` apply to text only.
 
 ## Limits of the data form
 

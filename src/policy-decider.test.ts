@@ -1,7 +1,8 @@
 import { describe, expect, test } from "vitest";
-import { createMachine } from "xstate";
+import { createActor, createMachine } from "xstate";
 import { z } from "zod";
 import type { AgentDecisionExecutor, AgentExecutorDecisionRequest } from "./decision.js";
+import { decideNext } from "./decide-next.js";
 import { createInMemoryEventLogStore } from "./event-log-store.js";
 import { createPolicyDecider } from "./policy-decider.js";
 import { runAgent } from "./run-agent.js";
@@ -312,5 +313,58 @@ describe("createPolicyDecider", () => {
         attempts: [],
       } as unknown as AgentExecutorDecisionRequest),
     ).rejects.toThrow(/policy .* settled 'idle'/);
+  });
+});
+
+// The same desk as a plain machine: no agent.decide, so the host asks with decideNext.
+const plainDesk = createMachine({
+  schemas: {
+    context: z.object({ requested: z.number() }),
+    events: { REFUND: z.object({ amount: z.number() }), ESCALATE: z.object({}) },
+  },
+  context: { requested: 40 },
+  initial: "deciding",
+  states: {
+    deciding: { on: { REFUND: { target: "refunded" }, ESCALATE: { target: "escalated" } } },
+    refunded: { type: "final" },
+    escalated: { type: "final" },
+  },
+});
+
+describe("createPolicyDecider with decideNext", () => {
+  const ask = (requested: number) =>
+    ({
+      model: "decider",
+      allowedEvents: ["REFUND", "ESCALATE"],
+      payloads: () => ({ REFUND: [{ amount: requested }] }),
+      metadata: { facts: { requested } },
+    }) as const;
+
+  test("takes the facts from decideNext's `metadata`, with the default input", async () => {
+    const inner = model("ESCALATE");
+    const snapshot = createActor(plainDesk).start().getSnapshot();
+
+    const result = await decideNext(snapshot, {
+      ...ask(40),
+      decide: createPolicyDecider(policy, { executors: { decide: inner.decide } }),
+    });
+
+    expect(result.event).toEqual({ type: "REFUND", amount: 40 });
+    expect(inner.seen).toEqual([]);
+  });
+
+  test("with a `store`, names the policy thread from decideNext's `callKey`", async () => {
+    const store = createInMemoryEventLogStore();
+    const inner = model("ESCALATE");
+    const decide = createPolicyDecider(policy, { executors: { decide: inner.decide }, store });
+    const snapshot = createActor(plainDesk).start().getSnapshot();
+
+    const result = await decideNext(snapshot, { ...ask(240), decide, callKey: "desk:case-1" });
+
+    expect(result.event).toEqual({ type: "ESCALATE" });
+    expect(inner.seen[0]!.metadata).toEqual({ facts: { requested: 240 } });
+    const { threadIds } = await store.listThreads!({ prefix: "policy:" });
+    expect(threadIds).toHaveLength(1);
+    expect(threadIds[0]).toMatch(/^policy:desk:case-1\.0:[0-9a-f]{64}$/);
   });
 });

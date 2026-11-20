@@ -3,10 +3,10 @@
 Install the published agent and its matching XState peer:
 
 ```sh
-pnpm add @statelyai/agent@2.0.0-alpha.40 xstate@6.0.0-beta.2 zod
+pnpm add @statelyai/agent@2.0.0-alpha.42 xstate@6.0.0-beta.2 zod
 ```
 
-This is the published pair as of November 17, 2026. XState is pinned to the exact version the installed package's peer dependency names, because its experimental durable restoration API (`xstate/durable`) can still change between prereleases. `xstate@beta` can resolve to a newer prerelease that the package does not support.
+XState is pinned to the exact version the installed package's peer dependency names, because its experimental durable restoration API (`xstate/durable`) can still change between prereleases. `xstate@beta` can resolve to a newer prerelease that the package does not support.
 
 Add `ai` and a provider only when using the optional AI SDK adapter.
 

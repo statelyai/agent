@@ -80,7 +80,17 @@ vi.mock("ai", async (importOriginal) => {
 - Each `generateText` and `streamText` call runs on the real AI SDK with the seam's `model` in place of the code's, and its `tools` wrapped with `recorder.tools`. The code's own tool loop runs.
 - A call made while `currentSeam()` returns `undefined` throws, so no test reaches a real provider.
 - A tool that has `execute` runs inside the `generateText` call. A check the code makes after the call returns comes after the tool already ran: model the order the calls happen in.
-- `recorder.model` records each provider attempt. A failed call that the AI SDK (or the code) retried with the same request has `retriedBy` set to the call that retried it. Skip those effects in the mapping to read one observation per call the code made, and count the calls yourself: `effect.call` counts attempts.
+- `recorder.model` records each provider attempt, and `effect.call` counts attempts. `recordAiSdk` stamps each attempt of a `recorder.model` wrapper from `createRecorder` with `aiSdkCall`, the `generateText` or `streamText` call it belongs to, including steps that use a model from `prepareStep`: attempts with the same `aiSdkCall` are one call the code made, its tool-loop steps and the SDK's retries.
+- A failed attempt followed by the same request has `retriedBy` set to the attempt that resent it. When that attempt has the same `aiSdkCall`, the SDK retried it (`maxRetries`): skip it in the mapping. When it has a different `aiSdkCall`, the code resent it: keep it, so the model checks the code's retry path and its call limit. An attempt with no `aiSdkCall` is one whose resender is unknown: keep it. That is any attempt not routed through `recordAiSdk`, any routed attempt whose model is not a `recorder.model` wrapper passed as is (a proxy around one, or one with a replaced method), and any attempt recorded through a recorder `createRecorder` did not make.
+
+  ```ts no-check
+  const sdkRetried = (effect: RecordedModelCall, effects: RecordedEffect[]) =>
+    effect.aiSdkCall !== undefined &&
+    effect.retriedBy !== undefined &&
+    effects.some(
+      (e) => e.kind === "model" && e.call === effect.retriedBy && e.aiSdkCall === effect.aiSdkCall,
+    );
+  ```
 
 ## Step 1: the model file
 
@@ -183,26 +193,41 @@ An observation is one thing the run did, in the model's terms. Map the recording
 function toObservations(recording: Recording): Observation[] {
   return recording.effects.flatMap((effect): Observation[] => {
     if (effect.kind === "output") return [{ kind: "returned", outcome: effect.value }];
-    if (effect.kind !== "call") return [];
+    // An effect the mapping does not know is kept, so the check reports it.
+    if (effect.kind !== "call") return [{ kind: `unmapped:${effect.kind}` }];
     switch (effect.name) {
+      // A call that threw carries its error, so its actor fails with it.
       case "lookupOrder":
-        return [{ kind: "lookup", order: effect.result as Order }];
+        return [
+          {
+            kind: "lookup",
+            orderId: (effect.args as [string])[0],
+            order: effect.result as Order,
+            error: effect.error,
+          },
+        ];
       case "decide":
-        return [{ kind: "decision", decision: effect.result as Decision }];
+        return [{ kind: "decision", decision: effect.result as Decision, error: effect.error }];
       case "requestApproval": {
         const [{ amount }] = effect.args as [{ amount: number }];
         return [{ kind: "approval", approved: effect.result as boolean, amount }];
       }
       case "issueRefund":
         return [
-          { kind: "refund", ...(effect.args as [{ orderId: string; amount: number }])[0] },
+          {
+            kind: "refund",
+            ...(effect.args as [{ orderId: string; amount: number }])[0],
+            error: effect.error,
+          },
         ];
       default:
-        return [];
+        return [{ kind: `unmapped:${effect.name}`, args: effect.args }];
     }
   });
 }
 ```
+
+Never drop an effect the mapping does not know. Map it to an `unmapped:<name>` observation instead. No actor or event observes that kind, so `checkConformance` reports it as a deviation (`unexpected-observation` or `extra-observations`), and a call the code added after the mapping was written cannot pass unchecked.
 
 Keep the mapping to what the call shows. Do not decide in the mapping what the code should have done next: that is the model's job, and a mapping that repeats the code's logic makes the check pass for any run.
 
@@ -215,12 +240,22 @@ const report = await checkConformance(refundModel, {
   input: { orderId: scenario.order.orderId },
   observations: toObservations(recording),
   actors: {
-    lookupOrder: { observes: "lookup", output: ({ observation }) => observation.order },
-    decide: { observes: "decision", output: ({ observation }) => observation.decision },
+    lookupOrder: {
+      observes: "lookup",
+      matches: ({ input, observation }) => input === observation.orderId,
+      output: ({ observation }) => observation.order,
+      error: ({ observation }) => observation.error,
+    },
+    decide: {
+      observes: "decision",
+      output: ({ observation }) => observation.decision,
+      error: ({ observation }) => observation.error,
+    },
     issueRefund: {
       observes: "refund",
       matches: ({ input, observation }) =>
         input.orderId === observation.orderId && input.amount === observation.amount,
+      error: ({ observation }) => observation.error,
     },
   },
   events: {
@@ -237,9 +272,10 @@ const report = await checkConformance(refundModel, {
 ```
 
 - An actor with `observes` consumes the next observation, which must be of that kind. `output` builds the actor's output from it.
+- The model's placeholders declare output schemas, so an `output` the schema rejects, such as a decision of an unknown `type`, is an `invalid-output` deviation instead of an error inside the model's `onDone`.
 - `matches` compares the actor's input with the observation. Here, the refund the code issued must be for the order and amount the model would refund.
 - `events` sends an observation to the model as an event while the model waits, here the person's approval. Its `matches` compares the observation with the model's context: the person approved the amount the model is waiting to refund.
-- `output` checks the code's return value. The model must finish where the code returned, and `matches` compares the model's output with the recorded one. Leave it out for a run where the code threw, which has no return value.
+- `output` checks the code's return value. The model must finish where the code returned, and `matches` compares the model's output with the recorded one. Pass it for runs where the code threw too: record the throw as the outcome (`recorder.output({ threw: error instanceof Error ? error.message : String(error) })` in a `catch`, since code can throw a value that is not an `Error`) and model each failure the code throws as a final state whose output `matches` compares. Give that final state an output in the same shape as a return, such as `{ outcome: { threw: message } }`, and compare the fields, such as `output.outcome.threw === observation.outcome.threw`: the recorded outcome and the model's output are different objects, so `===` on the objects never matches. A model that errors instead of finishing leaves that outcome unconsumed, which deviates. Without `output`, a run that otherwise conforms reports a recorded throw as `extra-observations`, like a return value. Leaving the throw out of the observations leaves the outcome unchecked.
 - An actor the recording cannot see takes no `observes`. It runs unchecked and is listed in `report.unobserved`.
 - When an actor's output carries state the recording does not show, build it in `output` from the model's own `input` plus the observation.
 
@@ -250,12 +286,17 @@ All runs of the unchanged code conform. The full option and deviation reference 
 Pass each report's `trace` to `traceCoverage`:
 
 ```ts no-check
-const coverage = traceCoverage(refundModel, reports.map((report) => report.trace));
+const coverage = traceCoverage(
+  refundModel,
+  reports.map((report) => report.trace),
+);
 coverage.unvisitedStates; // []
 coverage.unvisitedHandlers; // transitions no recorded run took
 ```
 
 An unvisited state or handler is a part of the model no recorded run exercised. Add a scenario that reaches it, or confirm that it cannot happen in production.
+
+A choice state (a `type: "choice"` state, or one that leaves only through eventless `always` transitions) is listed in `coverage.unobservable` as `{ state, event: "always" }`, not in `unvisitedHandlers`. A trace records one step per macrostep, so it does not show which branch a run took. The branches inside a choice state are not covered: a branch no run took is not reported. To check that each branch is reachable, prove it with `canReach` in step 2, with a target only that branch reaches: a state or context value the branch sets. Reaching the branch's target state proves nothing when another branch or route also leads there.
 
 ## A regression, caught
 

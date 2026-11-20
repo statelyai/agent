@@ -27,7 +27,7 @@ import {
   type AgentRequestMode,
   type AgentTextRequest,
 } from "./text-logic.js";
-import { isDecisionLogic, type AgentDecisionRequest } from "./decision.js";
+import { acceptedDecisionOptions, isDecisionLogic, type AgentDecisionRequest } from "./decision.js";
 import {
   getAcceptedEvents,
   getHumanEventTypes,
@@ -219,21 +219,23 @@ export function getAgentRequests(
             actor: "agent",
           })
         : [];
-      const humanEventTypes: ReadonlySet<string> = options.snapshot
-        ? getHumanEventTypes(options.snapshot)
+      const snapshot = options.snapshot;
+      const humanEventTypes: ReadonlySet<string> = snapshot
+        ? getHumanEventTypes(snapshot, options.events ?? options.schemas?.events)
         : new Set();
+      // A closed choice is rebuilt over the expanded `events`, as the runtime
+      // does, so a wildcard `allowedEvents` still gets its options.
+      const offered = snapshot
+        ? acceptedDecisionOptions({ ...decisionRequest, events }, (event) => snapshot.can(event))
+        : decisionRequest.options;
 
       return [
         {
           ...decisionRequest,
           id: params.id,
           events,
-          ...(decisionRequest.options
-            ? {
-                options: decisionRequest.options.filter(
-                  (option) => !humanEventTypes.has(option.event.type),
-                ),
-              }
+          ...(offered
+            ? { options: offered.filter((option) => !humanEventTypes.has(option.event.type)) }
             : {}),
         },
       ];

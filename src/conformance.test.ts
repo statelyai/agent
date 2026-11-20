@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, expectTypeOf, test } from "vitest";
 import { z } from "zod";
 import { createAsyncLogic } from "xstate";
 import { AgentError } from "./errors.js";
@@ -406,9 +406,11 @@ describe("checkConformance", () => {
     expect(report.deviation).toMatchObject({ reason: "unmapped-actor", expected: "send" });
 
     await expect(
+      // @ts-expect-error the model declares no src "asist"
       checkConformance(model, { observations: [], actors: { asist: {} } }),
     ).rejects.toMatchObject({ code: "unknown-actor-source" });
     await expect(
+      // @ts-expect-error the model declares no src "asist"
       checkConformance(model, { observations: [], actors: { asist: {} } }),
     ).rejects.toBeInstanceOf(AgentError);
   });
@@ -424,18 +426,16 @@ describe("checkConformance", () => {
     const options = {
       input: { maxSteps: 3 },
       actors: {
-        assist: { observes: "assist", output: () => ({ done: true, email: true }) },
-        send: { observes: "send" },
+        assist: { observes: "assist" as const, output: () => ({ done: true, email: true }) },
+        send: { observes: "send" as const },
       },
       events: {
-        approval: (o: { kind: string }) => ({
-          type: (o as unknown as { approved: boolean }).approved ? "APPROVE" : "REJECT",
-        }),
+        approval: (o: { approved: boolean }) => ({ type: o.approved ? "APPROVE" : "REJECT" }),
       },
       output: {
-        observes: "returned",
-        matches: ({ output, observation }: { output: unknown; observation: { kind: string } }) =>
-          output === (observation as unknown as { value: unknown }).value,
+        observes: "returned" as const,
+        matches: ({ output, observation }: { output: unknown; observation: { value: unknown } }) =>
+          output === observation.value,
       },
     };
 
@@ -455,7 +455,7 @@ describe("checkConformance", () => {
     });
 
     // The code never returned (it threw), and the model finished.
-    const threw = observations.filter((o) => o.kind !== "returned");
+    const threw: typeof observations = observations.filter((o) => o.kind !== "returned");
     expect(
       (await checkConformance(model, { ...options, observations: threw })).deviation,
     ).toMatchObject({
@@ -533,5 +533,220 @@ describe("checkConformance", () => {
       state: "awaitingApproval",
     });
     expect(report.consumed).toBe(1);
+  });
+
+  test("callbacks are typed from the machine and the observations", () => {
+    // Type-only: the calls below never run.
+    const typesOnly = () => {
+      const observations: Observation[] = [];
+      void checkConformance(model, {
+        input: { maxSteps: 3 },
+        observations,
+        actors: {
+          assist: {
+            observes: "assist",
+            output: ({ observation, input }) => {
+              expectTypeOf(observation).toEqualTypeOf<Extract<Observation, { kind: "assist" }>>();
+              expectTypeOf(input).toBeUnknown();
+              return { done: observation.done, email: observation.email };
+            },
+          },
+          send: {},
+        },
+        events: {
+          approval: {
+            event: (o) => ({ type: o.approved ? "APPROVE" : "REJECT" }),
+            matches: ({ observation, context }) => {
+              expectTypeOf(observation).toEqualTypeOf<Extract<Observation, { kind: "approval" }>>();
+              expectTypeOf(context.steps).toBeNumber();
+              return true;
+            },
+          },
+        },
+      });
+      void checkConformance(model, {
+        observations,
+        actors: {
+          // @ts-expect-error "asist" is no observation kind
+          assist: { observes: "asist" },
+        },
+      });
+      void checkConformance(model, {
+        observations,
+        actors: {
+          // @ts-expect-error "asist" is no actor src the model declares
+          asist: {},
+        },
+      });
+      const withInput = setupAgent({
+        context: z.object({}),
+        actors: {
+          lookup: createAsyncLogic({
+            schemas: { input: z.object({ id: z.string() }) },
+            run: async (): Promise<never> => Promise.reject(new Error("model only")),
+          }),
+        },
+      }).createMachine({
+        context: {},
+        initial: "a",
+        states: {
+          a: { invoke: { src: "lookup", input: { id: "x" }, onDone: { target: "b" } } },
+          b: {},
+        },
+      });
+      void checkConformance(withInput, {
+        observations: [{ kind: "lookup" }],
+        actors: {
+          lookup: {
+            observes: "lookup",
+            matches: ({ input }) => {
+              expectTypeOf(input).toEqualTypeOf<{ id: string }>();
+              return true;
+            },
+          },
+        },
+      });
+    };
+    expect(typesOnly).toBeTypeOf("function");
+  });
+
+  describe("schemas", () => {
+    const replySchema = z.discriminatedUnion("kind", [
+      z.object({ kind: z.literal("text") }),
+      z.object({ kind: z.literal("calls"), calls: z.array(z.string()) }),
+    ]);
+    const typed = setupAgent({
+      context: z.object({}),
+      events: { USER: z.object({ text: z.string() }) },
+      actors: {
+        callModel: createAsyncLogic({
+          schemas: { output: replySchema },
+          run: async (): Promise<never> => Promise.reject(new Error("model only")),
+        }),
+        lookup: createAsyncLogic({
+          schemas: { output: z.string() },
+          run: async (): Promise<never> => Promise.reject(new Error("model only")),
+        }),
+      },
+    }).createMachine({
+      context: {},
+      initial: "waiting",
+      states: {
+        waiting: { on: { USER: { target: "calling" } } },
+        calling: {
+          invoke: {
+            src: "callModel",
+            onDone: ({ event }) =>
+              event.output.kind !== "text" &&
+              (event.output as { calls: string[] }).calls.find((name) => name === "lookup")
+                ? { target: "looking" }
+                : { target: "done" },
+          },
+        },
+        looking: { invoke: { src: "lookup", onDone: { target: "done" } } },
+        done: { type: "final" },
+      },
+    });
+    const observations = [{ kind: "user" }, { kind: "model" }, { kind: "lookup" }];
+    const run = (answers: { model?: unknown; lookup?: unknown; text?: unknown }) =>
+      checkConformance(typed, {
+        observations,
+        actors: {
+          callModel: {
+            observes: "model",
+            output: () => answers.model ?? { kind: "calls", calls: ["lookup"] },
+          },
+          lookup: { observes: "lookup", output: () => answers.lookup ?? "found" },
+        },
+        events: { user: () => ({ type: "USER", text: answers.text ?? "hi" }) as never },
+      });
+
+    test("an output that fails the actor's output schema is an invalid-output deviation", async () => {
+      expect((await run({})).conforms).toBe(true);
+
+      const report = await run({ lookup: 42 });
+      expect(report).toMatchObject({ conforms: false, consumed: 2 });
+      expect(report.deviation).toMatchObject({
+        reason: "invalid-output",
+        index: 2,
+        expected: "lookup",
+        observed: { kind: "lookup" },
+        state: "looking",
+      });
+      expect(report.deviation?.schemaError).toEqual(expect.any(String));
+    });
+
+    test("a malformed model-call output is an invalid-output deviation, not a TypeError", async () => {
+      const report = await run({ model: { kind: "bogus" } });
+      expect(report.deviation).toMatchObject({
+        reason: "invalid-output",
+        index: 1,
+        expected: "callModel",
+        state: "calling",
+      });
+    });
+
+    test("an event payload that fails the event's schema is an invalid-event deviation", async () => {
+      const report = await run({ text: 7 });
+      expect(report).toMatchObject({ conforms: false, consumed: 0 });
+      expect(report.deviation).toMatchObject({
+        reason: "invalid-event",
+        index: 0,
+        expected: "event user",
+        observed: { kind: "user" },
+        state: "waiting",
+      });
+      expect(report.deviation?.schemaError).toContain("Invalid event payload for 'USER'");
+    });
+
+    test("an output is checked against the actor a provide replaced, not the setup actor", async () => {
+      const provided = typed.provide({
+        actors: {
+          // A replacement whose output type differs from the setup actor's.
+          lookup: createAsyncLogic({
+            schemas: { output: z.number() },
+            run: async (): Promise<never> => Promise.reject(new Error("model only")),
+          }) as never,
+        },
+      });
+      const check = (lookup: unknown) =>
+        checkConformance(provided, {
+          observations,
+          actors: {
+            callModel: { observes: "model", output: () => ({ kind: "calls", calls: ["lookup"] }) },
+            lookup: { observes: "lookup", output: () => lookup },
+          },
+          events: { user: () => ({ type: "USER", text: "hi" }) },
+        });
+
+      expect((await check(42)).conforms).toBe(true);
+      expect((await check("found")).deviation).toMatchObject({
+        reason: "invalid-output",
+        expected: "lookup",
+      });
+    });
+
+    test("the model receives the event as its schema parsed it", async () => {
+      const defaulted = setupAgent({
+        context: z.object({}),
+        events: { USER: z.object({ text: z.string(), lang: z.string().default("en") }) },
+      }).createMachine({
+        context: {},
+        initial: "waiting",
+        states: {
+          waiting: {
+            on: { USER: ({ event }) => (event.lang === "en" ? { target: "done" } : undefined) },
+          },
+          done: { type: "final" },
+        },
+      });
+      const report = await checkConformance(defaulted, {
+        observations: [{ kind: "user" }],
+        actors: {},
+        events: { user: () => ({ type: "USER", text: "hi" }) as never },
+      });
+      expect(report.deviation).toBeUndefined();
+      expect(report.conforms).toBe(true);
+    });
   });
 });

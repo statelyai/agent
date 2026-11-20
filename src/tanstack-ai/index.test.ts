@@ -16,12 +16,8 @@ import type { AgentTextRequest } from "../text-logic.js";
 import type { AgentTools } from "../types.js";
 import { AgentTruncatedError, createAgentRuntime, setupAgent } from "../index.js";
 import { runToQuiescence } from "../run-agent.js";
-import {
-  createTanStackAiExecutors,
-  toDecisionMessages,
-  toTanStackAiMessages,
-  toTanStackAiModelOptions,
-} from "./index.js";
+import { createTanStackAiExecutors, toDecisionMessages } from "./index.js";
+import { toTanStackAiMessages, toTanStackAiModelOptions } from "./mappers.js";
 
 // ─── A scripted TanStack AI text adapter ───
 

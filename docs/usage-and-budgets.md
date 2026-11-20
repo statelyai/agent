@@ -149,9 +149,13 @@ Use `maxModelCalls` as a runaway-loop backstop. Put anything the machine's own l
 
 ## Retries and executor budgets
 
-Transport-level retries, such as retries for 429 responses, timeouts, and backoff, belong in the executor or the SDK it wraps, not in the machine. The AI SDK's `maxRetries` handles them, as do the equivalent options on the OpenAI and Anthropic clients. `maxRetries` keeps AI SDK semantics: it is the number of retries made after the first attempt, so `maxRetries: 2` allows up to three attempts. A raw-`fetch` executor adds its own loop. The machine never sees a transient network failure.
+Retries can happen in three places, and the counts multiply.
 
-Machine-level retry is different. An authored `onError` transition that re-enters a state after a semantic failure, such as a validation rejection or an exhausted decision, is control flow you model explicitly.
+- Machine retries. An authored `onError` transition that re-enters a state after a failure, such as a provider error, a validation rejection, or an exhausted decision, is control flow you model explicitly. Each attempt counts in `modelCalls` and in `maxModelCalls`.
+- Decision retries. `agent.decide` retries an invalid choice up to its `maxRetries`, default 2, so one decision makes up to 3 calls. Each counts in `modelCalls`.
+- SDK retries. The AI SDK adapter passes `maxRetries: 0` to every AI SDK call by default, so `modelCalls` counts every provider request. Set `maxRetries` in the adapter's `settings` (global or per model entry) to let the SDK retry transient failures such as 429 responses. A request that succeeds counts once in `modelCalls`, however many SDK retries it took. A `streamText` request that fails counts every attempt, because the SDK reports each one; a `generateText` request that fails counts once. `maxRetries` keeps AI SDK semantics: it is the number of retries after the first attempt, so `maxRetries: 2` allows up to three requests.
+
+A machine that allows 3 attempts at a decision with the default 2 decision retries and `maxRetries: 2` in the adapter's settings can make up to 3 × 3 × 3 = 27 provider requests, of which `modelCalls` reports up to 9. The OpenAI and Anthropic clients have their own retry options, and a raw-`fetch` executor adds its own loop.
 
 For finer budgets than `maxModelCalls`, such as a token cap or a per-request-`src` call count, wrap the executors. A child machine's requests inherit the parent's executors, so one wrapper counts the whole tree.
 
@@ -215,11 +219,11 @@ Model-call results reach the machine with usage stripped out.
 
 ### Rules
 
-| Area                 | Rule                                                                                                                                                                                                                                                         |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Not model-facing** | The `@agent.*` namespace is excluded from `getAcceptedEvents` and `parseAgentEvent`. The event is never a decision candidate, even under `allowedEvents: ['*']`, and cannot be forged from a wire message.                                                   |
-| **Durability**       | The event is folded into machine context, so a native snapshot from `result.persist()` retains the counters when a later runtime resumes with `{ snapshot }`.                                                                                                |
-| **Run scope**        | `result.usage` counts calls made during that run only. Persist cumulative counters in machine context when they must survive snapshot resume.                                                                                                                |
+| Area                 | Rule                                                                                                                                                                                                                                                  |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Not model-facing** | The `@agent.*` namespace is excluded from `getAcceptedEvents` and `parseAgentEvent`. The event is never a decision candidate, even under `allowedEvents: ['*']`, and cannot be forged from a wire message.                                            |
+| **Durability**       | The event is folded into machine context, so a native snapshot from `result.persist()` retains the counters when a later runtime resumes with `{ snapshot }`.                                                                                         |
+| **Run scope**        | `result.usage` counts calls made during that run only. Persist cumulative counters in machine context when they must survive snapshot resume.                                                                                                         |
 | **Stragglers**       | A call that settles after a `runAgent` leg resolved still folds into `result.usage`, but its machine event is dropped. Watch `usage.dropped` on `onTrace` if a counter looks short.                                                                   |
 | **Coverage**         | Only usage your executor reports is delivered. No `usage` on the result means no event. [`simulateAgent`](verify.md) scripts return no usage, so a token counter stays `0` under simulation. Test budgets with `runAgent` and a usage-reporting mock. |
 

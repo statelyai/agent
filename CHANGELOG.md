@@ -1,5 +1,52 @@
 # @statelyai/agent
 
+## 2.0.0-alpha.42
+
+### Minor Changes
+
+- [#258](https://github.com/statelyai/agent/pull/258) [`74134e8`](https://github.com/statelyai/agent/commit/74134e865a0386c92595d9bf38a2734fe3a61ee6) Thanks [@davidkpiano](https://github.com/davidkpiano)! - The AI SDK adapter now passes `maxRetries: 0` to every AI SDK call by default, so run usage counts every provider request. Set `maxRetries` in the adapter's `settings` or a model entry's settings to let the SDK retry; a request that succeeds counts once in `modelCalls` however many SDK retries it took, and a failed `streamText` request counts every attempt.
+
+  A resume now checks the restored context against the machine's `context` schema and the `schemas.context` of each active state, with or without an event log. A context that fails throws `AgentSnapshotInvalidError` (code `snapshot-invalid`) before the run starts. The check runs each schema's validator on the stored values, so a context schema with a transform that changes a field's type rejects valid snapshots: declare context fields with the type they hold.
+
+- [#257](https://github.com/statelyai/agent/pull/257) [`8856252`](https://github.com/statelyai/agent/commit/885625285a01a8df027c45fd08865cbe1cc10f6c) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Removed unused public exports: `GROUPED_EVENT_THRESHOLD` and `AGENT_TRACE_SCHEMA_VERSION` from `@statelyai/agent`; `AGENT_EVENT_SCHEMA_VERSION`, `AGENT_INIT_EVENT_TYPE`, `agentCallOccurrence`, `getSnapshotStateHash`, and `validateReplayEntries` from `/log`; `toLanguageModel` from `/ai-sdk`; `addAgentCallUsage`, `toAgentFinishReason`, `toAgentResponseFinishReason`, `toAgentResponseUsage`, `toOpenAiCallSettings`, `toOpenAiEventTools`, `toOpenAiMessages`, `toOpenAiToolChoice`, `toOpenAiTools`, and `toResponsesInput` from `/openai`; `toAgentFinishReason`, `toTanStackAiEventTools`, `toTanStackAiMessages`, `toTanStackAiModelOptions`, `toTanStackAiTools`, and `toTextAdapter` from `/tanstack-ai`; and `sameModelCallShape` from `/testing`.
+
+- [#259](https://github.com/statelyai/agent/pull/259) [`23265fe`](https://github.com/statelyai/agent/commit/23265fe922b3d577cac12818adfb90a4fee6707c) Thanks [@davidkpiano](https://github.com/davidkpiano)! - `describeMachine(machine, { format: "mermaid" })` renders a machine as a Mermaid `stateDiagram-v2` diagram, with no network connection. It draws one edge per target that a transition written as a function can return, marks conditional ones with `?`, and sends targets it cannot read to a dashed `?` node. GitHub renders the output in Markdown.
+
+- [#260](https://github.com/statelyai/agent/pull/260) [`7d1dc30`](https://github.com/statelyai/agent/commit/7d1dc3031c49cd43a38d895919d41832a1ba734c) Thanks [@davidkpiano](https://github.com/davidkpiano)! - `@statelyai/agent/testing` loads under the Cloudflare Vitest pool. The built `.mjs` and `.cjs` files no longer carry JSDoc comments, so a `vi.mock(` example in one no longer makes Vitest 4 hoist the module and drop its re-exports. The `.d.mts` and `.d.cts` files keep the JSDoc.
+
+  `checkConformance` validates what the mapping feeds the model. An actor output that the actor's declared output schema rejects is an `invalid-output` deviation, and an event payload that the model's event schema rejects is an `invalid-event` deviation. The output schema is the one on the actor the run binds, so a `machine.provide({ actors })` replacement is checked against its own schema. The model receives each event as its schema parsed it, with defaults and transforms applied, as a host that calls `parseAgentEvent` sends it. Both carry the schema's message in `schemaError`. A malformed model-call output no longer throws a `TypeError` from the model's `onDone`.
+
+  `checkConformance` callbacks are typed from the model and the observations. `actors` keys are the model's actor srcs, `observes` is one of the observation kinds, `observation` is narrowed to that kind, `input` has the actor's input type, and an event's `matches` reads the model's typed `context`. A misspelled src or kind is a compile error. An options object built outside the call needs `as const` on its `observes` values.
+
+  `canReach` and `explorePaths` type the snapshot their predicate, `payloads`, and `dedupeBy` receive as the machine's own snapshot, so `snapshot.context` needs no cast. Where a child search also calls a callback with a child's snapshot (`payloads` under `children: "explore"` or `"coupled"`, `dedupeBy` under `children: "explore"`), its parameter is `TSnapshot | ExploreSnapshot`.
+
+  The default `maxPaths` for `canReach` and `explorePaths` is 10,000, up from 200.
+
+### Patch Changes
+
+- [#256](https://github.com/statelyai/agent/pull/256) [`4dc5f42`](https://github.com/statelyai/agent/commit/4dc5f42b1a5311a41f721e4f8ebb52c170761688) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Docs: install the published `2.0.0-alpha.41` with `xstate@6.0.0-beta.2`, and fix the decide mock shape, the conformance mapping example, the local relay URL, and lint references. Add a strangler-fig section on reconciling host writes after a failed run.
+
+## 2.0.0-alpha.41
+
+### Minor Changes
+
+- [#252](https://github.com/statelyai/agent/pull/252) [`4a3a10b`](https://github.com/statelyai/agent/commit/4a3a10b192a895b569c4cc1f2346dd14b6279082) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Add `checkConformance` to `@statelyai/agent/testing`. It checks a recorded run of existing code against a model of that code. The model runs with each actor answered from the recording's observations, and the report names the first deviation (`unexpected-observation`, `missing-observation`, `input-mismatch`, `extra-observations`, `ignored-event`, or `unmapped-actor`) with the model's state, plus the actors the recording could not observe. Pass the reports' `trace` to `traceCoverage` for the states no recorded run reached.
+
+  - `output: { observes, matches }` checks the code's recorded return value against the model's output (`output-mismatch`).
+  - An `events` entry can be `{ event, matches }`, which compares the observation with the model's context before sending it, such as the draft a person approved.
+  - `recordAiSdk(ai, current)` records AI SDK code that builds its model inline or passes module-level tools to `generateText`: mock `"ai"` with it, and each `generateText` and `streamText` call uses the seam's model and records its tools.
+  - A model effect from `recorder.model` that failed and was retried with the same request has `retriedBy`, so a mapping can read one observation per call the code made.
+
+  The new [Verify in place](https://github.com/statelyai/agent/blob/next/docs/verify-in-place.md) guide and `examples/verify-in-place` walk through the track: a model of an unchanged refund loop, proofs, recorded runs checked against the model, coverage, and a seeded regression caught.
+
+- [#255](https://github.com/statelyai/agent/pull/255) [`7ef9389`](https://github.com/statelyai/agent/commit/7ef9389f726920462d9f769666ee561a092dbf16) Thanks [@davidkpiano](https://github.com/davidkpiano)! - `recordAiSdk` stamps each recorded model attempt with `aiSdkCall`, the index of the `generateText` or `streamText` call it belongs to. Attempts with the same `aiSdkCall` are one call the code made (its tool-loop steps and the SDK's retries), so a mapping can tell a retry by the SDK (the `retriedBy` attempt has the same `aiSdkCall`) from a resend by the code (a different one), including with `maxRetries: 0` and after the SDK's last attempt. Steps that use a model from `prepareStep` run on the seam's model and carry the same `aiSdkCall`. `recorder.model` now wraps frozen models, and reads metadata getters such as `provider` on the model itself.
+
+  The Verify in place guide now checks a run where the code threw with `output`, by recording the throw as the outcome, instead of leaving its outcome unchecked.
+
+### Patch Changes
+
+- [#253](https://github.com/statelyai/agent/pull/253) [`d9101a0`](https://github.com/statelyai/agent/commit/d9101a08e5d9b019561fbbeeadbde2bfab634655) Thanks [@davidkpiano](https://github.com/davidkpiano)! - `canReach` without `dedupeBy` now deduplicates on a default key (state value, context, status, history, pending requests and invoke inputs, children and their inputs, armed timers, coupled children's states). An `interleave: "pending"` search that explored every interleaving now finishes, and a loop over finitely many states is a complete search. A step whose context is not plain data is not deduplicated. `explorePaths` is unchanged.
+
 ## 2.0.0-alpha.40
 
 ### Patch Changes

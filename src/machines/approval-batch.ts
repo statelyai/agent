@@ -31,8 +31,13 @@ export type ApprovalCallResult = {
   reason?: string;
 };
 
-/** A standing approval granted with `APPROVE_ALWAYS`. The host persists it and feeds it to its policy. */
-export type ApproveAlwaysRule = { name: string };
+/**
+ * A standing approval granted with `APPROVE_ALWAYS`: the approved call's tool
+ * name and arguments. The host persists it and feeds it to its policy, which
+ * should allow a later call only when both match. Matching on `name` alone
+ * approves every argument the tool accepts.
+ */
+export type ApproveAlwaysRule = { name: string; args: unknown };
 
 /** Config for {@link createApprovalBatchMachine}. */
 export interface CreateApprovalBatchMachineConfig {
@@ -111,6 +116,17 @@ function settledResult(
   id: string,
 ): ApprovalCallResult | undefined {
   return Object.hasOwn(results, id) ? results[id] : undefined;
+}
+
+// Two approve-always rules with equal arguments are one rule. Arguments that
+// do not serialize (a BigInt, a cycle) compare by reference.
+function sameArgs(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  try {
+    return JSON.stringify(a) === JSON.stringify(b);
+  } catch {
+    return false;
+  }
 }
 
 function errorMessage(error: unknown): string {
@@ -389,8 +405,11 @@ export function createApprovalBatchMachine(
       );
       const awaiting = context.awaiting.filter((candidate) => candidate.id !== call.id);
       const approveAlways =
-        type === "APPROVE_ALWAYS" && !context.approveAlways.some((rule) => rule.name === call.name)
-          ? [...context.approveAlways, { name: call.name }]
+        type === "APPROVE_ALWAYS" &&
+        !context.approveAlways.some(
+          (rule) => rule.name === call.name && sameArgs(rule.args, call.args),
+        )
+          ? [...context.approveAlways, { name: call.name, args: call.args }]
           : context.approveAlways;
       return { context: { awaiting, choices: choicesFor(awaiting), approveAlways } };
     };
@@ -405,8 +424,9 @@ export function createApprovalBatchMachine(
   const machineConfig = {
     id: "approval-batch",
     // Stamped by the runtime onto snapshots/logs instead of the structural hash;
-    // bumped only on a topology change a snapshot could not resume into.
-    version: "1",
+    // bumped on a topology change a snapshot could not resume into, or a change
+    // to what replaying a log produces. "2": approve-always rules carry `args`.
+    version: "2",
     context: ({ input }: { input: ApprovalBatchInput }) => {
       const ids = new Set(input.calls.map((call) => call.id));
       if (ids.size !== input.calls.length) {

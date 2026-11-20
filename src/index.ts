@@ -46,7 +46,7 @@ export type {
 } from "./decision.js";
 export { ACT_STATE_EXITED, DEFAULT_ACT_MAX_STEPS } from "./act.js";
 export type { AgentActInput } from "./act.js";
-export { GROUPED_EVENT_THRESHOLD, MAX_FINITE_PAYLOADS } from "./decision-strategy.js";
+export { MAX_FINITE_PAYLOADS } from "./decision-strategy.js";
 export type { DecisionStrategy } from "./decision-strategy.js";
 export { AgentInvalidEventPayloadError, getAcceptedEvents, parseAgentEvent } from "./events.js";
 export { eventFromInteraction, getInteraction, interactionMetaSchema } from "./interaction.js";
@@ -112,9 +112,9 @@ export type { AgentLogEntry } from "./event-log.js";
 export { AgentEventLogConflictError } from "./event-log-store.js";
 export type { AgentEventLogStore } from "./event-log-store.js";
 export {
-  AGENT_TRACE_SCHEMA_VERSION,
   AgentMaxModelCallsExceededError,
   AgentSnapshotDivergedError,
+  AgentSnapshotInvalidError,
   createAgentInbox,
   createAgentRuntime,
   isAgentIdle,

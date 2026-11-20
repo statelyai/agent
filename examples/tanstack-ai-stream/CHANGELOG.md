@@ -1,5 +1,19 @@
 # @statelyai/example-tanstack-ai-stream
 
+## 0.0.1-alpha.30
+
+### Patch Changes
+
+- Updated dependencies [[`74134e8`](https://github.com/statelyai/agent/commit/74134e865a0386c92595d9bf38a2734fe3a61ee6), [`8856252`](https://github.com/statelyai/agent/commit/885625285a01a8df027c45fd08865cbe1cc10f6c), [`23265fe`](https://github.com/statelyai/agent/commit/23265fe922b3d577cac12818adfb90a4fee6707c), [`4dc5f42`](https://github.com/statelyai/agent/commit/4dc5f42b1a5311a41f721e4f8ebb52c170761688), [`7d1dc30`](https://github.com/statelyai/agent/commit/7d1dc3031c49cd43a38d895919d41832a1ba734c)]:
+  - @statelyai/agent@2.0.0-alpha.42
+
+## 0.0.1-alpha.29
+
+### Patch Changes
+
+- Updated dependencies [[`d9101a0`](https://github.com/statelyai/agent/commit/d9101a08e5d9b019561fbbeeadbde2bfab634655), [`4a3a10b`](https://github.com/statelyai/agent/commit/4a3a10b192a895b569c4cc1f2346dd14b6279082), [`7ef9389`](https://github.com/statelyai/agent/commit/7ef9389f726920462d9f769666ee561a092dbf16)]:
+  - @statelyai/agent@2.0.0-alpha.41
+
 ## 0.0.1-alpha.28
 
 ### Patch Changes

@@ -20,6 +20,7 @@ import {
   checkConformance,
   createRecorder,
   type ConformanceReport,
+  type RecordedError,
   type Recording,
 } from "@statelyai/agent/testing";
 import { handleRefundRequest, type Decision, type Order, type RefundEffects } from "./before.js";
@@ -110,21 +111,33 @@ export async function recordRun(
 // --- 2. Map recorded calls to observations. ---
 
 export type Observation =
-  | { kind: "lookup"; order: Order }
-  | { kind: "decision"; decision: Decision }
+  | { kind: "lookup"; orderId: string; order: Order; error?: RecordedError }
+  | { kind: "decision"; decision: Decision; error?: RecordedError }
   | { kind: "approval"; approved: boolean; amount: number }
-  | { kind: "refund"; orderId: string; amount: number }
-  | { kind: "returned"; outcome: unknown };
+  | { kind: "refund"; orderId: string; amount: number; error?: RecordedError }
+  | { kind: "returned"; outcome: unknown }
+  | { kind: `unmapped:${string}`; args?: unknown };
 
 export function toObservations(recording: Recording): Observation[] {
+  // A call that threw carries its error, so its actor fails with it.
+  const failed = (effect: { error?: RecordedError }) =>
+    effect.error ? { error: effect.error } : {};
   return recording.effects.flatMap((effect): Observation[] => {
     if (effect.kind === "output") return [{ kind: "returned", outcome: effect.value }];
-    if (effect.kind !== "call") return [];
+    // An effect the mapping does not know is kept, so the check reports it.
+    if (effect.kind !== "call") return [{ kind: `unmapped:${effect.kind}` }];
     switch (effect.name) {
       case "lookupOrder":
-        return [{ kind: "lookup", order: effect.result as Order }];
+        return [
+          {
+            kind: "lookup",
+            orderId: (effect.args as [string])[0],
+            order: effect.result as Order,
+            ...failed(effect),
+          },
+        ];
       case "decide":
-        return [{ kind: "decision", decision: effect.result as Decision }];
+        return [{ kind: "decision", decision: effect.result as Decision, ...failed(effect) }];
       case "requestApproval":
         return [
           {
@@ -134,9 +147,15 @@ export function toObservations(recording: Recording): Observation[] {
           },
         ];
       case "issueRefund":
-        return [{ kind: "refund", ...(effect.args as [{ orderId: string; amount: number }])[0] }];
+        return [
+          {
+            kind: "refund",
+            ...(effect.args as [{ orderId: string; amount: number }])[0],
+            ...failed(effect),
+          },
+        ];
       default:
-        return [];
+        return [{ kind: `unmapped:${effect.name}`, args: effect.args }];
     }
   });
 }
@@ -153,43 +172,39 @@ export function checkRun(
     actors: {
       lookupOrder: {
         observes: "lookup",
-        output: ({ observation }) =>
-          (observation as Extract<Observation, { kind: "lookup" }>).order,
+        // The code looked up the order the model looks up.
+        matches: ({ input, observation }) => input === observation.orderId,
+        output: ({ observation }) => observation.order,
+        // A lookup that failed in the recording fails here too.
+        error: ({ observation }) => observation.error,
       },
       decide: {
         observes: "decision",
-        output: ({ observation }) =>
-          (observation as Extract<Observation, { kind: "decision" }>).decision,
+        output: ({ observation }) => observation.decision,
+        error: ({ observation }) => observation.error,
       },
       issueRefund: {
         observes: "refund",
         // The refund the code issued must be the one the model would issue.
         matches: ({ input, observation }) => {
-          const refund = observation as Extract<Observation, { kind: "refund" }>;
           const expected = input as { orderId: string; amount: number };
-          return expected.orderId === refund.orderId && expected.amount === refund.amount;
+          return expected.orderId === observation.orderId && expected.amount === observation.amount;
         },
+        error: ({ observation }) => observation.error,
       },
     },
     events: {
       approval: {
-        event: (observation) => ({
-          type: (observation as Extract<Observation, { kind: "approval" }>).approved
-            ? "APPROVE"
-            : "REJECT",
-        }),
+        event: (observation) => ({ type: observation.approved ? "APPROVE" : "REJECT" }),
         // The person approved the amount the model is waiting to refund.
-        matches: ({ observation, context }) =>
-          (observation as Extract<Observation, { kind: "approval" }>).amount ===
-          (context as { amount: number }).amount,
+        matches: ({ observation, context }) => observation.amount === context.amount,
       },
     },
     // The outcome the code returned is the one the model ends with.
     output: {
       observes: "returned",
       matches: ({ output, observation }) =>
-        (output as { outcome: string }).outcome ===
-        (observation as Extract<Observation, { kind: "returned" }>).outcome,
+        (output as { outcome: string }).outcome === observation.outcome,
     },
   });
 }

@@ -2,7 +2,6 @@ import { describe, expect, test } from "vitest";
 import { z } from "zod";
 import { createActor, toPromise } from "xstate";
 import {
-  AGENT_TRACE_SCHEMA_VERSION,
   AGENT_USAGE_EVENT_TYPE,
   createAgentSchemas,
   createTextLogic,
@@ -13,7 +12,7 @@ import {
   type AgentTraceEvent,
   type ChosenEvent,
 } from "./index.js";
-import { runToQuiescence } from "./run-agent.js";
+import { AGENT_TRACE_SCHEMA_VERSION, runToQuiescence } from "./run-agent.js";
 
 /** Drops the versioned envelope fields, leaving only the trace payload. */
 function stripEnvelope(event: AgentTraceEvent): Record<string, unknown> {

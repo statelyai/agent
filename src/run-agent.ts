@@ -39,7 +39,12 @@ import {
   resolveMachineVersion,
   validateSchemaSync,
 } from "./utils.js";
-import { getAcceptedEvents, getHumanEventTypes, type AgentSchemas } from "./events.js";
+import {
+  getAcceptedEvents,
+  getHumanEventTypes,
+  isEventPattern,
+  type AgentSchemas,
+} from "./events.js";
 import {
   GENERATE_TEXT_ACTOR,
   getCallFinishReason,
@@ -137,6 +142,66 @@ export class AgentSnapshotDivergedError extends AgentError {
         `the log replays to state hash '${expected}', the snapshot hashes '${actual}'.`,
     );
     this.name = "AgentSnapshotDivergedError";
+  }
+}
+
+/**
+ * Thrown by {@link AgentRuntime.start} when the context of the snapshot a run
+ * resumes from breaks the machine's `context` schema or an active state's
+ * `schemas.context`. A live run never produces such a snapshot, so it was
+ * edited or built out of band. `stateNodeId` names the state whose schema
+ * failed, when it was a state's.
+ */
+export class AgentSnapshotInvalidError extends AgentError {
+  readonly stateNodeId?: string;
+
+  constructor(message: string, options: { stateNodeId?: string; cause?: unknown } = {}) {
+    super("snapshot-invalid", `createAgentRuntime: ${message}`, { cause: options.cause });
+    this.name = "AgentSnapshotInvalidError";
+    if (options.stateNodeId !== undefined) {
+      this.stateNodeId = options.stateNodeId;
+    }
+  }
+}
+
+// Checks a resume snapshot's context against the machine's and the active
+// states' context schemas: XState restores a snapshot as given, so a context
+// outside them would otherwise run on. A snapshot XState cannot restore at all
+// is left to the restore itself, which fails the run.
+function assertRestorableSnapshot(machine: AnyStateMachine, persisted: unknown): void {
+  let snapshot: AnyMachineSnapshot;
+  try {
+    snapshot = restoreMachineSnapshot(machine, persisted);
+  } catch {
+    return;
+  }
+  if (snapshot.status !== "active") {
+    return;
+  }
+  const checks: Array<{ schema: StandardSchemaV1 | undefined; stateNodeId?: string }> = [
+    { schema: machine.schemas?.context as StandardSchemaV1 | undefined },
+    ...snapshot.nodes
+      .filter((node) => node !== machine.root)
+      .map((node) => ({
+        schema: node.schemas?.context as StandardSchemaV1 | undefined,
+        stateNodeId: node.id,
+      })),
+  ];
+  for (const { schema, stateNodeId } of checks) {
+    if (schema === undefined) continue;
+    const result = schema["~standard"].validate(snapshot.context);
+    // An async schema cannot be checked before the run starts. Its rejection
+    // is handled so it never surfaces as an unhandled rejection.
+    if (result instanceof Promise) {
+      result.catch(() => {});
+      continue;
+    }
+    if (!result.issues) continue;
+    const where = stateNodeId === undefined ? "the machine's" : `state '${stateNodeId}''s`;
+    throw new AgentSnapshotInvalidError(
+      `the resume snapshot's context does not match ${where} context schema: ${result.issues.map((issue: { message: string }) => issue.message).join(", ")}`,
+      { ...(stateNodeId !== undefined ? { stateNodeId } : {}), cause: result.issues },
+    );
   }
 }
 
@@ -1503,7 +1568,8 @@ function bindActLogic(runCtx: RunAgentBindContext): ActLogic {
         const before = actorRef.getSnapshot() as AnyMachineSnapshot;
         let accepted: boolean;
         try {
-          accepted = !getHumanEventTypes(before).has(type) && before.can(event);
+          accepted =
+            !getHumanEventTypes(before, runCtx.schemas?.events).has(type) && before.can(event);
         } catch {
           accepted = false;
         }
@@ -1770,7 +1836,10 @@ function bindDecisionLogic(logic: DecisionLogic, runCtx: RunAgentBindContext): D
       const agentCan = (event: ChosenEvent): boolean => {
         if (!actorRef) return true;
         const snapshot = actorRef.getSnapshot() as AnyMachineSnapshot;
-        return !getHumanEventTypes(snapshot).has(event.type) && snapshot.can(event);
+        return (
+          !getHumanEventTypes(snapshot, runCtx.schemas?.events).has(event.type) &&
+          snapshot.can(event)
+        );
       };
 
       const lowered = logic.request(input as never);
@@ -1801,9 +1870,30 @@ function bindDecisionLogic(logic: DecisionLogic, runCtx: RunAgentBindContext): D
       }
       // After the options: a closed choice builds them from `events`, so a
       // person's event still lands in `withheld`.
+      // A pattern left unexpanded (no registered type matches it) is no event a model can send.
       if (actorRef) {
-        const humanEventTypes = getHumanEventTypes(actorRef.getSnapshot() as AnyMachineSnapshot);
-        request.events = events.filter((event) => !humanEventTypes.has(event.type));
+        const humanEventTypes = getHumanEventTypes(
+          actorRef.getSnapshot() as AnyMachineSnapshot,
+          runCtx.schemas?.events,
+        );
+        request.events = events.filter(
+          (event) => !humanEventTypes.has(event.type) && !isEventPattern(event.type),
+        );
+      }
+      // No candidate at all: say why, rather than exhaust with no attempts.
+      if (actorRef && request.events.length === 0) {
+        const allowed = declaredEventTypes?.map((type) => `'${type}'`).join(", ") ?? "any";
+        // The same error as exhausted retries, so a host branching on
+        // `decision-exhausted` keeps handling it; the message says why.
+        const error = new AgentDecisionExhaustedError([]);
+        error.message =
+          `Decision '${request.name}' has no event to offer: the current state accepts no event ` +
+          `type matching allowedEvents (${allowed}) that a model may send; no model call was made. ` +
+          "A wildcard handler such as `on: { 'desk.*': ... }` accepts only the matching event " +
+          "types registered in the machine's event schemas.";
+        runCtx.emitTrace?.({ type: "request.start", request }, self);
+        runCtx.emitTrace?.({ type: "request.error", request, error }, self);
+        throw error;
       }
       // Nothing to choose from: fail without a model call, the same way
       // exhausted retries fail, so the invoke's onError handles it.
@@ -4129,6 +4219,10 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
             ...initMetadata,
             executionId: logExecutionId!,
           });
+      }
+
+      if (effectiveSnapshot !== undefined) {
+        assertRestorableSnapshot(logMachine, effectiveSnapshot);
       }
 
       // ─── Per-call idempotency keys (`info.callKey`) ───

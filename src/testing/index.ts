@@ -77,7 +77,6 @@ export {
   createRecorder,
   recordAiSdk,
   RecordingDivergenceError,
-  sameModelCallShape,
 } from "../equivalence.js";
 export type {
   AiSdkSeam,

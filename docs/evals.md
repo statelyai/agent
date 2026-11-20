@@ -103,7 +103,8 @@ The mock answers in the provider's format, not the request's:
 
 - A plain-text request takes the text as is.
 - A structured request asks the provider for JSON and reads the declared output from a `result` key, so the mock returns `{ "result": … }` as JSON text.
-- An `agent.decide` request expects a `tool-call` content part. Its `toolName` is `send_event_<TYPE>` for the chosen event type, and its `input` is the event payload as JSON text.
+- An `agent.decide` request uses object mode by default, so the mock returns JSON text. An open choice reads `{ "event": { "type": "APPROVE", … } }`: the chosen event type plus its payload fields. A closed choice (`payloads`) reads `{ "choice": "<option id>" }`. Text that is not JSON is rejected with "the answer was not valid JSON".
+- In tool mode (`decideMode: "tool"`, or the default when a candidate's payload is not an object), the mock returns a `tool-call` content part instead. For an open choice, its `toolName` is `send_event_<TYPE>` for the chosen event type, and its `input` is the event payload as JSON text. For a closed choice, its `toolName` is `choose_option` and its `input` is `{ "option": "<option id>" }` as JSON text. See [Coercion](decisions.md#coercion).
 
 `doGenerateCalls` records the options of every call, including the prompt the adapter rendered.
 
@@ -337,7 +338,7 @@ replay.output(await runPort(replay.client("anthropic", stand, { methods })));
 compareRecordings(recorder.recording, replay.recording); // { equivalent: true, divergences: [] }
 ```
 
-- `recorder.model` records each provider attempt as a `model` effect. A failed attempt followed by the same request, such as an AI SDK retry, has `retriedBy` set to the call that retried it.
+- `recorder.model` records each provider attempt as a `model` effect. A failed attempt followed by the same request, such as an AI SDK retry, has `retriedBy` set to the call that retried it. Attempts made inside a `generateText` or `streamText` call that `recordAiSdk` routed carry that call's index as `aiSdkCall`, so a retry by the SDK (same `aiSdkCall`) is told apart from one by the code (a different `aiSdkCall`).
 - Each call is a `call` effect named `<name>.<method>`, such as `anthropic.messages.create`, with its arguments and its result or error.
 - `recorder.fn(name, asyncFn, options?)` wraps one async function the same way, for a client that is a function.
 - Replay answers each call with the next unused recorded call of the same name, in order, whatever its arguments. A call past the recorded ones throws `RecordingDivergenceError`.

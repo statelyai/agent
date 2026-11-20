@@ -91,6 +91,8 @@ const executors = createAiSdkExecutors({
 
 Precedence is global `settings`, then model-entry settings, then portable generation fields declared by the request.
 
+The adapter passes `maxRetries: 0` to every AI SDK call by default, so run usage counts every provider request and the machine's own retries are the only ones. Set `maxRetries` in `settings` or a model entry's settings to let the SDK retry. A request that succeeds counts once in `modelCalls`, however many SDK retries it took. A `streamText` request that fails counts every attempt. See [Retries and executor budgets](usage-and-budgets.md#retries-and-executor-budgets).
+
 ## Decision models
 
 <!-- decision-model entries from src/ai-sdk/index.ts (decideWithDecisionModel) -->
@@ -110,7 +112,7 @@ const executors = createAiSdkExecutors({
 - The adapter asks one `choice` question. Each option id is a label, and its criterion is the option's description, or the event as JSON when it has none. The instructions are the request's `system` and `prompt`, and the state is the request's `input`.
 - The result carries the chosen option's event, the call's usage, and `confidence` when the model reports it.
 - A label that is not an option is a failed attempt, retried like any other. A retry appends each earlier attempt's reason to the instructions.
-- A text request on a decision model throws. Host `settings` apply to language models only.
+- A text request on a decision model throws. Of the host `settings`, only `maxRetries` applies to a decision model.
 - `resolveModel` may return a decision model too.
 
 ## Mastra models
@@ -250,13 +252,13 @@ The `decide` executor asks for one structured-output object naming the event, or
 
 Each example is a runnable host for one provider stack.
 
-| Example                                                                       | Backing                                                                                                           |
-| ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| [ai-sdk-host](https://github.com/statelyai/agent/blob/next/examples/ai-sdk-host/index.ts)                               | Vercel AI SDK, through the optional adapter                                                                       |
+| Example                                                                                                                 | Backing                                                                                                              |
+| ----------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| [ai-sdk-host](https://github.com/statelyai/agent/blob/next/examples/ai-sdk-host/index.ts)                               | Vercel AI SDK, through the optional adapter                                                                          |
 | [openai-sdk-host](https://github.com/statelyai/agent/blob/next/examples/openai-sdk-host/index.ts)                       | `createOpenAiExecutors` from `@statelyai/agent/openai`, over the raw `openai` package (Responses + Chat Completions) |
 | [tanstack-ai-stream](https://github.com/statelyai/agent/blob/next/examples/tanstack-ai-stream/index.ts)                 | `createTanStackAiExecutors` from `@statelyai/agent/tanstack-ai`, streamed to a `useChat` client over AG-UI           |
 | [anthropic-sdk-host](https://github.com/statelyai/agent/blob/next/examples/anthropic-sdk-host/index.ts)                 | raw `@anthropic-ai/sdk` (Messages); structured via forced tool call, decisions via `tool_choice: { type: 'any' }`    |
 | [langchain-host](https://github.com/statelyai/agent/blob/next/examples/langchain-host/index.ts)                         | LangChain `BaseChatModel` (`@langchain/core`), wrapped into the executor contract                                    |
-| [mastra-host](https://github.com/statelyai/agent/blob/next/examples/mastra-host/index.ts)                               | Mastra `Agent` and `createTool`, bridging to `runAgent`                                                       |
+| [mastra-host](https://github.com/statelyai/agent/blob/next/examples/mastra-host/index.ts)                               | Mastra `Agent` and `createTool`, bridging to `runAgent`                                                              |
 | [cloudflare-agent-host](https://github.com/statelyai/agent/blob/next/examples/cloudflare-agent-host/index.ts)           | Durable Object                                                                                                       |
 | [cloudflare-workers-ai-host](https://github.com/statelyai/agent/blob/next/examples/cloudflare-workers-ai-host/index.ts) | Workers AI binding                                                                                                   |

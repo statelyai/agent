@@ -1,14 +1,9 @@
 import { describe, expect, test } from "vitest";
-import { canReach } from "@statelyai/agent/testing";
+import { canReach, createRecorder } from "@statelyai/agent/testing";
 import { APPROVAL_THRESHOLD, handleRefundRequest } from "./before.js";
 import { SCENARIOS, checkRun, recordRun, runVerifyInPlaceExample } from "./index.js";
 import { refundModel } from "./model.js";
 import { handleRefundRequestRegressed } from "./regression.js";
-
-type Snapshot = {
-  matches: (state: string) => boolean;
-  context: { amount: number; approved: boolean; order: { total: number } | null };
-};
 
 // The decisions the model may receive, for the proofs: a small, a large, and
 // an over-total refund, a reply, and another round.
@@ -32,11 +27,11 @@ describe("verify in place: the model's rules", () => {
   test("no refund over the threshold without an approval", async () => {
     const result = await canReach(
       refundModel,
-      ((snapshot: Snapshot) =>
+      (snapshot) =>
         snapshot.matches("refunding") &&
         snapshot.context.amount > APPROVAL_THRESHOLD &&
-        !snapshot.context.approved) as never,
-      proofOptions as never,
+        !snapshot.context.approved,
+      proofOptions,
     );
     expect(result).toMatchObject({ reachable: false, complete: true });
   });
@@ -45,11 +40,11 @@ describe("verify in place: the model's rules", () => {
     // Not vacuous: the path the first proof guards exists.
     const result = await canReach(
       refundModel,
-      ((snapshot: Snapshot) =>
+      (snapshot) =>
         snapshot.matches("refunding") &&
         snapshot.context.amount > APPROVAL_THRESHOLD &&
-        snapshot.context.approved) as never,
-      proofOptions as never,
+        snapshot.context.approved,
+      proofOptions,
     );
     expect(result.reachable).toBe(true);
   });
@@ -57,10 +52,9 @@ describe("verify in place: the model's rules", () => {
   test("no refund over the order total", async () => {
     const result = await canReach(
       refundModel,
-      ((snapshot: Snapshot) =>
-        snapshot.matches("refunding") &&
-        snapshot.context.amount > snapshot.context.order!.total) as never,
-      proofOptions as never,
+      (snapshot) =>
+        snapshot.matches("refunding") && snapshot.context.amount > snapshot.context.order!.total,
+      proofOptions,
     );
     expect(result).toMatchObject({ reachable: false, complete: true });
   });
@@ -145,6 +139,24 @@ describe("verify in place: a seeded regression", () => {
       reason: "output-mismatch",
       observed: { kind: "returned", outcome: "replied" },
       state: "refunded",
+    });
+  });
+
+  test("a lookup that failed in the recording fails the model's lookup", async () => {
+    const recorder = createRecorder();
+    const lookupOrder = recorder.fn("lookupOrder", async (_orderId: string): Promise<never> => {
+      throw new Error("order not found");
+    });
+    await lookupOrder("A-1").catch(() => {});
+    const report = await checkRun(SCENARIOS[0]!, recorder.recording);
+    expect(report).toMatchObject({ conforms: true, status: "error", consumed: 1 });
+
+    // A lookup of another order is a mismatch, failed or not.
+    const other = createRecorder();
+    await other.fn("lookupOrder", async (_orderId: string) => SCENARIOS[0]!.order)("A-404");
+    expect((await checkRun(SCENARIOS[0]!, other.recording)).deviation).toMatchObject({
+      reason: "input-mismatch",
+      expected: "lookupOrder",
     });
   });
 });

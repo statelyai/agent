@@ -365,3 +365,46 @@ describe("canReach — default key", () => {
     expect(await canReach(machine, "goal", { maxDepth: 3 })).toMatchObject({ reachable: true });
   });
 });
+
+describe("default path cap", () => {
+  // Eight rounds of a two-way choice that the context records: 256 distinct
+  // paths, none of them merged by the default key.
+  function createRounds() {
+    return setupAgent({
+      context: z.object({ round: z.number(), picks: z.string() }),
+      actors: { pick: createAsyncLogic<"a" | "b">({ run: async () => "a" }) },
+    }).createMachine({
+      context: { round: 0, picks: "" },
+      initial: "checking",
+      states: {
+        checking: {
+          type: "choice",
+          choice: ({ context }) => (context.round < 8 ? { target: "picking" } : { target: "done" }),
+        },
+        picking: {
+          invoke: {
+            src: "pick",
+            onDone: ({ context, event }) => ({
+              target: "checking",
+              context: { round: context.round + 1, picks: context.picks + event.output },
+            }),
+          },
+        },
+        done: { type: "final" },
+      },
+    });
+  }
+  const options = { outputs: { pick: ["a", "b"] }, maxDepth: 8 };
+
+  test("a loop with a few hundred paths is explored completely by default", async () => {
+    const report = await explorePaths(createRounds(), options);
+    expect(report).toMatchObject({ hitPathCap: false, complete: true, pathsExplored: 256 });
+
+    const result = await canReach(
+      createRounds(),
+      (snapshot) => snapshot.context.picks === "c",
+      options,
+    );
+    expect(result).toMatchObject({ reachable: false, complete: true });
+  });
+});

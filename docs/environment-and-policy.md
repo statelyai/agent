@@ -33,7 +33,17 @@ environment (TypeScript, fixed)          policy (TS or JSON, improvable)
 - The policy answers at those decision points. It can be a single model call, a ladder of `choice` states over the facts, a judgment, or a request to ask the customer. Its final state outputs the event it proposes. The host runs the policy as the environment's `decide` executor: `createPolicyDecider(policyMachine, { executors })` starts one policy run per decision and returns its output event. See [A policy as the decider](decisions.md#a-policy-as-the-decider).
 - An invariant sentinel, a state that is entered only when a rule is broken, stays unreachable for every policy. `canReach` proves it once, against the environment, for every event sequence and payload variant you list. See [Payloads and invoke outputs](verify.md#payloads-and-invoke-outputs).
 
-The environment can be a plain XState machine. [`decideNext`](decisions.md#decisions-at-the-boundary-of-a-plain-machine) asks a model to pick one event that a plain XState machine accepts right now, and [closed choices](decisions.md#closed-choices) list the concrete events a decider may pick.
+The environment can be a plain XState machine. [`decideNext`](decisions.md#decisions-at-the-boundary-of-a-plain-machine) asks a model to pick one event that a plain XState machine accepts right now, and [closed choices](decisions.md#closed-choices) list the concrete events a decider may pick. A policy decider answers `decideNext` with its defaults when the host passes `metadata: { facts }` (the policy's default `facts`) and, with a `store`, a `callKey` per decision (the policy thread's name):
+
+```ts no-check
+const { event } = await decideNext(snapshot, {
+  decide: createPolicyDecider(policyMachine, { executors: modelExecutors, store }),
+  model: "decider",
+  allowedEvents: "desk.*",
+  metadata: { facts: { requested: snapshot.context.requested } },
+  callKey: `desk:${caseId}`,
+});
+```
 
 ### The event vocabulary
 
