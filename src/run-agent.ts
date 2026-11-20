@@ -1568,7 +1568,8 @@ function bindActLogic(runCtx: RunAgentBindContext): ActLogic {
         const before = actorRef.getSnapshot() as AnyMachineSnapshot;
         let accepted: boolean;
         try {
-          accepted = !getHumanEventTypes(before).has(type) && before.can(event);
+          accepted =
+            !getHumanEventTypes(before, runCtx.schemas?.events).has(type) && before.can(event);
         } catch {
           accepted = false;
         }

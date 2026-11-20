@@ -10,6 +10,7 @@ import {
 } from "./decision.js";
 import { createAgentRuntime, runToQuiescence } from "./run-agent.js";
 import { createAgentSchemas, setupAgent } from "./setup-agent.js";
+import { initialAgentStep } from "./steps.js";
 
 // A plain XState machine: no setupAgent, no agent.* anywhere.
 const desk = createMachine({
@@ -602,6 +603,19 @@ describe("agent.decide with a wildcard handler under the runtime", () => {
         failed: { type: "final" },
       },
     });
+
+  test("a step request's closed choice offers what the runtime offers", () => {
+    const step = initialAgentStep(
+      wildcardMachine({ allowedEvents: ["desk.*"], payloads: { "desk.refund": [{ amount: 20 }] } }),
+      {},
+    );
+    const request = step.requests[0] as { options?: Array<{ event: unknown }> };
+
+    expect(request.options?.map((option) => option.event)).toEqual([
+      { amount: 20, type: "desk.refund" },
+      { type: "desk.close" },
+    ]);
+  });
 
   test("a closed choice offers the registered types the wildcard matches", async () => {
     const { decide, requests } = scripted([(request) => request.options![0]!.event]);
