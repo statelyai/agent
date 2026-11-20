@@ -86,8 +86,9 @@ function disambiguateEventToolName(
  * `'*'` (every event), or a `'prefix.*'` wildcard matching any deeper
  * segment (`'todo.*'` matches `'todo.add'` and `'todo.list.clear'`, not
  * `'todo'` itself — mirroring xstate's partial wildcard events).
+ * @internal
  */
-function matchesEventPattern(eventType: string, pattern: string): boolean {
+export function matchesEventPattern(eventType: string, pattern: string): boolean {
   if (pattern === "*") {
     return true;
   }

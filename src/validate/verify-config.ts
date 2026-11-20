@@ -6,13 +6,19 @@
  */
 import type { AnyActorLogic, AnyStateMachine } from "xstate";
 import { ACT_ACTOR, DECIDE_ACTOR, GENERATE_TEXT_ACTOR, STREAM_TEXT_ACTOR } from "../text-logic.js";
-import { explorePaths, lintAgentMachine, type ExplorePathsOptions } from "../verify.js";
+import {
+  explorePaths,
+  lintAgentMachine,
+  type AgentPathReport,
+  type ExplorePathsOptions,
+} from "../verify.js";
 import {
   setupAgentFromConfig,
   type AgentWorkflowConfig,
   type FromConfigOptions,
   type SchemaCompiler,
 } from "../workflow-config.js";
+import { lintAgentConfig } from "./lint-config.js";
 import { validateAgentConfig } from "./validate-config.js";
 
 /** The gates {@link verifyAgentConfig} runs, in order. */
@@ -81,8 +87,13 @@ export interface VerifyAgentConfigOptions {
   actors?: Record<string, AnyActorLogic>;
   /** The names the config may reference. Omit to skip the vocabulary checks. */
   allow?: AgentConfigVocabulary;
-  /** Lint policy. Error findings always fail; `warnings: true` fails on warnings too. */
-  lint?: { warnings?: boolean };
+  /**
+   * Lint policy. Error findings always fail; `warnings: true` fails on
+   * warnings too. `terminalStates` lists non-final state paths that may wait
+   * forever (a case parked for a person who may never act): the
+   * `state-cannot-finish` check treats them, and their descendants, as finishing.
+   */
+  lint?: { warnings?: boolean; terminalStates?: string[] };
   /** Path exploration. Omit to skip the `explore` gate. */
   explore?: VerifyAgentConfigExploreOptions;
 }
@@ -97,6 +108,12 @@ export interface VerifyAgentConfigResult {
   machine?: AnyStateMachine;
   /** The typed config, set when the `validate` gate passed. */
   config?: AgentWorkflowConfig;
+  /**
+   * One `explorePaths` report per `explore.inputs` entry, in order. Set when
+   * the `explore` gate ran and every input explored without throwing, so
+   * extra checks can read the paths without exploring again.
+   */
+  explore?: AgentPathReport[];
 }
 
 const BUILTIN_SRCS: readonly string[] = [
@@ -115,7 +132,17 @@ const MAX_DETAIL_LINES = 10;
  * - `validate`: the config's shape, against the shipped JSON Schema.
  * - `vocabulary`: names the config references, against `allow`.
  * - `lower`: `setupAgent.fromConfig` (unresolved guards/actions, bad targets).
- * - `lint`: `lintAgentMachine` (errors fail; warnings fail with `lint.warnings`).
+ * - `lint`: `lintAgentMachine`, plus checks over the config's state graph:
+ *   every state is reachable, every reachable state can still reach a final
+ *   state, and every event a decision may send is handled and has a payload
+ *   schema (errors fail; warnings fail with `lint.warnings`). A passing gate
+ *   does not prove these properties:
+ *   - A config with no final state skips the finishing check.
+ *   - A config with a target that cannot be resolved statically skips both
+ *     graph checks (reachable, can finish).
+ *   - Both decision checks skip a decision whose `allowedEvents` is a
+ *     `{{ }}` template. The schema check also skips an `agent.decide` closed
+ *     choice (a `payloads` map) and a templated `payloads`.
  * - `explore`: `explorePaths` from each `explore.inputs` entry; every terminal
  *   must be one of `explore.terminals`, no cap (`maxPaths`, `maxNodes`) or
  *   `budget` may cut it short, every event's payloads must be tried (`unexpandedEvents`), and
@@ -177,10 +204,12 @@ export async function verifyAgentConfig(
   }
   record("lower", []);
 
-  const diagnostics = lintAgentMachine(machine).map((d) => ({
-    failing: d.severity === "error" || options.lint?.warnings === true,
-    line: `${d.severity} ${d.code} at '${d.path}': ${d.message}`,
-  }));
+  const diagnostics = [...lintAgentMachine(machine), ...lintAgentConfig(typed, options.lint)].map(
+    (d) => ({
+      failing: d.severity === "error" || options.lint?.warnings === true,
+      line: `${d.severity} ${d.code} at '${d.path}': ${d.message}`,
+    }),
+  );
   const lintOk = record(
     "lint",
     diagnostics.filter((d) => d.failing).map((d) => d.line),
@@ -188,11 +217,16 @@ export async function verifyAgentConfig(
   );
   if (!lintOk) return fail({ config: typed, machine });
 
-  if (options.explore && !record("explore", await checkExplore(machine, options.explore))) {
-    return fail({ config: typed, machine });
+  let reports: AgentPathReport[] | undefined;
+  if (options.explore) {
+    const explored = await checkExplore(machine, options.explore);
+    reports = explored.reports;
+    if (!record("explore", explored.problems)) {
+      return fail({ config: typed, machine, ...(reports ? { explore: reports } : {}) });
+    }
   }
 
-  return { ok: true, gates, config: typed, machine };
+  return { ok: true, gates, config: typed, machine, ...(reports ? { explore: reports } : {}) };
 }
 
 // ─── vocabulary ───
@@ -358,14 +392,19 @@ const isPlainObject = (value: unknown): value is ConfigNode =>
 async function checkExplore(
   machine: AnyStateMachine,
   options: VerifyAgentConfigExploreOptions,
-): Promise<string[]> {
+): Promise<{ problems: string[]; reports?: AgentPathReport[] }> {
   const { inputs, terminals = ["done"], ...rest } = options;
   if (inputs.length === 0) {
-    return ["explore.inputs is empty, so no path was explored; give at least one input"];
+    return {
+      problems: ["explore.inputs is empty, so no path was explored; give at least one input"],
+    };
   }
   const allowed: readonly string[] = terminals;
   const maxDepth = options.maxDepth ?? 8;
   const problems = new Set<string>();
+  // Reports are returned only when every input produced one; after a throw,
+  // later inputs are still checked but their reports are not kept.
+  let reports: AgentPathReport[] | undefined = [];
   for (const [index, input] of inputs.entries()) {
     const at = inputs.length > 1 ? `input ${index}: ` : "";
     let report;
@@ -373,8 +412,10 @@ async function checkExplore(
       report = await explorePaths(machine, { ...rest, input });
     } catch (error) {
       problems.add(`${at}exploration threw: ${errorMessage(error)}`);
+      reports = undefined;
       continue;
     }
+    reports?.push(report);
     for (const terminal of report.terminals) {
       if (allowed.includes(terminal.status)) continue;
       const trail = `path [${terminal.path
@@ -423,7 +464,10 @@ async function checkExplore(
       );
     }
   }
-  return [...problems];
+  return {
+    problems: [...problems],
+    ...(reports ? { reports } : {}),
+  };
 }
 
 // ─── helpers ───
