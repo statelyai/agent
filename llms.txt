@@ -16,6 +16,7 @@ Not v5: transitions are plain functions returning `{ target, context }` (no `ass
 - [Scope and ecosystem boundaries](docs/scope.md): What Stately Agent owns, what the host owns, and where specialized libraries fit.
 - [Agent machines](docs/machines.md): Author an agent machine as a typed XState state machine that decides what your agent can do, while the host executes model calls.
 - [Decisions](docs/decisions.md): Let the model choose one currently-legal machine event, validated and retried by the machine before it is taken. Covers closed choices over concrete events, decision-model executors, and `decideNext` for plain XState machines.
+- [Acting on events](docs/act.md): Let the model send any number of the invoking state's events in one tool loop, each answered with what it changed.
 - [Environment and policy](docs/environment-and-policy.md): Split an agent into a fixed environment that people author and verify, and a policy that a model can write and, experimentally, improve inside it.
 - [Text requests](docs/text-requests.md): Declare typed model calls on an agent machine and invoke them from a state, parsing structured or streamed output.
 - [Tools](docs/tools.md): Define tools, attach them to a text request, and let the host run the tool loop while the machine stays in one state.

@@ -288,7 +288,7 @@ async function readRun(
     }
   } catch (error) {
     // The failed turn was a call too.
-    throw withModelCalls(error, summary.modelCalls + 1);
+    throw withModelCalls(error, summary.modelCalls + 1, summary.usage);
   }
   const invalid = new Set<string>();
   for (const { part, json } of args.values()) {

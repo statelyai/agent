@@ -2,6 +2,8 @@ import {
   getNextTransitions,
   type AnyMachineSnapshot,
   type AnyStateMachine,
+  type AnyStateNode,
+  type AnyTransitionDefinition,
   type EventFromLogic,
   type EventObject,
   type MachineSnapshot,
@@ -241,13 +243,58 @@ export function getAcceptedEvents(
     actor?: "agent";
   } = {},
 ): AgentEventDescriptor[] {
-  const eventTypes = options.eventTypes;
   const humanEventTypes: ReadonlySet<string> =
     options.actor === "agent" ? getHumanEventTypes(snapshot) : new Set();
+  return describeEventTransitions(getNextTransitions(snapshot), humanEventTypes, options);
+}
+
+/**
+ * The events an `agent.act` invoke offers as tools: what the snapshot accepts
+ * now, plus every event the invoking state node can accept while it stays
+ * active (its own and its ancestors' handlers, and all of its descendants').
+ * An event is left out when every one of those handlers is tagged
+ * `meta: { actor: "human" }`. Filters and tool names match
+ * {@link getAcceptedEvents}. @internal
+ */
+export function getActEvents(
+  snapshot: AnyMachineSnapshot,
+  invokeId: string,
+  options: Pick<AgentRequestOptions, "events" | "schemas"> & {
+    eventTypes?: readonly string[];
+  } = {},
+): AgentEventDescriptor[] {
+  const transitions = [...getNextTransitions(snapshot)];
+  const node = snapshot.nodes.find((stateNode) =>
+    stateNode.invoke.some((invoke) => invoke.id === invokeId),
+  );
+  const collect = (stateNode: AnyStateNode, descend: boolean): void => {
+    for (const list of stateNode.transitions.values()) transitions.push(...list);
+    if (descend) for (const child of Object.values(stateNode.states)) collect(child, true);
+  };
+  if (node) {
+    collect(node, true);
+    for (let parent = node.parent; parent; parent = parent.parent) collect(parent, false);
+  }
+  const humanOnly = new Set<string>();
+  const agentSendable = new Set<string>();
+  for (const transition of transitions) {
+    const human = (transition.meta as { actor?: unknown } | undefined)?.actor === "human";
+    (human ? humanOnly : agentSendable).add(transition.eventType);
+  }
+  for (const eventType of agentSendable) humanOnly.delete(eventType);
+  return describeEventTransitions(transitions, humanOnly, options);
+}
+
+function describeEventTransitions(
+  transitions: readonly AnyTransitionDefinition[],
+  excludedEventTypes: ReadonlySet<string>,
+  options: Pick<AgentRequestOptions, "events" | "schemas"> & { eventTypes?: readonly string[] },
+): AgentEventDescriptor[] {
+  const eventTypes = options.eventTypes;
   const seen = new Set<string>();
   const usedToolNames = new Set<string>();
 
-  return getNextTransitions(snapshot).flatMap((transitionDefinition) => {
+  return transitions.flatMap((transitionDefinition) => {
     const eventType = transitionDefinition.eventType;
 
     if (
@@ -255,7 +302,7 @@ export function getAcceptedEvents(
       eventType === "*" ||
       eventType.startsWith("xstate.") ||
       isReservedAgentEvent(eventType) ||
-      humanEventTypes.has(eventType) ||
+      excludedEventTypes.has(eventType) ||
       (eventTypes && !eventTypes.some((pattern) => matchesEventPattern(eventType, pattern))) ||
       seen.has(eventType)
     ) {

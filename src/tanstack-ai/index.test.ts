@@ -308,6 +308,22 @@ describe("createTanStackAiExecutors — tools", () => {
     });
   });
 
+  test("a loop that fails after a turn reports the calls it made and their usage on the error", async () => {
+    const adapter = new FakeTextAdapter([
+      { toolCalls: [{ name: "lookup", input: { city: "Oslo" } }] },
+      { error: { message: "upstream down" } },
+    ]);
+    const { generateText } = createTanStackAiExecutors({ models: { quick: adapter } });
+
+    await expect(
+      generateText(textRequest({ tools: { lookup } as unknown as AgentTools, maxSteps: 2 })),
+    ).rejects.toMatchObject({
+      message: "upstream down",
+      modelCalls: 2,
+      usage: { inputTokens: 5, outputTokens: 2, totalTokens: 7 },
+    });
+  });
+
   test("without maxSteps the run is a single model turn", async () => {
     const adapter = new FakeTextAdapter([
       { toolCalls: [{ name: "lookup", input: { city: "Oslo" } }] },

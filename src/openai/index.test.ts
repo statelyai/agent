@@ -785,10 +785,12 @@ describe("createOpenAiExecutors: tool loop", () => {
     },
   } as unknown as AgentTools;
 
-  test("a loop that fails after a step reports the calls it made on the error", async () => {
+  test("a loop that fails after a step reports the calls it made and their usage on the error", async () => {
     const create = vi.fn(async (_params: any) => {
       if (create.mock.calls.length === 1) {
-        return responseWith([functionCallOutput("lookup", { q: "cats" })]);
+        return responseWith([functionCallOutput("lookup", { q: "cats" })], {
+          usage: { input_tokens: 10, output_tokens: 5, total_tokens: 15 },
+        });
       }
       throw new Error("upstream down");
     });
@@ -797,6 +799,7 @@ describe("createOpenAiExecutors: tool loop", () => {
     await expect(generateText(textRequest({ tools, maxSteps: 4 } as never))).rejects.toMatchObject({
       message: "upstream down",
       modelCalls: 2,
+      usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
     });
   });
 

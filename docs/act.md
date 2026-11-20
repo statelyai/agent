@@ -1,13 +1,13 @@
 ---
 title: Acting on events
-description: Let the model send any number of the current state's accepted events in one tool loop, each answered with what it changed.
+description: Let the model send any number of the invoking state's events in one tool loop, each answered with what it changed.
 ---
 
 > **Alpha:** `@statelyai/agent` 2.0 is in alpha. APIs can change between releases; pin an exact version. Feedback: [github.com/statelyai/agent](https://github.com/statelyai/agent/issues).
 
 ## Overview
 
-`agent.act` is a builtin invoke that runs one `generateText` request with a host-side tool loop. Its tools are the invoking state's accepted events, plus any plain `tools`. The loop may make multiple provider model calls. The model calls the tools in any order, zero or more times, and each call is delivered to the machine.
+`agent.act` is a builtin invoke that runs one `generateText` request with a host-side tool loop. Its tools are the events the invoking state and its descendants accept, plus any plain `tools`. The loop may make multiple provider model calls. The model calls the tools in any order, zero or more times, and each call is delivered to the machine.
 
 - `agent.decide` sends exactly one event per decision. See [Decisions](decisions.md).
 - `agent.act` sends zero to many events, and sees the result of each one before it calls the next.
@@ -62,23 +62,24 @@ The model sees two tools, one for `ADD` and one for `CHECKOUT`. It calls `ADD` t
 
 ## Input
 
-| Field                                                                                 | Description                                                                                       |
-| ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| `model`                                                                               | Model ref. Required.                                                                              |
-| `name`                                                                                | Semantic request identity. Defaults to the invoke id.                                             |
-| `system`, `prompt`, `messages`                                                        | Same as a text request. See [Text requests](text-requests.md).                                    |
-| `allowedEvents`                                                                       | Event types offered as tools, intersected with what the state accepts. Omitted means all of them. |
-| `tools`                                                                               | Plain tools offered beside the event tools. See [Tools](tools.md).                                |
-| `maxSteps`                                                                            | Bound on the host's tool loop. Default `DEFAULT_ACT_MAX_STEPS` (20).                              |
-| `temperature`, `maxOutputTokens`, `topP`, `topK`, `seed`, `stopSequences`, `metadata` | Passed through to the request.                                                                    |
+| Field                                                                                 | Description                                                                                |
+| ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `model`                                                                               | Model ref. Required.                                                                       |
+| `name`                                                                                | Semantic request identity. Defaults to the invoke id.                                      |
+| `system`, `prompt`, `messages`                                                        | Same as a text request. See [Text requests](text-requests.md).                             |
+| `allowedEvents`                                                                       | Event types offered as tools, intersected with the event tools. Omitted means all of them. |
+| `tools`                                                                               | Plain tools offered beside the event tools. See [Tools](tools.md).                         |
+| `maxSteps`                                                                            | Bound on the host's tool loop. Default `DEFAULT_ACT_MAX_STEPS` (20).                       |
+| `temperature`, `maxOutputTokens`, `topP`, `topK`, `seed`, `stopSequences`, `metadata` | Passed through to the request.                                                             |
 
 ## Event tools
 
-- Each accepted event becomes one tool. The tool name is the event's tool name, and its input is the event's payload schema.
-- Events tagged `meta: { actor: "human" }` are never offered. See [Events a person sends](decisions.md#events-a-person-sends).
+- Each event the invoking state can accept while it stays active becomes one tool named `send_event_<TYPE>`. Its input is the event's payload schema.
+- That covers the handlers on the invoking state, on its ancestors, and on all of its descendants, plus whatever the snapshot accepts when the invoke starts. An event that only a later sub-state accepts is offered from the first step.
+- An event is not offered when every handler for it in that scope is tagged `meta: { actor: "human" }`. See [Events a person sends](decisions.md#events-a-person-sends).
 - Calls run one at a time, in call order, even when the host runs tools concurrently.
 - A payload that fails the event's schema answers with the validation error. Nothing is sent.
-- An event the current snapshot does not accept answers `'<type>' is not allowed in state <value>`. Nothing is sent.
+- An event the current snapshot does not accept answers `'<type>' is not allowed in state <value>`. Nothing is sent. This includes an event a later sub-state accepts but the current one does not.
 - An accepted event is sent to the machine. The call waits for the transition to commit, then answers with a delta: `{ state }` when the state value changed, and `changed` with each context key that changed (values truncated to 120 characters).
 
 ## When the loop ends
@@ -90,6 +91,7 @@ The model sees two tools, one for `ADD` and one for `CHECKOUT`. It calls `ADD` t
 
 - `agent.act` runs on the `generateText` executor, as one text request carrying the event tools. Any adapter with a host-side tool loop runs it. See [Hosts](hosts.md).
 - Usage, the model-call budget, and traces count it like any text request. See [Usage and budgets](usage-and-budgets.md).
+- Usage counts every provider request the loop made and the tokens of every response it received, including when a state exit ends the loop. The run waits for the aborted executor to settle before it finishes.
 - Events it sends are journaled like any delivered event, in delivery order. See [The event log](event-log.md).
 - `lintAgentMachine` reports `decide-allows-human-event` when its literal `allowedEvents` names a human-tagged event.
 

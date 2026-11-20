@@ -13,6 +13,7 @@ import {
   type FlexibleSchema,
   type JSONValue,
   type LanguageModel,
+  type LanguageModelCallEndEvent,
   type LanguageModelCallStartEvent,
   type LanguageModelUsage,
   type ModelMessage,
@@ -24,6 +25,7 @@ import type { AnyStateMachine } from "xstate";
 import { resolveModelSource } from "../internal/model-source.js";
 import {
   providerOutputSchema,
+  type AgentCallUsage,
   type AgentFinishReason,
   type AgentRequestExecutorInfo,
   type AgentTextRequest,
@@ -45,7 +47,7 @@ import {
 } from "../internal/decision-object.js";
 import { isRecord } from "../internal/is-record.js";
 import { rejectedAnswer } from "../internal/rejected-answer.js";
-import { withModelCalls } from "../internal/with-model-calls.js";
+import { addCallUsage, withModelCalls } from "../internal/with-model-calls.js";
 import type { AgentTools, ChosenEvent } from "../types.js";
 import {
   defined,
@@ -401,6 +403,7 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
     const settings = { ...callSettings(options, request), ...defined(modelSettings ?? {}) };
     // Counted for a request that throws: `steps` only exists on a result.
     let calls = 0;
+    let received: AgentCallUsage | undefined;
     const common = {
       model,
       abortSignal: info?.signal,
@@ -409,6 +412,10 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
       onLanguageModelCallStart: (event: LanguageModelCallStartEvent) => {
         calls++;
         return settings.onLanguageModelCallStart?.(event);
+      },
+      onLanguageModelCallEnd: (event: LanguageModelCallEndEvent) => {
+        received = addCallUsage(received, toAgentCallUsage(event.usage));
+        return settings.onLanguageModelCallEnd?.(event);
       },
       ...toAiSdkCallSettings(request),
       ...maxStepsSetting(request),
@@ -479,7 +486,7 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
         raw: result,
       } satisfies AiSdkGenerateResult;
     } catch (error) {
-      throw withModelCalls(error, calls);
+      throw withModelCalls(error, calls, received);
     }
   };
 
@@ -490,6 +497,7 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
     const { model, settings: modelSettings } = resolveLanguageModel(options, request);
     const settings = { ...callSettings(options, request), ...defined(modelSettings ?? {}) };
     let calls = 0;
+    let received: AgentCallUsage | undefined;
     const result = aiStreamText({
       model,
       abortSignal: info?.signal,
@@ -498,6 +506,10 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
       onLanguageModelCallStart: (event) => {
         calls++;
         return settings.onLanguageModelCallStart?.(event);
+      },
+      onLanguageModelCallEnd: (event) => {
+        received = addCallUsage(received, toAgentCallUsage(event.usage));
+        return settings.onLanguageModelCallEnd?.(event);
       },
       ...toAiSdkCallSettings(request),
       ...maxStepsSetting(request),
@@ -516,7 +528,7 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
         raw: result,
       } satisfies AiSdkStreamResult;
     } catch (error) {
-      throw withModelCalls(error, calls);
+      throw withModelCalls(error, calls, received);
     }
   };
 
