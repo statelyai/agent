@@ -1026,7 +1026,12 @@ describe("verifyAgentConfig config graph checks", () => {
 
     // Without it, the move exits region `a` only and `c` stays stuck.
     config.states.p.states.b.states.idle = { on: { JUMP: { target: "#m.p.a.finished" } } };
-    const detail = lintGate(await verifyAgentConfig(config, { compileSchema }))!.detail!;
+    let detail = lintGate(await verifyAgentConfig(config, { compileSchema }))!.detail!;
+    expect(detail).toContain("state-cannot-finish at 'p.c.stuck'");
+
+    // A reentering move inside its own region has that region as its domain.
+    config.states.p.states.b.states.idle = { on: { JUMP: { target: "idle", reenter: true } } };
+    detail = lintGate(await verifyAgentConfig(config, { compileSchema }))!.detail!;
     expect(detail).toContain("state-cannot-finish at 'p.c.stuck'");
   });
 

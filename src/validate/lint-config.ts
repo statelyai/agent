@@ -281,7 +281,8 @@ function finishingStates(
   // A transition from a state in another region of a parallel ancestor moves
   // this state when it leaves the parallel state, targets the parallel state
   // itself (which reenters every region), targets this state's own region, or
-  // sets `reenter: true` (its domain is then the whole parallel state). One
+  // sets `reenter: true` with a target outside its own region (its domain is
+  // then the whole parallel state). One
   // that targets a third region without `reenter` leaves this region where it is.
   const siblingRegionExits = (node: GraphNode): boolean =>
     ancestors(node).some(
@@ -298,7 +299,7 @@ function finishingStates(
                     (target === at.parent ||
                       !within(target, at.parent!) ||
                       within(target, at) ||
-                      !!edges.reenter.get(state)?.has(target)) &&
+                      (!within(target, region) && !!edges.reenter.get(state)?.has(target))) &&
                     live.has(target),
                 ),
             ),
