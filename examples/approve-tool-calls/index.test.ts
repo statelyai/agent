@@ -1,5 +1,7 @@
 import { describe, expect, test } from "vitest";
+import { runAgent } from "@statelyai/agent";
 import { canReach } from "@statelyai/agent/testing";
+import { createAsyncLogic } from "xstate";
 import {
   approveToolCallsMachine,
   runApproveToolCallsExample,
@@ -77,6 +79,22 @@ describe("approve-tool-calls", () => {
       }),
     ).rejects.toThrow();
     expect(ran).toEqual([]);
+  });
+
+  test("an approve-always rule holds its own copy of the arguments", async () => {
+    // Development builds freeze context; production builds do not. Without a
+    // copy, a runner that mutates its input would change what was approved.
+    const paused = await runAgent(approveToolCallsMachine, {
+      input: { calls: [{ id: "w1", tool: "writeFile", args: { path: "a", dryRun: true } }] },
+    });
+    const result = await runAgent(approveToolCallsMachine, {
+      snapshot: paused.persist(),
+      event: { type: "APPROVE_ALWAYS" },
+      actors: { runTool: createAsyncLogic({ run: async () => "ok" }) },
+    });
+    const { calls, rules } = result.snapshot.context;
+    expect(rules).toEqual([{ tool: "writeFile", args: { path: "a", dryRun: true } }]);
+    expect(rules[0]!.args).not.toBe(calls[0]!.args);
   });
 
   test("calls run in proposal order and a failure does not stop the batch", async () => {
