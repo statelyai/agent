@@ -251,15 +251,16 @@ A tool with `needsApproval: true` comes back from `generateText` unexecuted, as 
 ```ts no-check
 import { generateText, type ModelMessage } from "ai";
 
-/** A plain JSON value. A `Date`, `Set`, `Map`, or `BigInt` has no exact JSON form. */
-function isJson(value: unknown): boolean {
+/** A plain JSON value. A `Date`, `Set`, `Map`, `BigInt`, or cycle has no exact JSON form. */
+function isJson(value: unknown, parents: object[] = []): boolean {
   if (value === null || typeof value === "string" || typeof value === "boolean") return true;
   if (typeof value === "number") return Number.isFinite(value);
-  if (Array.isArray(value)) return Array.from(value).every(isJson);
+  if (typeof value !== "object" || parents.includes(value)) return false;
+  const inner = [...parents, value];
+  if (Array.isArray(value)) return Array.from(value).every((item) => isJson(item, inner));
   return (
-    typeof value === "object" &&
     Object.getPrototypeOf(value) === Object.prototype &&
-    Object.values(value).every(isJson)
+    Object.values(value).every((item) => isJson(item, inner))
   );
 }
 
