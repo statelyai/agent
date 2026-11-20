@@ -1,7 +1,12 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
-import { createActor } from "xstate";
-import { AgentInvalidEventPayloadError, parseAgentEvent, setupAgent } from "./index.js";
+import { createActor, createMachine } from "xstate";
+import {
+  AgentInvalidEventPayloadError,
+  getAcceptedEvents,
+  parseAgentEvent,
+  setupAgent,
+} from "./index.js";
 
 const agent = setupAgent({
   context: z.object({}),
@@ -68,5 +73,48 @@ describe("parseAgentEvent", () => {
       AgentInvalidEventPayloadError,
     );
     expect(() => parseAgentEvent(machine, { text: "hi" })).toThrow(AgentInvalidEventPayloadError);
+  });
+});
+
+describe("getAcceptedEvents with a wildcard handler", () => {
+  const wildcard = (events: Record<string, z.ZodType>) =>
+    createActor(
+      createMachine({
+        schemas: { events },
+        initial: "open",
+        states: { open: { on: { "desk.*": { target: "open" } } } },
+      }),
+    )
+      .start()
+      .getSnapshot();
+
+  test("expands to the registered types the handler matches, by xstate's rule", () => {
+    const snapshot = wildcard({
+      desk: z.object({}),
+      "desk.refund": z.object({ amount: z.number() }),
+      "desk.case.close": z.object({}),
+      desktop: z.object({}),
+      other: z.object({}),
+    });
+
+    const types = getAcceptedEvents(snapshot).map((event) => event.type);
+
+    expect(types).toEqual(["desk", "desk.refund", "desk.case.close"]);
+    expect(types.every((type) => snapshot.can({ type }))).toBe(true);
+    expect(snapshot.can({ type: "desktop" })).toBe(false);
+  });
+
+  test("narrows the expansion with `eventTypes`", () => {
+    const snapshot = wildcard({ "desk.refund": z.object({}), "desk.close": z.object({}) });
+
+    expect(
+      getAcceptedEvents(snapshot, { eventTypes: ["desk.close"] }).map((event) => event.type),
+    ).toEqual(["desk.close"]);
+  });
+
+  test("keeps the pattern when no registered type matches it", () => {
+    const snapshot = wildcard({ other: z.object({}) });
+
+    expect(getAcceptedEvents(snapshot).map((event) => event.type)).toEqual(["desk.*"]);
   });
 });

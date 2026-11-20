@@ -96,6 +96,24 @@ function matchesEventPattern(eventType: string, pattern: string): boolean {
 }
 
 /**
+ * True when xstate routes `eventType` to a transition keyed `descriptor`: the
+ * same rule as xstate's own (unexported) `matchesEventDescriptor`. `'desk.*'`
+ * matches `'desk'`, `'desk.refund'` and `'desk.case.close'`; `'*'` matches
+ * every type.
+ */
+function matchesHandlerDescriptor(eventType: string, descriptor: string): boolean {
+  if (descriptor === eventType || descriptor === "*") return true;
+  if (!descriptor.endsWith(".*")) return false;
+  const descriptorTokens = descriptor.split(".");
+  const eventTokens = eventType.split(".");
+  for (let index = 0; index < descriptorTokens.length; index++) {
+    if (descriptorTokens[index] === "*") return index === descriptorTokens.length - 1;
+    if (descriptorTokens[index] !== eventTokens[index]) return false;
+  }
+  return true;
+}
+
+/**
  * Event types reserved for delivery by the library (`@agent.*`). A machine
  * may declare transitions on them,
  * but they are never model-facing: {@link getAcceptedEvents} drops them before
@@ -231,6 +249,11 @@ export function parseAgentEvent<TSource extends AnyStateMachine | AnyMachineSnap
  * any `allowedEvents` matching — a machine that handles `'@agent.usage'` still
  * never offers it to a model.
  *
+ * A partial wildcard handler (`on: { 'desk.*': ... }`) lists the event types
+ * registered in `events`/`schemas` (else the machine's own event schemas) that
+ * it matches, by xstate's rule; with none registered, it lists the pattern
+ * itself, which a model cannot choose.
+ *
  * Pass `actor: "agent"` for the list a model may choose from: it also drops an
  * event the state handles through a transition tagged `meta: { actor: "human" }`.
  */
@@ -247,14 +270,24 @@ export function getAcceptedEvents(
   const seen = new Set<string>();
   const usedToolNames = new Set<string>();
 
-  return getNextTransitions(snapshot).flatMap((transitionDefinition) => {
-    const eventType = transitionDefinition.eventType;
+  const schemas = options.events ?? options.schemas?.events;
 
+  return getNextTransitions(snapshot).flatMap((transitionDefinition) => {
+    const handlerType = transitionDefinition.eventType;
+    if (!handlerType) return [];
+    // A wildcard transition tagged `meta: { actor: "human" }` covers what it expands to.
+    const humanHandler = humanEventTypes.has(handlerType);
+    return expandHandlerType(snapshot, handlerType, schemas).flatMap((eventType) =>
+      describeAcceptedEvent(eventType, humanHandler),
+    );
+  });
+
+  function describeAcceptedEvent(eventType: string, humanHandler: boolean): AgentEventDescriptor[] {
     if (
-      !eventType ||
       eventType === "*" ||
       eventType.startsWith("xstate.") ||
       isReservedAgentEvent(eventType) ||
+      humanHandler ||
       humanEventTypes.has(eventType) ||
       (eventTypes && !eventTypes.some((pattern) => matchesEventPattern(eventType, pattern))) ||
       seen.has(eventType)
@@ -266,7 +299,7 @@ export function getAcceptedEvents(
     const defaultToolName = sanitizeEventToolName(eventType);
     const toolName = disambiguateEventToolName(defaultToolName, eventType, usedToolNames);
 
-    const inputSchema = (options.events ?? options.schemas?.events)?.[eventType];
+    const inputSchema = schemas?.[eventType];
 
     return [
       {
@@ -275,7 +308,28 @@ export function getAcceptedEvents(
         ...(inputSchema ? { inputSchema } : {}),
       },
     ];
-  });
+  }
+}
+
+/**
+ * The event types a handler keyed `handlerType` accepts: a partial wildcard
+ * (`'desk.*'`) stands for the registered event types it matches, read from
+ * `schemas`, else the machine's own. With none registered, or for any other
+ * handler, the key itself.
+ */
+function expandHandlerType(
+  snapshot: AnyMachineSnapshot,
+  handlerType: string,
+  schemas?: Record<string, unknown>,
+): string[] {
+  if (handlerType === "*" || !handlerType.endsWith(".*")) return [handlerType];
+  const registered = Object.keys(
+    schemas ?? (snapshot.machine.schemas?.events as Record<string, unknown> | undefined) ?? {},
+  );
+  const matched = registered.filter(
+    (type) => !isEventPattern(type) && matchesHandlerDescriptor(type, handlerType),
+  );
+  return matched.length ? matched : [handlerType];
 }
 
 /**
@@ -290,6 +344,7 @@ export function getHumanEventTypes(snapshot: AnyMachineSnapshot): ReadonlySet<st
     for (const transition of getNextTransitions(snapshot)) {
       if ((transition.meta as { actor?: unknown } | undefined)?.actor === "human") {
         types.add(transition.eventType);
+        for (const type of expandHandlerType(snapshot, transition.eventType)) types.add(type);
       }
     }
     humanEventTypesBySnapshot.set(snapshot, types);

@@ -39,7 +39,12 @@ import {
   resolveMachineVersion,
   validateSchemaSync,
 } from "./utils.js";
-import { getAcceptedEvents, getHumanEventTypes, type AgentSchemas } from "./events.js";
+import {
+  getAcceptedEvents,
+  getHumanEventTypes,
+  isEventPattern,
+  type AgentSchemas,
+} from "./events.js";
 import {
   GENERATE_TEXT_ACTOR,
   getCallFinishReason,
@@ -1861,9 +1866,27 @@ function bindDecisionLogic(logic: DecisionLogic, runCtx: RunAgentBindContext): D
       }
       // After the options: a closed choice builds them from `events`, so a
       // person's event still lands in `withheld`.
+      // A pattern left unexpanded (no registered type matches it) is no event a model can send.
       if (actorRef) {
         const humanEventTypes = getHumanEventTypes(actorRef.getSnapshot() as AnyMachineSnapshot);
-        request.events = events.filter((event) => !humanEventTypes.has(event.type));
+        request.events = events.filter(
+          (event) => !humanEventTypes.has(event.type) && !isEventPattern(event.type),
+        );
+      }
+      // No candidate at all: say why, rather than exhaust with no attempts.
+      if (actorRef && request.events.length === 0) {
+        const allowed = declaredEventTypes?.map((type) => `'${type}'`).join(", ") ?? "any";
+        // The same error as exhausted retries, so a host branching on
+        // `decision-exhausted` keeps handling it; the message says why.
+        const error = new AgentDecisionExhaustedError([]);
+        error.message =
+          `Decision '${request.name}' has no event to offer: the current state accepts no event ` +
+          `type matching allowedEvents (${allowed}) that a model may send; no model call was made. ` +
+          "A wildcard handler such as `on: { 'desk.*': ... }` accepts only the matching event " +
+          "types registered in the machine's event schemas.";
+        runCtx.emitTrace?.({ type: "request.start", request }, self);
+        runCtx.emitTrace?.({ type: "request.error", request, error }, self);
+        throw error;
       }
       // Nothing to choose from: fail without a model call, the same way
       // exhausted retries fail, so the invoke's onError handles it.

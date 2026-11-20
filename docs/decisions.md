@@ -65,6 +65,10 @@ The `allowedEvents` option accepts a single string or an array. Entries are exac
 | `'*'`              | Every currently-legal event.                                                                                                                                                                        |
 | `'todo.*'`         | Every declared event under the `todo.` namespace, such as `todo.add` and `todo.toggle`. Typed against declared dotted types, so a pattern matching nothing, such as `'nope.*'`, is a compile error. |
 
+A state can handle a namespace with one wildcard handler, as in `on: { 'desk.*': ... }`. That handler's candidates are the event types registered in the machine's event schemas that it matches, by xstate's matching rule: `'desk.*'` matches `desk`, `desk.refund`, and `desk.case.close`. A type with no registered schema is never a candidate.
+
+A decision with no candidate fails before any model call with `AgentDecisionExhaustedError` (code `decision-exhausted`, no attempts). Its message names the `allowedEvents` and the wildcard-handler rule. The invoke's `onError` handles it.
+
 ### Reusable decision logic
 
 <!-- createDecisionLogic public API from src/decision.ts and src/index.ts -->
@@ -385,11 +389,12 @@ await runAgent(deskMachine, { input, executors: { ...modelExecutors, decide } })
 
 - Each decision request starts one run of the policy. Its output, an event, is the choice. The environment still judges it: an event it does not accept is retried like any decider's.
 - The policy's input defaults to `{ facts, options, system, prompt }`: the request's `metadata.facts`, the offered events, and its prompt. The policy's input schema validates it. Pass `input: (request) => ...` to build it another way.
+- `facts` comes from the caller's `metadata`. Under `agent.decide`, it is the invoke input's `metadata.facts`. Under [`decideNext`](#decisions-at-the-boundary-of-a-plain-machine), it is the `metadata.facts` option. A caller that sets no `metadata` leaves `facts` out of the input, so a policy whose input schema requires `facts` fails validation.
 - The policy's own `agent.decide` invokes are answered by `executors`. Pass the environment's `metadata` on to them, so the model sees what it would without the policy.
 - The result carries the policy's token usage, and none when it decided with a rule.
 - A run that does not end `done` with an event throws `AgentError` with code `policy-not-done`. Give each of the policy's decisions an `onError` that falls back to an event the environment always accepts.
 - Every other `runAgent` option passes through: `store` and `metadata` to journal the policy's runs, `onTrace` to trace them.
-- Each decision's policy run gets its own `store` thread, `policy:${info.callKey}:${hash}` by default, where `hash` is the SHA-256 of the policy input: a thread that already has entries is resumed, so a shared one would return an earlier choice. The hash keeps a machine that asks something else at the same call site after a version bridge, which keeps the call key, off the earlier thread. Pass `threadId: (request, info) => ...` to name them yourself; it is required with a `store` when the decider is called without a `callKey`.
+- Each decision's policy run gets its own `store` thread, `policy:${info.callKey}:${hash}` by default, where `hash` is the SHA-256 of the policy input: a thread that already has entries is resumed, so a shared one would return an earlier choice. The hash keeps a machine that asks something else at the same call site after a version bridge, which keeps the call key, off the earlier thread. Pass `threadId: (request, info) => ...` to name them yourself; it is required with a `store` when the decider is called without a `callKey`. Under `agent.decide`, the runtime supplies the call key. Under `decideNext`, pass the `callKey` option.
 - The policy's input must be JSON, since it opens the run's event log. The default drops keys whose value is `undefined`; any other value that is not JSON throws before the run.
 
 To route by request name, wrap it: `decide: (request, info) => (request.name === "chooseResolution" ? policyDecide(request, info) : modelExecutors.decide!(request, info))`, where `policyDecide` is the executor `createPolicyDecider` returned.
@@ -398,13 +403,15 @@ To route by request name, wrap it: `decide: (request, info) => (request.name ===
 
 A machine does not have to know about AI. `decideNext` asks a model to pick one event that a plain XState machine accepts right now, built with `createMachine` or `setup`, with no `agent.*` invoke anywhere.
 
-- `allowedEvents`: exact types or wildcards such as `'desk.*'`. Candidates are the matching events an active state handles.
+- `allowedEvents`: exact types or wildcards such as `'desk.*'`. Candidates are the matching events an active state handles. A wildcard handler contributes the registered event types it matches, as under [`agent.decide`](#allowedevents-patterns).
 - `payloads` (optional): a function of the snapshot returning payloads per event type, as in a closed choice. A candidate type with no key is offered bare, as `{ type }`. An empty list offers nothing for that type, so `{ "desk.escalate": [] }` withholds it.
 - Options are kept only where `snapshot.can(event)` is true. Each one is described by its transition's `description`, else its event schema's description.
 - `lookahead` (optional): appends what each option changes, computed with xstate's pure `transition()`: the state value and the changed top-level context keys.
   - `true` reports every changed key.
   - An array of context keys reports only those keys. A state value change is always reported.
   - Each reported value is cut at 120 characters.
+- `metadata` (optional): passed through as `request.metadata`, as `agent.decide` input's `metadata` is. A [policy decider](#a-policy-as-the-decider) reads its default `facts` from `metadata.facts`.
+- `callKey` (optional): the decision's idempotency key. Give each decision its own key, and the same key when a crashed host asks the same decision again. Each attempt's executor `info.callKey` is `${callKey}.${attempt}`, as under `agent.decide`. A policy decider with a `store` names each policy thread from it. With no `callKey`, the executor gets none.
 - With no options, it returns `{ event: null }` without calling the executor.
 - It never sends. The host sends the event, after checking `can` again, because the actor may have moved while the model was choosing.
 

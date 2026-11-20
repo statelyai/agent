@@ -39,6 +39,19 @@ export interface DecideNextOptions<TSnapshot extends AnyMachineSnapshot = AnyMac
   /** Semantic request name, for traces and scripted executors. Default `'decideNext'`. */
   name?: string;
   /**
+   * Passed through as `request.metadata`, as `agent.decide` input's
+   * `metadata` is. {@link createPolicyDecider}'s default policy input reads
+   * `metadata.facts`.
+   */
+  metadata?: Record<string, unknown>;
+  /**
+   * The decision's idempotency key, unique per decision and the same when a
+   * crashed host asks again. Each attempt's executor `info.callKey` is
+   * `${callKey}.${attempt}`, as under `agent.decide`. {@link createPolicyDecider}
+   * with a `store` names each policy thread from it. Default: none.
+   */
+  callKey?: string;
+  /**
    * Describe what each option changes: the state value and the changed
    * top-level context keys, computed with xstate's pure `transition()`.
    * An array limits which context keys are reported (a state value change is
@@ -147,6 +160,7 @@ export async function decideNext<TSnapshot extends AnyMachineSnapshot>(
     system: options.system,
     prompt: options.prompt,
     input: { value: snapshot.value, context: snapshot.context },
+    ...(options.metadata !== undefined ? { metadata: options.metadata } : {}),
     events,
     options: offered,
     withheld,
@@ -173,6 +187,7 @@ export async function decideNext<TSnapshot extends AnyMachineSnapshot>(
       maxRetries: options.maxRetries,
       signal: options.signal,
       canTake: (chosen) => safeCan(snapshot, chosen),
+      ...(options.callKey !== undefined ? { callKey: options.callKey } : {}),
     },
   );
   return { event: event as EventFromSnapshot<TSnapshot>, attempts, request, withheld };
