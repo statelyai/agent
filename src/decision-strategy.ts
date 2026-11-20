@@ -8,16 +8,17 @@ import { AgentError } from "./errors.js";
 import { sanitizeEventToolName, type AgentEventDescriptor } from "./events.js";
 import { isRecord } from "./internal/is-record.js";
 import type { AgentRequestExecutor, AgentRequestExecutorInfo } from "./text-logic.js";
-import type { ChosenEvent } from "./types.js";
-import { getJsonSchemaSync, userMessage } from "./utils.js";
+import type { ChosenEvent, StandardSchemaV1 } from "./types.js";
+import { getJsonSchemaSync, schemaDescription, userMessage } from "./utils.js";
 
 /**
  * How a decision is split into model calls:
  * - `'direct'`: one decide call over every candidate event.
  * - `'pick-then-fill'`: pick the event type first (a closed choice over bare
- *   `{ type }` options), then fill its payload: nothing to fill, a second
- *   closed choice over the enumerated payloads when every field is finite,
- *   else a structured `generateText` call with `fillModel`.
+ *   `{ type }` options, each described by its option or event schema), then
+ *   fill its payload: nothing to fill, a second closed choice over the
+ *   enumerated payloads when every field is finite, else a structured
+ *   `generateText` call with `fillModel`.
  * - `'grouped'`: pick a group of event types, then decide within it.
  * - `'auto'` (default): `'pick-then-fill'` with a `fillModel`; `'grouped'` over
  *   more than {@link GROUPED_EVENT_THRESHOLD} events in at least two groups;
@@ -235,11 +236,18 @@ function groupedDecide({ decide }: DecisionStrategyExecutors): AgentDecisionExec
 function pickThenFillDecide(executors: DecisionStrategyExecutors): AgentDecisionExecutor {
   return async (request, info) => {
     const types = candidateTypes(request);
+    // A bare `{ type }` option's description, else the event schema's.
     const descriptions = new Map(
-      (request.options ?? [])
-        .filter((option) => Object.keys(option.event).length === 1 && option.description)
-        .map((option) => [option.event.type, option.description!]),
+      request.events.flatMap((event) => {
+        const description = schemaDescription(event.inputSchema);
+        return description ? [[event.type, description] as const] : [];
+      }),
     );
+    for (const option of request.options ?? []) {
+      if (Object.keys(option.event).length === 1 && option.description) {
+        descriptions.set(option.event.type, option.description);
+      }
+    }
     let type: string;
     if (types.length === 1) {
       type = types[0]!;
@@ -329,7 +337,9 @@ async function fillWithModel(
               .filter((part) => part !== undefined)
               .join("\n\n"),
           }),
-      outputSchema: descriptor.inputSchema,
+      // `resolveDecision` validates the payload, so a fill that fails the
+      // schema is a retried 'invalid-payload' attempt, not a thrown error.
+      outputSchema: unvalidated(descriptor.inputSchema!),
       tools: {},
       ...(request.metadata !== undefined ? { metadata: request.metadata } : {}),
     },
@@ -346,4 +356,22 @@ async function fillWithModel(
     };
   }
   return { event: { ...payload, type: descriptor.type } as ChosenEvent };
+}
+
+// `schema`'s JSON Schema, accepting any value: the provider is asked for the
+// schema's shape, and the caller validates the answer.
+function unvalidated(schema: StandardSchemaV1): StandardSchemaV1 {
+  const { jsonSchema } = schema["~standard"] as {
+    jsonSchema?: { input?: (...args: unknown[]) => unknown };
+  };
+  return {
+    "~standard": {
+      version: 1,
+      vendor: "statelyai-agent",
+      validate: (value: unknown) => ({ value }),
+      ...(jsonSchema?.input
+        ? { jsonSchema: { input: (...args: unknown[]) => jsonSchema.input!(...args) } }
+        : {}),
+    },
+  } as StandardSchemaV1;
 }

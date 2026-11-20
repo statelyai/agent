@@ -1,5 +1,5 @@
 import type { AnyMachineSnapshot, AnyStateMachine, StateValue } from "xstate";
-import { isPlainObject } from "./internal/is-record.js";
+import { isPlainObject, isRecord } from "./internal/is-record.js";
 import type {
   AgentMessage,
   AssistantMessage,
@@ -372,6 +372,26 @@ export function getJsonSchemaSync(schema?: StandardSchemaV1): Record<string, unk
   }
   const result = jsonSchemaFn();
   return result instanceof Promise ? undefined : (result as Record<string, unknown> | undefined);
+}
+
+/**
+ * An event schema's description: the schema's own `description` (zod's
+ * `.describe()`), else the `description` of its JSON Schema. @internal
+ */
+export function schemaDescription(schema: StandardSchemaV1 | undefined): string | undefined {
+  if (!schema) return undefined;
+  const direct = (schema as { description?: unknown }).description;
+  if (typeof direct === "string") return direct;
+  try {
+    const json = (
+      schema["~standard"] as {
+        jsonSchema?: { input?: (options: { target: string }) => unknown };
+      }
+    ).jsonSchema?.input?.({ target: "draft-2020-12" });
+    return isRecord(json) && typeof json.description === "string" ? json.description : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**

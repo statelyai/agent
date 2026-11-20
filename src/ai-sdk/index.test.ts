@@ -1709,6 +1709,99 @@ describe("createAiSdkExecutors — decision models in the models map", () => {
     expect(calls).toHaveLength(0);
   });
 
+  describe("pick-then-fill with a fillModel", () => {
+    const payload = z.object({ priority: z.enum(["low", "high"]), summary: z.string() });
+    const routes: AgentDecisionRequest = {
+      kind: "decision",
+      id: "d2",
+      name: "route",
+      model: "judge",
+      prompt: "Route the ticket.",
+      events: [
+        {
+          type: "route.billing",
+          toolName: "send_event_route_billing",
+          inputSchema: payload.describe("Charges and refunds"),
+        },
+        {
+          type: "route.shipping",
+          toolName: "send_event_route_shipping",
+          inputSchema: payload.describe("Deliveries"),
+        },
+      ],
+      strategy: "pick-then-fill",
+      fillModel: "writer",
+      attempts: [],
+    };
+    // A language model that answers each structured call with the next payload.
+    const writer = (payloads: unknown[]) =>
+      new MockLanguageModelV3({
+        doGenerate: async () => ({
+          content: [{ type: "text", text: JSON.stringify({ result: payloads.shift() }) }],
+          finishReason: { unified: "stop", raw: "stop" },
+          usage: {
+            inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
+            outputTokens: { total: 1, text: 1, reasoning: 0 },
+          },
+          warnings: [],
+        }),
+      });
+
+    test("each criterion is the event schema's description", async () => {
+      const { model, calls } = judge("route.billing");
+      const executors = createAiSdkExecutors({
+        models: { judge: model, writer: writer([{ priority: "low", summary: "Refund" }]) },
+      });
+      await resolveDecision(routes, executors);
+      expect((Object.values(calls[0]!.questions)[0] as { criteria: unknown }).criteria).toEqual({
+        "route.billing": "Charges and refunds",
+        "route.shipping": "Deliveries",
+      });
+    });
+
+    test("a fill that fails the event schema is an invalid-payload attempt and is retried", async () => {
+      const { model, calls } = judge("route.billing");
+      const fills = writer([
+        { priority: "urgent" },
+        { priority: "high", summary: "Charged twice" },
+      ]);
+      const executors = createAiSdkExecutors({ models: { judge: model, writer: fills } });
+      const seen: AgentDecisionRequest[] = [];
+      const event = await resolveDecision(routes, {
+        ...executors,
+        decide: (attempt, info) => (seen.push(attempt), executors.decide(attempt, info)),
+      });
+
+      expect(event).toEqual({ type: "route.billing", priority: "high", summary: "Charged twice" });
+      expect(calls).toHaveLength(2);
+      expect(fills.doGenerateCalls).toHaveLength(2);
+      const [attempt] = seen[1]!.attempts;
+      expect(attempt).toMatchObject({
+        failure: "invalid-payload",
+        event: { type: "route.billing", priority: "urgent" },
+      });
+      expect(attempt!.reason).toMatch(/^'route\.billing' payload failed validation: /);
+      // The validation reason is fed back to the next fill.
+      expect(JSON.stringify(fills.doGenerateCalls[1]!.prompt)).toContain(
+        "Your previous choice failed: 'route.billing' payload failed validation",
+      );
+    });
+
+    test("fills that keep failing the event schema exhaust the retries", async () => {
+      const { model } = judge("route.billing");
+      const fills = writer([{ priority: "urgent" }, { priority: "urgent" }]);
+      const executors = createAiSdkExecutors({ models: { judge: model, writer: fills } });
+      const error = await resolveDecision(routes, executors, { maxRetries: 1 }).catch(
+        (e: unknown) => e,
+      );
+      expect(error).toBeInstanceOf(AgentDecisionExhaustedError);
+      expect((error as AgentDecisionExhaustedError).attempts.map((a) => a.failure)).toEqual([
+        "invalid-payload",
+        "invalid-payload",
+      ]);
+    });
+  });
+
   test("types: the models map and setupAgent models accept both kinds", () => {
     const models = {
       desk: new MockLanguageModelV3(),

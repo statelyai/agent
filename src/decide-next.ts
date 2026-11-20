@@ -18,6 +18,7 @@ import type { DecisionStrategy } from "./decision-strategy.js";
 import { isRecord } from "./internal/is-record.js";
 import type { AgentRequestExecutor } from "./text-logic.js";
 import type { ChosenEvent, StandardSchemaV1 } from "./types.js";
+import { schemaDescription } from "./utils.js";
 
 /** Options for {@link decideNext}. */
 export interface DecideNextOptions<TSnapshot extends AnyMachineSnapshot = AnyMachineSnapshot> {
@@ -207,22 +208,6 @@ function describeOption(
     ? describeEffect(snapshot, event, lookahead === true ? undefined : lookahead)
     : undefined;
   return effect ? `${base}. Then: ${effect}` : base;
-}
-
-function schemaDescription(schema: StandardSchemaV1 | undefined): string | undefined {
-  if (!schema) return undefined;
-  const direct = (schema as { description?: unknown }).description;
-  if (typeof direct === "string") return direct;
-  try {
-    const json = (
-      schema["~standard"] as {
-        jsonSchema?: { input?: (options: { target: string }) => unknown };
-      }
-    ).jsonSchema?.input?.({ target: "draft-2020-12" });
-    return isRecord(json) && typeof json.description === "string" ? json.description : undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 function describeEffect(

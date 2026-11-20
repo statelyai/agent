@@ -314,11 +314,16 @@ A **decision strategy** splits one decision into several model calls. Set `strat
 | `'grouped'`        | Pick a group of event types as a closed choice, then one decide call within that group.                                  |
 | `'auto'` (default) | `'pick-then-fill'` when `fillModel` is set; `'grouped'` over more than 24 events in two or more groups; else `'direct'`. |
 
+Picking the type under `'pick-then-fill'`:
+
+- Each `{ type }` option carries a description: a closed choice's bare `{ type }` option description, else the event schema's description (zod's `.describe()`). A decision model gets it as the option's criterion.
+
 Filling a payload under `'pick-then-fill'`:
 
 - An event with no payload fields: no fill call.
 - Every payload field finite (an `enum`, a `const`, a boolean, or a union of those), with at most 32 combinations (`MAX_FINITE_PAYLOADS`): a closed choice over the enumerated payloads, on the same model.
 - Any open field: a structured `generateText` call on `fillModel`, with the event's payload schema as its output schema and `type` fixed. This needs a `generateText` executor.
+- The fill is validated like any answer. A payload that fails the event's schema is an `invalid-payload` attempt, and the retry repeats the pick and the fill with the validation reason fed back.
 - Open fields with no `fillModel` throw `missing-fill-model` at runtime. `verifyAgentConfig` reports it at setup when `strategy: 'pick-then-fill'` is literal.
 
 Groups under `'grouped'`:

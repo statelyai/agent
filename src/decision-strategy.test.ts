@@ -18,6 +18,7 @@ import { createAgentSchemas, setupAgent } from "./setup-agent.js";
 import type { AgentRequestExecutor, AgentRequestExecutorInfo } from "./text-logic.js";
 import type { AgentTraceEvent, ChosenEvent } from "./index.js";
 import { sanitizeEventToolName } from "./events.js";
+import { getJsonSchemaSync, validateSchemaSync } from "./utils.js";
 
 const schemas = {
   "desk.refund": z.object({ amount: z.number(), note: z.string() }),
@@ -84,9 +85,61 @@ describe("decide strategies", () => {
     ]);
     expect(fill!.request).toMatchObject({
       model: "writer",
-      outputSchema: schemas["desk.refund"],
       prompt: "Handle the ticket.\n\nYou chose 'desk.refund'. Write its payload.",
     });
+    // The fill asks for the event schema's shape; resolveDecision validates it.
+    const { outputSchema } = fill!.request as Parameters<AgentRequestExecutor>[0];
+    expect(getJsonSchemaSync(outputSchema)).toEqual(getJsonSchemaSync(schemas["desk.refund"]));
+  });
+
+  test("the pick offers each event type with its schema's description", async () => {
+    const calls: Call[] = [];
+    const described = [
+      {
+        type: "desk.refund",
+        toolName: "send_event_desk_refund",
+        inputSchema: schemas["desk.refund"].describe("Refund the customer"),
+      },
+      { type: "desk.close", toolName: "send_event_desk_close", inputSchema: schemas["desk.close"] },
+    ];
+    await resolveDecision(
+      createDecisionRequest({ model: "picker", events: described, fillModel: "writer" }),
+      {
+        decide: closedChoiceDecide(calls, ["desk.refund"]),
+        generateText: fillText(calls, [{ amount: 20, note: "late" }]),
+      },
+    );
+    expect((calls[0]!.request as AgentExecutorDecisionRequest).options).toEqual([
+      { event: { type: "desk.refund" }, description: "Refund the customer" },
+      { event: { type: "desk.close" } },
+    ]);
+  });
+
+  test("a fill the generateText executor rejects against outputSchema is retried", async () => {
+    const calls: Call[] = [];
+    // Like a provider adapter: structured output that fails `outputSchema` throws.
+    const strictFill =
+      (results: unknown[]): AgentRequestExecutor =>
+      async (request, info) => {
+        calls.push({ kind: "fill", request, info });
+        return { result: validateSchemaSync(request.outputSchema!, results.shift()) };
+      };
+    const event = await resolveDecision(
+      createDecisionRequest({ model: "picker", events, fillModel: "writer" }),
+      {
+        decide: closedChoiceDecide(calls, ["desk.refund", "desk.refund"]),
+        generateText: strictFill([{ amount: 1 }, { amount: 1, note: "ok" }]),
+      },
+    );
+    expect(event).toEqual({ type: "desk.refund", amount: 1, note: "ok" });
+    expect(calls.map((call) => call.kind)).toEqual(["decide", "fill", "decide", "fill"]);
+    expect((calls[2]!.request as AgentExecutorDecisionRequest).attempts).toEqual([
+      {
+        event: { type: "desk.refund", amount: 1 },
+        failure: "invalid-payload",
+        reason: expect.stringMatching(/^'desk\.refund' payload failed validation: /),
+      },
+    ]);
   });
 
   test("a finite payload is filled by a second closed choice with the same model", async () => {
