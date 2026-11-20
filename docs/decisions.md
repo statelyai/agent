@@ -321,7 +321,9 @@ const policyDecide: AgentDecisionExecutor = async (request, info) => {
     ...(info?.signal ? { signal: info.signal } : {}),
   });
   if (result.status !== "done") throw new Error(`policy settled '${result.status}'`);
-  return { event: result.output };
+  // Report the policy's model usage so the enclosing run counts it.
+  const { modelCalls, ...usage } = result.usage;
+  return { event: result.output, ...(modelCalls > 0 ? { usage } : {}) };
 };
 
 await runAgent(deskMachine, { input, executors: { ...modelExecutors, decide: policyDecide } });
