@@ -50,9 +50,6 @@
       "otel": [
         "./dist/otel.d.mts"
       ],
-      "policy": [
-        "./dist/policy.d.mts"
-      ],
       "tanstack-ai": [
         "./dist/tanstack-ai.d.mts"
       ],
@@ -133,16 +130,6 @@
       "require": {
         "types": "./dist/otel.d.cts",
         "default": "./dist/otel.cjs"
-      }
-    },
-    "./policy": {
-      "import": {
-        "types": "./dist/policy.d.mts",
-        "default": "./dist/policy.mjs"
-      },
-      "require": {
-        "types": "./dist/policy.d.cts",
-        "default": "./dist/policy.cjs"
       }
     },
     "./tanstack-ai": {

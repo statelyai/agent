@@ -30,7 +30,6 @@ Execution is at-least-once. A host runs the request and then journals its comple
 - `requestId` is the invoke site, and `n` is the invocation's ordinal there: how many times a fold of the log has started that invoke, a cancelled invocation included. Each iteration of a looped state gets its own key, and so does a call re-entered after a cancel. A run whose log cannot be folded counts the site's completions instead, a decision counting once its chosen event is journaled.
 - A call inside an invoked child machine names the child's path: `<executionId>:<childId>/<requestId>#<n>`, one `/` segment per nesting level. A `%` or `/` inside an id is escaped as `%25` or `%2F`. The child's own entries (its `actorPath`) are folded too, so `n` keeps counting across turns and across invocations of the child.
 - A decision retry appends its attempt ordinal: `<executionId>:<requestId>#<n>.<attempt>`, where `attempt` is the number of prior failed attempts. Each retry is a different request, so it gets a different key.
-- A [decision strategy](decisions.md#decision-strategies)'s sub-calls append their role: `<executionId>:<requestId>#<n>.<attempt>.pick`, `.group`, or `.fill`.
 - A resumed run re-executing an in-flight request passes the same `callKey` as the original attempt.
 - A fork mints its own lineage id (see [Fork](event-log.md#fork)), so none of its calls shares a key with its parent's.
 - It is `undefined` off the `runAgent` path (a bare `provideExecutors` bind) and on a run with no event log.

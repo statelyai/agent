@@ -873,7 +873,7 @@ function siteOfModelKey(key: string): string {
   return hash === -1 ? key : key.slice(0, hash);
 }
 
-/** `site#n` of a model key: the call, without its attempt or strategy suffix. */
+/** `site#n` of a model key: the call, without its attempt suffix. */
 function callOfModelKey(key: string): string {
   const hash = key.lastIndexOf("#");
   if (hash === -1) return key;

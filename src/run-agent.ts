@@ -1713,73 +1713,6 @@ function createCountingDecide(
   };
 }
 
-// A decision strategy's `fillModel` call: a structured text call, budgeted,
-// traced, and usage-recorded like the decide calls beside it. `info.callKey`
-// arrives from the strategy (`…#n.<attempt>.fill`).
-function createCountingFill(
-  runCtx: RunAgentBindContext,
-  self: BoundActorSelf | undefined,
-  recordLater: (record: () => void) => void,
-): AgentRequestExecutor {
-  return async (request, info) => {
-    const { id, src } = selfIdAndSrc(self);
-    const agentRequest: AgentRequest = {
-      kind: "text",
-      id,
-      src,
-      mode: "generate",
-      input: request,
-      tools: request.tools,
-      events: [],
-    };
-    runCtx.consumeModelCall();
-    runCtx.emitTrace?.({ type: "request.start", request: agentRequest }, self);
-    try {
-      await runCtx.awaitJournal?.();
-      info?.signal?.throwIfAborted();
-      const raw = await runCtx.generateText!(request, {
-        ...info,
-        ...(runCtx.runId !== undefined ? { runId: runCtx.runId } : {}),
-        ...(info?.requestId === undefined && id !== "" ? { requestId: id } : {}),
-      });
-      runCtx.countModelCalls?.(getCallModelCalls(raw) - 1);
-      const usage = getCallUsage(raw);
-      const finishReason = getCallFinishReason(raw);
-      if (usage) {
-        recordLater(() =>
-          runCtx.recordUsage?.(
-            usage,
-            {
-              kind: "decision",
-              ...(id !== "" ? { id } : {}),
-              ...(src !== "" ? { src } : {}),
-              model: request.model,
-              ...(info?.callKey !== undefined ? { callKey: info.callKey } : {}),
-            },
-            self,
-          ),
-        );
-      }
-      runCtx.emitTrace?.(
-        {
-          type: "request.end",
-          request: agentRequest,
-          output: raw.result,
-          raw,
-          ...(usage !== undefined ? { usage } : {}),
-          ...(finishReason !== undefined ? { finishReason } : {}),
-        },
-        self,
-      );
-      return raw;
-    } catch (error) {
-      runCtx.countModelCalls?.(getCallModelCalls(error) - 1);
-      runCtx.emitTrace?.({ type: "request.error", request: agentRequest, error }, self);
-      throw error;
-    }
-  };
-}
-
 /**
  * Builds the decision actor logic the runtime installs in place of a
  * `DecisionLogic`/`agent.decide` source. `DecisionLogic.withExecutor(...)`
@@ -1915,9 +1848,6 @@ function bindDecisionLogic(logic: DecisionLogic, runCtx: RunAgentBindContext): D
       const usageRecords: Array<() => void> = [];
       const recordLater = (record: () => void) => usageRecords.push(record);
       const decide = createCountingDecide(runCtx, self, recordLater);
-      const generateText = runCtx.generateText
-        ? createCountingFill(runCtx, self, recordLater)
-        : undefined;
       // The invoke-level key: resolveDecision appends each attempt's ordinal.
       const invokeCallKey = id !== "" ? runCtx.callKey?.(id, self) : undefined;
       let priorAttempts: DecisionAttempt[] = [];
@@ -1930,7 +1860,6 @@ function bindDecisionLogic(logic: DecisionLogic, runCtx: RunAgentBindContext): D
               priorAttempts = attemptRequest.attempts;
               return decide(attemptRequest, info);
             },
-            ...(generateText ? { generateText } : {}),
           },
           {
             ...(invokeCallKey !== undefined ? { callKey: invokeCallKey } : {}),

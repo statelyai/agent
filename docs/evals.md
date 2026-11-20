@@ -221,27 +221,6 @@ const stats = foldTraces(traces, {
 - Rows come in the order states were first seen. Sort them yourself, for example by `failures / visits`.
 - `failures` counts a failed run against every state it visited, so the states after a bad decision rank as high as the decision. Pass `blame` to count each failed run once, against the state its failure started in. See [Where failures start](#where-failures-start).
 
-## Decision requests from traces
-
-`getDecisionRequests` (from `@statelyai/agent/evals`) lists the decisions a run asked for, read from its trace: each decision's first `request.start`, and the states the run was in.
-
-```ts no-check
-import { getDecisionRequests } from "@statelyai/agent/evals";
-
-for (const { states, request } of getDecisionRequests(trace, { name: "chooseResolution" })) {
-  const { event } = await decide(request); // a candidate decider
-  console.log(
-    states,
-    request.options?.map((o) => o.event),
-    event,
-  );
-}
-```
-
-- A trace is one run's events, live or from `serializeTraceEvent`. Retries of a decision are left out, so each decision appears once.
-- A serialized request keeps its `options`, `withheld`, `metadata`, `system`, and `prompt`. Event schemas do not survive serialization, so replay closed choices rather than open ones.
-- Use the requests as eval rows (a decider on each, compared with a label) or as probe inputs for a policy.
-
 ## Parity with the code you replace
 
 Start with `checkParity`. Pick a lower-level tool only when the old code does not route its side effects through one object.
@@ -466,28 +445,11 @@ report.passHat(5); // the chance 5 runs of a scenario all pass
 ```
 
 - `passAny` is pass@k for the scenario, and `passAll` is pass^k.
-- `passHat(j)` estimates the suite's pass^j without running more: per scenario, C(passes, j) / C(runs, j), averaged over scenarios. Scenarios with fewer than `j` runs are left out. A `j` that is not a whole number from 1 to the most runs any scenario has throws an `AgentError` with code `pass-hat-out-of-range`.
+- `passHat(j)` estimates the suite's pass^j without running more: per scenario, C(passes, j) / C(k, j), averaged over scenarios. A `j` that is not a whole number from 1 to `k` throws an `AgentError` with code `pass-hat-out-of-range`.
 - `distinctPaths` counts the different step sequences the runs took. `divergedAt` is the earliest state where a run left the first run's path, found with `firstDivergence`. A scenario that passes 3 of 5 runs and diverges at `deciding` points at one decision.
 - Runs are sequential, scenario by scenario. A run that throws fails, with its message as `error` and no trace.
 - `report.traces` holds every recorded trace, ready for `foldTraces` or `traceCoverage`.
 - `k` below 1 throws an `AgentError` with code `invalid-repeat-count`.
-
-For runs collected elsewhere, such as CI shards or production replays, `summarizeRepeats` takes the runs per scenario and returns the same report. `repeatRuns` collects runs and calls it.
-
-```ts no-check
-import { summarizeRepeats } from "@statelyai/agent/evals";
-
-const report = summarizeRepeats([
-  {
-    id: "duplicate-charge",
-    scenario,
-    runs: [
-      { passed: true, trace },
-      { passed: false, trace: other },
-    ],
-  },
-]);
-```
 
 ## Judge agreement
 
