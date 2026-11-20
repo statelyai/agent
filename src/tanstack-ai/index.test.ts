@@ -324,6 +324,55 @@ describe("createTanStackAiExecutors — tools", () => {
     });
   });
 
+  test("a structured loop truncated after a turn keeps its calls and usage on the truncation error", async () => {
+    const adapter = new FakeTextAdapter([
+      { toolCalls: [{ name: "lookup", input: { city: "Oslo" } }] },
+      { error: { message: "cut off", code: "max_tokens" } },
+    ]);
+    const { generateText } = createTanStackAiExecutors({ models: { quick: adapter } });
+
+    const error = await generateText(
+      textRequest({
+        tools: { lookup } as unknown as AgentTools,
+        maxSteps: 2,
+        outputSchema: z.object({ title: z.string() }),
+      }),
+    ).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(AgentTruncatedError);
+    expect(error).toMatchObject({
+      modelCalls: 2,
+      usage: { inputTokens: 5, outputTokens: 2, totalTokens: 7 },
+    });
+  });
+
+  test("a loop cancelled mid-run reports the turns it completed on the abort reason", async () => {
+    const controller = new AbortController();
+    const reason = new Error("state exited");
+    const stopping = {
+      ...lookup,
+      execute: async (input: { city: string }) => {
+        controller.abort(reason);
+        return lookup.execute(input);
+      },
+    };
+    const adapter = new FakeTextAdapter([
+      { toolCalls: [{ name: "lookup", input: { city: "Oslo" } }] },
+      { toolCalls: [{ name: "lookup", input: { city: "Bergen" } }] },
+      { text: "done" },
+    ]);
+    const { generateText } = createTanStackAiExecutors({ models: { quick: adapter } });
+
+    await expect(
+      generateText(
+        textRequest({ tools: { lookup: stopping } as unknown as AgentTools, maxSteps: 3 }),
+        {
+          signal: controller.signal,
+        },
+      ),
+    ).rejects.toBe(reason);
+    expect(reason).toMatchObject({ usage: { inputTokens: 5, outputTokens: 2, totalTokens: 7 } });
+  });
+
   test("without maxSteps the run is a single model turn", async () => {
     const adapter = new FakeTextAdapter([
       { toolCalls: [{ name: "lookup", input: { city: "Oslo" } }] },

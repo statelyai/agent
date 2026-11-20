@@ -551,7 +551,12 @@ async function runChat(
     signal?.removeEventListener("abort", abort);
   }
   if (signal?.aborted) {
-    throw signal.reason ?? new Error("createTanStackAiExecutors: the request was aborted.");
+    // The stream can end normally after a cancel: its turns still count.
+    throw withModelCalls(
+      signal.reason ?? new Error("createTanStackAiExecutors: the request was aborted."),
+      run.modelCalls,
+      run.usage,
+    );
   }
   return run;
 }
@@ -706,9 +711,10 @@ export function createTanStackAiExecutors<TModels extends TanStackAiModelMap>(
         info?.signal,
       );
     } catch (error) {
-      throw structured && isTruncationError(error)
-        ? truncated(request, info, undefined, error)
-        : error;
+      if (!(structured && isTruncationError(error))) throw error;
+      // The replacement error carries the turns `readRun` recorded on the cause.
+      const { modelCalls, usage } = error as { modelCalls?: number; usage?: AgentCallUsage };
+      throw withModelCalls(truncated(request, info, undefined, error), modelCalls ?? 1, usage);
     }
 
     if (outputSchema) {

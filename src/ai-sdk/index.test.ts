@@ -506,6 +506,49 @@ describe("onResult metadata enrichment", () => {
     expect(result.raw).toBeDefined();
   });
 
+  test("a structured tool loop whose final output fails to parse reports every response's usage", async () => {
+    const { MockLanguageModelV3 } = await import("ai/test");
+    const { tool } = await import("ai");
+    const { createAiSdkExecutors } = await import("./index.js");
+
+    const usage = {
+      inputTokens: { total: 2, noCache: 2, cacheRead: 0, cacheWrite: 0 },
+      outputTokens: { total: 1, text: 1, reasoning: 0 },
+    };
+    const responses = [
+      {
+        content: [
+          { type: "tool-call" as const, toolCallId: "c1", toolName: "lookup", input: "{}" },
+        ],
+        finishReason: { unified: "tool-calls" as const, raw: "tool_calls" },
+        usage,
+        warnings: [],
+      },
+      {
+        content: [{ type: "text" as const, text: "not json" }],
+        finishReason: { unified: "stop" as const, raw: "stop" },
+        usage,
+        warnings: [],
+      },
+    ];
+    const model = new MockLanguageModelV3({ doGenerate: async () => responses.shift()! });
+    const lookup = tool({ inputSchema: z.object({}), execute: async () => "found" });
+
+    const executors = createAiSdkExecutors({ models: { m: model } });
+    await expect(
+      executors.generateText({
+        model: "m",
+        prompt: "hi",
+        tools: { lookup },
+        maxSteps: 2,
+        outputSchema: z.object({ title: z.string() }),
+      } as never),
+    ).rejects.toMatchObject({
+      modelCalls: 2,
+      usage: { inputTokens: 4, outputTokens: 2, totalTokens: 6 },
+    });
+  });
+
   test("decide returns usage/finishReason alongside the chosen event", async () => {
     const { MockLanguageModelV3 } = await import("ai/test");
     const { createAiSdkExecutors } = await import("./index.js");

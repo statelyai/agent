@@ -2,7 +2,7 @@ import { AGENT_USAGE_TOKEN_FIELDS, type AgentCallUsage } from "../text-logic.js"
 
 /**
  * Records on a thrown error how many provider calls its request made, and the
- * usage of the responses it received, so the runtime counts a failed or
+ * total usage of the responses it received, so the runtime counts a failed or
  * aborted tool loop's steps too (see `getCallModelCalls` and `getCallUsage`).
  * @internal
  */
@@ -13,7 +13,9 @@ export function withModelCalls(
 ): unknown {
   if (typeof error === "object" && error !== null && Object.isExtensible(error)) {
     if (modelCalls > 1) (error as { modelCalls?: number }).modelCalls ??= modelCalls;
-    if (usage) (error as { usage?: AgentCallUsage }).usage ??= usage;
+    // The adapter's total covers every response the request received. An SDK
+    // error's own `usage` covers only the last one, so the total replaces it.
+    if (usage) (error as { usage?: AgentCallUsage }).usage = usage;
   }
   return error;
 }

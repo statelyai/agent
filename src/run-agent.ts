@@ -3502,8 +3502,13 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
     deliveryWaiters.clear();
     releaseCommitted();
   };
-  // `agent.act` loops a state exit aborted, still settling: `finish` waits for them.
+  // `agent.act` loops a state exit aborted, still settling: `finish` waits for
+  // them, unless the run stops first (`stopped` resolves in `stopRun`).
   const settling = new Set<Promise<void>>();
+  let markStopped!: () => void;
+  const stopped = new Promise<void>((resolve) => {
+    markStopped = resolve;
+  });
   const runCtx: RunAgentBindContext = {
     generateText: executors.generateText,
     streamText: executors.streamText,
@@ -3749,6 +3754,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       return;
     }
     stopReason = reason;
+    markStopped();
     // Persisted before the children stop, so a resume restarts the work
     // this stop cut off instead of finding it stopped.
     try {
@@ -4510,7 +4516,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       // usage must count. Not when the run stopped: that cut-off is a straggler.
       while (stopReason === undefined && settling.size > 0) {
         releaseAllDeliveries();
-        await Promise.all(settling);
+        await Promise.race([Promise.all(settling), stopped]);
       }
       // A decision's usage is queued after the event it chose; when that event
       // ends the machine, the usage is never handed out. Journal it out of

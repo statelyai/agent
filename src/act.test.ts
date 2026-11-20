@@ -379,6 +379,24 @@ describe("agent.act", () => {
     },
   );
 
+  test("a stop ends the wait for an act loop a state exit aborted", async () => {
+    const { generateText } = scripted(async (call) => {
+      await call("send_event_ADD", { item: "apple" });
+      await call("send_event_CHECKOUT", {});
+      // The host's tool loop never settles after the exit aborted it.
+      return new Promise<undefined>(() => {});
+    });
+    const controller = new AbortController();
+    const reason = new Error("host stopped");
+    setTimeout(() => controller.abort(reason), 20);
+    const result = await runToQuiescence(
+      createAgentRuntime(cartMachine(), { executors: { generateText }, signal: controller.signal }),
+      { input: {} },
+    );
+
+    expect(result).toMatchObject({ status: "error", error: reason });
+  }, 2000);
+
   test("allowedEvents is typed against the machine's events", () => {
     setupAgent({ schemas }).createMachine({
       context: { items: [], note: "" },
