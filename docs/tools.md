@@ -251,10 +251,10 @@ A tool with `needsApproval: true` comes back from `generateText` unexecuted, as 
 ```ts no-check
 import { generateText, type ModelMessage } from "ai";
 
-/** A plain JSON value. A `Date`, `Set`, `Map`, `BigInt`, or cycle has no exact JSON form. */
+/** A plain JSON value. A `Date`, `Set`, `Map`, `BigInt`, `-0`, or cycle has no exact JSON form. */
 function isJson(value: unknown, parents: object[] = []): boolean {
   if (value === null || typeof value === "string" || typeof value === "boolean") return true;
-  if (typeof value === "number") return Number.isFinite(value);
+  if (typeof value === "number") return Number.isFinite(value) && !Object.is(value, -0);
   if (typeof value !== "object" || parents.includes(value)) return false;
   const inner = [...parents, value];
   if (Array.isArray(value)) return Array.from(value).every((item) => isJson(item, inner));
@@ -272,19 +272,24 @@ async function answerApprovals(messages: ModelMessage[]) {
 
   // 1. Map the unexecuted calls to the machine input. A person approves the
   //    arguments, and a rule matches them later, so they must be exact. A call
-  //    whose parsed input is not plain JSON (an input schema turned a string
-  //    into a `Date` or a `Set`, say) stays out of the machine, and step 3
-  //    answers it as failed.
+  //    whose parsed input is not a plain JSON object (an input schema turned
+  //    a string into a `Date` or a `Set`, say, or the input is `null` or an
+  //    array) stays out of the machine, and step 3 answers it as failed.
+  const argsOf = (input: unknown) => (input === undefined ? {} : input);
   const calls = requests
-    .filter(({ toolCall }) => isJson(toolCall.input ?? {}))
+    .filter(({ toolCall }) => {
+      const args = argsOf(toolCall.input);
+      return typeof args === "object" && args !== null && !Array.isArray(args) && isJson(args);
+    })
     .map(({ toolCall }) => ({
       id: toolCall.toolCallId,
       tool: toolCall.toolName,
-      args: toolCall.input ?? {},
+      args: argsOf(toolCall.input),
     }));
 
   // 2. Run the approval loop above with a runTool actor that calls
-  //    tools[call.tool].execute with call.args.
+  //    tools[call.tool].execute(call.args, { toolCallId: call.id, messages }),
+  //    passing the execution options the SDK would pass.
 
   // 3. Answer every request in one tool message, matching each result by call
   //    id. An executed result goes through the tool's own `toModelOutput`, as
@@ -313,7 +318,8 @@ async function answerApprovals(messages: ModelMessage[]) {
                 input: toolCall.input,
                 output: entry.value,
               })
-            : { type: "json", value: entry.value ?? null },
+            : // The SDK's default: the output as a JSON value (a `Date` becomes a string).
+              { type: "json", value: JSON.parse(JSON.stringify(entry.value ?? null)) },
     });
   }
   const toolMessage: ModelMessage = { role: "tool", content };
