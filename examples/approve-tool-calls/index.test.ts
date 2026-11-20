@@ -36,6 +36,24 @@ describe("approve-tool-calls", () => {
     expect(result.rules).toEqual([{ tool: "runCommand", args: { cmd: "npm test" } }]);
   });
 
+  test("the prompt shows nested arguments and literal braces as the runner gets them", async () => {
+    const call: ProposedCall = {
+      id: "w1",
+      tool: "writeFile",
+      args: { path: "a.txt", opts: { dryRun: false }, note: "keep {this}" },
+    };
+    const received: unknown[] = [];
+    const result = await runApproveToolCallsExample({
+      calls: [call],
+      verdicts: [{ type: "APPROVE" }],
+      run: async ({ args }) => received.push(args),
+    });
+    expect(result.asked).toEqual([
+      'Run writeFile(path="a.txt", opts={"dryRun":false}, note="keep {this}")?',
+    ]);
+    expect(received).toEqual([call.args]);
+  });
+
   test("a rule matches the same arguments in any key order", async () => {
     const write: ProposedCall = {
       id: "w2",

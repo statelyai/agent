@@ -253,39 +253,46 @@ import { generateText, type ModelMessage } from "ai";
 const first = await generateText({ model, tools, messages });
 const requests = first.content.filter((part) => part.type === "tool-approval-request");
 
-// 1. Map the unexecuted calls to the machine input.
+// 1. Map the unexecuted calls to the machine input. The person approves the
+//    JSON form of the arguments; the tool runs with the input the SDK parsed,
+//    which an input schema may have transformed (a string to a `Date`, say).
 const calls = requests.map(({ toolCall }) => ({
   id: toolCall.toolCallId,
   tool: toolCall.toolName,
-  args: toolCall.input,
+  args: JSON.parse(JSON.stringify(toolCall.input ?? {})),
 }));
 
-// 2. Run the approval loop above with a runTool actor that calls tools[call.tool].execute.
+// 2. Run the approval loop above with a runTool actor that calls
+//    tools[call.tool].execute with the parsed input of the request whose
+//    toolCall.toolCallId is call.id.
 
-// 3. Feed the results back as one tool message, and continue.
-const toolMessage: ModelMessage = {
-  role: "tool",
-  content: result.output.results.flatMap((entry, index) => {
-    const { approvalId, toolCall } = requests[index]!;
-    const approved = entry.status !== "denied";
-    return [
-      { type: "tool-approval-response", approvalId, approved, reason: entry.reason },
-      ...(approved
-        ? [
-            {
-              type: "tool-result",
+// 3. Feed the results back as one tool message, and continue. An executed
+//    result goes through the tool's own `toModelOutput`, as the SDK does when
+//    it runs a tool.
+const content = [];
+for (const [index, entry] of result.output.results.entries()) {
+  const { approvalId, toolCall } = requests[index]!;
+  const approved = entry.status !== "denied";
+  content.push({ type: "tool-approval-response", approvalId, approved, reason: entry.reason });
+  if (!approved) continue;
+  const toModelOutput = tools[toolCall.toolName]?.toModelOutput;
+  content.push({
+    type: "tool-result",
+    toolCallId: toolCall.toolCallId,
+    toolName: toolCall.toolName,
+    output:
+      entry.status === "failed"
+        ? { type: "error-text", value: entry.reason }
+        : toModelOutput
+          ? await toModelOutput({
               toolCallId: toolCall.toolCallId,
-              toolName: toolCall.toolName,
-              output:
-                entry.status === "executed"
-                  ? { type: "json", value: entry.value ?? null }
-                  : { type: "error-text", value: entry.reason },
-            },
-          ]
-        : []),
-    ];
-  }),
-};
+              input: toolCall.input,
+              output: entry.value,
+            })
+          : { type: "json", value: entry.value ?? null },
+  });
+}
+const toolMessage: ModelMessage = { role: "tool", content };
 await generateText({
   model,
   tools,

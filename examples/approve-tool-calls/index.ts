@@ -132,7 +132,8 @@ export const approveToolCallsMachine = agentSetup.createMachine({
         interaction: {
           label: ({ context }) => {
             const call = context.calls[context.cursor]!;
-            // The result is still interpolated, so keep `{` and `}` out of it.
+            // A function label is shown as written, so nested objects and
+            // braces inside strings reach the person intact.
             const args = Object.entries(call.args).map(
               ([key, value]) => `${key}=${JSON.stringify(value)}`,
             );
