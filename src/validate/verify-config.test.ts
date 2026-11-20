@@ -678,6 +678,27 @@ describe("verifyAgentConfig config graph checks", () => {
     expect(detail).not.toContain("lists 'mod.flag'");
     expect(detail).not.toContain("lists 'ALLOW'");
   });
+  test("decide-event-unhandled: a key with an empty transition list does not handle its event", async () => {
+    const config = {
+      initial: "triage",
+      schemas: { events: { ALLOW: empty, BLOCK: empty } },
+      states: {
+        triage: {
+          invoke: {
+            src: "agent.decide",
+            input: { model: MODEL, prompt: "Triage.", allowedEvents: ["ALLOW", "BLOCK"] },
+            onError: { target: "done" },
+          },
+          on: { ALLOW: { target: "done" }, BLOCK: [] } as Record<string, unknown>,
+        },
+        done: fin,
+      },
+    };
+    const detail = lintGate(await verifyAgentConfig(config, { compileSchema }))!.detail!;
+    expect(detail).toContain("decide-event-unhandled at 'triage'");
+    expect(detail).toContain("lists 'BLOCK'");
+    expect(detail).not.toContain("lists 'ALLOW'");
+  });
   test("decide-event-unhandled: a templated allowedEvents is not read as an event name", async () => {
     const config = (allowedEvents: unknown) => ({
       initial: "triage",

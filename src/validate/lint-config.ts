@@ -318,21 +318,24 @@ function finishingStates(
 // ─── decision events ───
 
 /**
- * The event types `states` handle: their `on` keys, plus the registered types
+ * The event types `states` handle: their `on` keys with at least one
+ * transition (XState offers no event for `KEY: []`), plus the registered types
  * a partial wildcard key (`'desk.*'`) matches, as the runtime expands it
  * (see `expandHandlerType`).
  */
 const handledEvents = (states: GraphNode[], registered: readonly string[]): Set<string> =>
   new Set(
     states.flatMap((at) =>
-      Object.keys((at.state.on ?? {}) as Record<string, unknown>).flatMap((key) => [
-        key,
-        ...(key !== "*" && key.endsWith(".*")
-          ? registered.filter(
-              (type) => !isEventPattern(type) && matchesHandlerDescriptor(type, key),
-            )
-          : []),
-      ]),
+      Object.entries((at.state.on ?? {}) as Record<string, unknown>)
+        .filter(([, transitions]) => toList(transitions).length > 0)
+        .flatMap(([key]) => [
+          key,
+          ...(key !== "*" && key.endsWith(".*")
+            ? registered.filter(
+                (type) => !isEventPattern(type) && matchesHandlerDescriptor(type, key),
+              )
+            : []),
+        ]),
     ),
   );
 
