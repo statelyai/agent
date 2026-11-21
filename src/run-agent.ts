@@ -219,6 +219,12 @@ export interface AgentRunMeta {
   logId?: string;
   /** The log's length at the moment this snapshot was taken. */
   logIndex: number;
+  /**
+   * The snapshot carries XState's timer occurrence counters (6.0.0-beta.4 and
+   * later). A snapshot without them is never trusted over the log, whose fold
+   * rebuilds them.
+   */
+  timerOccurrences?: true;
 }
 
 // The recorded `verification.stateHash` of a log entry is taken from a
@@ -4101,6 +4107,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
             inheritedExecutionId !== undefined &&
             cachedMeta?.logId === inheritedExecutionId &&
             cachedMeta.logIndex === resumeEvents.length &&
+            cachedMeta.timerOccurrences === true &&
             tailStateHash !== undefined &&
             hashResumeSnapshot(init.snapshot) === tailStateHash;
 
@@ -4551,6 +4558,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
           version: machineVersion,
           ...(logExecutionId !== undefined ? { logId: logExecutionId } : {}),
           logIndex: logIndexAtSettle,
+          timerOccurrences: true,
         };
         return persistedSnapshot;
       };

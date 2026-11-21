@@ -511,9 +511,11 @@ describe("getSnapshotStateHash", () => {
     const base = { status: "active", value: "waiting", context: { occurrence: 1 }, children: {} };
     // XState 6.0.0-beta.2 wrote neither `occurrence` nor `_nextTimerOccurrence`.
     const before = { ...base, timers: [timer] };
-    const after = { ...base, _nextTimerOccurrence: 1, timers: [{ ...timer, occurrence: 0 }] };
+    const after = { ...base, nextTimerOccurrence: 1, timers: [{ ...timer, occurrence: 0 }] };
+    const live = { ...base, _nextTimerOccurrence: 1, timers: [{ ...timer, occurrence: 0 }] };
 
     expect(getSnapshotStateHash(after)).toBe(getSnapshotStateHash(before));
+    expect(getSnapshotStateHash(live)).toBe(getSnapshotStateHash(before));
     // An `occurrence` in context is application data.
     expect(getSnapshotStateHash({ ...after, context: { occurrence: 2 } })).not.toBe(
       getSnapshotStateHash(after),

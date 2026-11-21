@@ -4170,6 +4170,50 @@ describe("runAgent event log", () => {
     );
   });
 
+  test("a checkpoint written before timer occurrences rebuilds its counters from the log", async () => {
+    const scheduled: string[] = [];
+    const timers = { schedule: ({ id }: { id: string }) => scheduled.push(id), cancel: () => {} };
+    const machine = setupAgent({
+      context: z.object({}),
+      events: { GO: z.object({}) },
+    }).createMachine({
+      id: "legacy-timers",
+      context: {},
+      initial: "first",
+      states: {
+        first: { after: { 20: { target: "between" } } },
+        between: { on: { GO: { target: "second" } } },
+        second: { after: { 20: { target: "done" } } },
+        done: { type: "final" },
+      },
+    });
+    const run = (start: Parameters<typeof runToQuiescence>[1]) =>
+      runToQuiescence(createAgentRuntime(machine, { timers }), start as never);
+
+    const started = await run({});
+    const between = await run({
+      events: started.events,
+      snapshot: started.persist(),
+      event: { type: "xstate.timer", id: scheduled.at(-1)! },
+    });
+    // What XState 6.0.0-beta.2 persisted: no occurrence counter, and a runtime
+    // that did not stamp one.
+    const legacy = JSON.parse(JSON.stringify(between.persist()));
+    delete legacy.nextTimerOccurrence;
+    delete legacy.agentMeta.timerOccurrences;
+
+    const second = await run({ events: between.events, snapshot: legacy, event: { type: "GO" } });
+    const done = await run({
+      events: second.events,
+      snapshot: second.persist(),
+      event: { type: "xstate.timer", id: scheduled.at(-1)! },
+    });
+    expect(done.status).toBe("done");
+    // The log alone reaches the same state: live and replay agree on the timer.
+    const replayed = await run({ events: done.events });
+    expect(replayed.status).toBe("done");
+  });
+
   test("resume precedence: a tail-stamped snapshot is trusted, a stale one is not", async () => {
     const machine = makeLoggedMachine();
     const first = await runToQuiescence(

@@ -498,7 +498,10 @@ function normalizeEventErrors(
 const SNAPSHOT_VOLATILE_KEYS = new Set([
   "sessionId",
   "_nextTimerId",
+  // XState 6.0.0-beta.4 added the occurrence counter: `_nextTimerOccurrence`
+  // on a live snapshot, `nextTimerOccurrence` on a persisted one.
   "_nextTimerOccurrence",
+  "nextTimerOccurrence",
   "_nextActorIds",
 ]);
 const CHILD_VOLATILE_KEYS = new Set(["sessionId"]);
