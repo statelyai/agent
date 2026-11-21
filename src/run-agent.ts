@@ -247,12 +247,13 @@ function hashResumeSnapshot(snapshot: unknown): string {
 // Copies each pending timer's `scheduledAt` from a checkpoint written before
 // timer occurrences onto the snapshot its log refolds to, so a restored timer
 // waits only what is left of its delay. Timers match on everything but the
-// occurrence, which the checkpoint does not have; children are matched too.
+// occurrence, which the checkpoint does not have, in any key order (another
+// XState version wrote it); children are matched too.
 function carryTimerStarts(from: unknown, to: unknown): void {
   const timersOf = (snapshot: unknown) =>
     ((snapshot as { timers?: unknown } | null)?.timers ?? []) as Array<Record<string, unknown>>;
   const identity = ({ occurrence: _o, scheduledAt: _s, ...timer }: Record<string, unknown>) =>
-    JSON.stringify(timer);
+    canonicalEventJson(timer);
   const starts = new Map(timersOf(from).map((timer) => [identity(timer), timer.scheduledAt]));
   for (const timer of timersOf(to)) {
     const scheduledAt = starts.get(identity(timer));

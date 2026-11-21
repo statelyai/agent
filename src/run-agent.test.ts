@@ -4231,11 +4231,15 @@ describe("runAgent event log", () => {
     const legacy = JSON.parse(JSON.stringify(started.persist()));
     delete legacy.nextTimerOccurrence;
     delete legacy.agentMeta.timerOccurrences;
-    for (const timer of legacy.timers) {
-      delete timer.occurrence;
-      // Scheduled 40 seconds before this resume.
-      timer.scheduledAt -= 40_000;
-    }
+    legacy.timers = legacy.timers.map((timer: Record<string, unknown>) => {
+      const { occurrence: _occurrence, ...rest } = timer;
+      // Scheduled 40 seconds before this resume, with its keys in another order.
+      const reordered = Object.entries({
+        ...rest,
+        scheduledAt: (rest.scheduledAt as number) - 40_000,
+      });
+      return Object.fromEntries(reordered.reverse());
+    });
 
     await runToQuiescence(createAgentRuntime(machine, { timers }), {
       events: started.events,
