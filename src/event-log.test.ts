@@ -506,6 +506,20 @@ describe("getSnapshotStateHash", () => {
     );
   });
 
+  test("timer occurrence counters are re-minted, so a log written before them still verifies", () => {
+    const timer = { event: { type: "xstate.after", delay: 20, stateId: "m.waiting" }, delay: 20 };
+    const base = { status: "active", value: "waiting", context: { occurrence: 1 }, children: {} };
+    // XState 6.0.0-beta.2 wrote neither `occurrence` nor `_nextTimerOccurrence`.
+    const before = { ...base, timers: [timer] };
+    const after = { ...base, _nextTimerOccurrence: 1, timers: [{ ...timer, occurrence: 0 }] };
+
+    expect(getSnapshotStateHash(after)).toBe(getSnapshotStateHash(before));
+    // An `occurrence` in context is application data.
+    expect(getSnapshotStateHash({ ...after, context: { occurrence: 2 } })).not.toBe(
+      getSnapshotStateHash(after),
+    );
+  });
+
   test("two live actors of the same machine at the same state hash identically", () => {
     const first = replay(machine, buildLog().slice(0, 2)).persistedSnapshot;
     const second = replay(machine, buildLog().slice(0, 2)).persistedSnapshot;

@@ -3600,8 +3600,13 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
   ) => {
     const id = timerId(timer);
     if (isRoot && !inProcessTimers) {
+      const host = options.timers as Exclude<AgentTimerScheduler, "in-process">;
+      // XState replaces a timer under the same key without cancelling it, so
+      // the replaced scheduling is cancelled here, as an in-process one is.
+      const replaced = hostTimerIds.get(logicalTimerId(timer));
+      if (replaced !== undefined && replaced !== id) host.cancel(replaced);
       hostTimerIds.set(logicalTimerId(timer), id);
-      (options.timers as Exclude<AgentTimerScheduler, "in-process">).schedule({ id, delay });
+      host.schedule({ id, delay });
       return;
     }
     const key = timerKey(isRoot ? undefined : source, logicalTimerId(timer));

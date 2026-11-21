@@ -403,9 +403,12 @@ describe("createTanStackAiExecutors — tools", () => {
     ]);
     const { generateText } = createTanStackAiExecutors({ models: { quick: adapter } });
 
-    await generateText(textRequest({ tools: { lookup } as unknown as AgentTools }));
+    const result = await generateText(textRequest({ tools: { lookup } as unknown as AgentTools }));
 
     expect(adapter.requests).toHaveLength(1);
+    // The loop-stop marker `chat()` adds after the tool runs is not a model call.
+    expect(result.modelCalls).toBe(1);
+    expect(result.usage).toEqual({ inputTokens: 5, outputTokens: 2, totalTokens: 7 });
   });
 
   test("a tool with no execute stops the run at its call", async () => {

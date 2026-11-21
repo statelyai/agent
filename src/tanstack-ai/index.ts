@@ -185,21 +185,37 @@ class TanStackAiRunError extends Error {
   }
 }
 
-/** The usage of every model call of one `chat()` run, summed as `onUsage` reports it. */
-type BilledUsage = { usage: AgentCallUsage | undefined };
+/**
+ * The model calls of one `chat()` run and their summed usage, as the run's
+ * middleware observed them: `onConfig` runs before each provider call, and
+ * `onUsage` reports each call's usage.
+ */
+type CallTally = { calls: number; usage: AgentCallUsage | undefined };
+
+/** Counts a run's provider calls and their usage into `tally`. */
+function tallyCalls(tally: CallTally): ChatMiddleware {
+  return {
+    name: "statelyai:call-tally",
+    onConfig: (ctx) => {
+      if (ctx.phase === "beforeModel" || ctx.phase === "structuredOutput") tally.calls++;
+    },
+    onUsage: (_ctx, usage) => {
+      tally.usage = addUsage(tally.usage, toAgentCallUsage(usage));
+    },
+  };
+}
 
 /**
  * Reads a `chat()` stream to the end. Text arrives as `TEXT_MESSAGE_CONTENT`
- * deltas; every model turn ends in its own `RUN_FINISHED`, so turns are counted
- * and the last finish reason wins. Usage comes from `billed`, not the chunks:
- * when a combined structured output fails to parse, `chat()` drops the final
- * turn's `RUN_FINISHED`, though `onUsage` still reported it. A provider
- * failure arrives as a `RUN_ERROR` chunk rather than a throw, and is thrown
- * here.
+ * deltas, and the last `RUN_FINISHED` sets the finish reason. Calls and usage
+ * come from `tally`, not the chunks: `chat()` adds a `RUN_FINISHED` of its own
+ * when the tool loop stops, and drops the final turn's when a combined
+ * structured output fails to parse. A provider failure arrives as a
+ * `RUN_ERROR` chunk rather than a throw, and is thrown here.
  */
 async function readRun(
   stream: AsyncIterable<StreamChunk>,
-  billed: BilledUsage,
+  tally: CallTally,
   onDelta?: (delta: string) => void,
 ): Promise<RunSummary> {
   const summary: RunSummary = {
@@ -283,7 +299,6 @@ async function readRun(
             (chunk.metadata?.tanstack as { finishReason?: string | null } | undefined)
               ?.finishReason;
           summary.finishReason = toAgentFinishReason(finishReason);
-          summary.modelCalls++;
           break;
         }
         case "RUN_ERROR":
@@ -291,10 +306,10 @@ async function readRun(
       }
     }
   } catch (error) {
-    // The failed turn was a call too.
-    throw withModelCalls(error, summary.modelCalls + 1, billed.usage);
+    throw withModelCalls(error, tally.calls, tally.usage);
   }
-  summary.usage = billed.usage;
+  summary.modelCalls = tally.calls;
+  summary.usage = tally.usage;
   const invalid = new Set<string>();
   for (const { part, json } of args.values()) {
     try {
@@ -548,23 +563,20 @@ async function runChat(
   } else {
     signal?.addEventListener("abort", abort, { once: true });
   }
-  const billed: BilledUsage = { usage: undefined };
-  const countUsage: ChatMiddleware = {
-    name: "statelyai:usage",
-    onUsage: (_ctx, usage) => {
-      billed.usage = addUsage(billed.usage, toAgentCallUsage(usage));
-    },
-  };
+  const tally: CallTally = { calls: 0, usage: undefined };
   let run: RunSummary;
   try {
     run = await readRun(
       chat({
         ...options,
         threadId: options.threadId ?? crypto.randomUUID(),
-        middleware: [...((options.middleware as ChatMiddleware[] | undefined) ?? []), countUsage],
+        middleware: [
+          ...((options.middleware as ChatMiddleware[] | undefined) ?? []),
+          tallyCalls(tally),
+        ],
         abortController: controller,
       } as unknown as Parameters<typeof chat>[0]) as AsyncIterable<StreamChunk>,
-      billed,
+      tally,
       onDelta,
     );
   } finally {

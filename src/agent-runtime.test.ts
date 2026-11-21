@@ -422,6 +422,41 @@ describe("createAgentRuntime", () => {
     expect(cancelled).toEqual([scheduled[0]]);
   });
 
+  test("host-owned timers: a timer replaced under the same id cancels the replaced scheduling", async () => {
+    const log: string[] = [];
+    const host = {
+      schedule: ({ id }: { id: string }) => log.push(`schedule ${id}`),
+      cancel: (id: string) => log.push(`cancel ${id}`),
+    };
+    const machine = setupAgent({
+      context: z.object({}),
+      events: { AGAIN: z.object({}) },
+    }).createMachine({
+      context: {},
+      initial: "waiting",
+      states: {
+        waiting: {
+          entry: (_, enq) => enq.raise({ type: "AGAIN" }, { id: "ping", delay: 1000 }),
+          on: {
+            AGAIN: (_, enq) => {
+              enq.raise({ type: "AGAIN" }, { id: "ping", delay: 1000 });
+            },
+          },
+        },
+      },
+    });
+
+    const first = await runToQuiescence(createAgentRuntime(machine, { timers: host }));
+    log.length = 0;
+    await runToQuiescence(createAgentRuntime(machine, { timers: host }), {
+      snapshot: first.persist(),
+      event: { type: "AGAIN" },
+    });
+    const [restored, replacement] = log.filter((line) => line.startsWith("schedule "));
+    expect(restored).not.toBe(replacement);
+    expect(log).toEqual([restored, `cancel ${restored!.slice("schedule ".length)}`, replacement]);
+  });
+
   test("a pending timer resumes with what is left of its delay, not the whole delay", async () => {
     const scheduled: Array<{ id: string; delay: number }> = [];
     const host = {
