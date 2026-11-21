@@ -403,12 +403,8 @@ const caseMachine = caseSetup.createMachine({
     RESYNC: ({ event }) => ({ target: event.status === "escalated" ? ".escalated" : ".open" }),
   },
   states: {
-    open: {
-      /* MESSAGE: to replying */
-    },
-    replying: {
-      /* the model call and the host's writes */
-    },
+    open: {/* MESSAGE: to replying */},
+    replying: {/* the model call and the host's writes */},
     escalated: {},
   },
 });

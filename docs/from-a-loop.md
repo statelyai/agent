@@ -374,12 +374,12 @@ triaging: {
 
 Split what must always hold from what a model can learn:
 
-| Kind     | In the loop                                | In the machine                                                                       |
-| -------- | ------------------------------------------ | ------------------------------------------------------------------------------------ |
+| Kind     | In the loop                                                | In the machine                                                                       |
+| -------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------ |
 | Rule     | Ship only with passing checks, approval and no novel issue | `autoShippable` in `triaging`, re-checked by `checkingShip`; or a person's `APPROVE` |
-| Rule     | At most 3 rounds                           | `roundLimit`, read by `triaging` and `retryBlocker`                                  |
-| Rule     | A novel issue is not retried               | `retryBlocker`, the guard on `RETRY`                                                 |
-| Judgment | Fixed: retry until the cap                 | `deciding`: `RETRY` with which feedback, or `ESCALATE` with which reason             |
+| Rule     | At most 3 rounds                                           | `roundLimit`, read by `triaging` and `retryBlocker`                                  |
+| Rule     | A novel issue is not retried                               | `retryBlocker`, the guard on `RETRY`                                                 |
+| Judgment | Fixed: retry until the cap                                 | `deciding`: `RETRY` with which feedback, or `ESCALATE` with which reason             |
 
 `retryBlocker` returns why `RETRY` is refused, or `undefined`:
 
