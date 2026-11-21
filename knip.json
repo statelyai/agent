@@ -23,8 +23,7 @@
     },
     "examples/cloudflare-agent-host": {
       "entry": ["test/**/*.workers-test.ts", "*.mjs"],
-      "project": ["**/*.ts"],
-      "ignoreDependencies": ["cloudflare"]
+      "project": ["**/*.ts"]
     },
     "examples/cloudflare-workers-ai-host": {
       "entry": ["test/**/*.workers-test.ts"],

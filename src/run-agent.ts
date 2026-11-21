@@ -2380,6 +2380,11 @@ export interface AgentTimerEvent {
 // XState keys a timer by a `TimerKey` object; hosts see it as an opaque `id`.
 const timerId = (timer: TimerKey): string => JSON.stringify(timer);
 
+// A scheduling's key carries an `occurrence`, so a cancelled firing cannot
+// consume its replacement; XState cancels by the key without it.
+const logicalTimerId = ({ occurrence: _occurrence, ...timer }: TimerKey): string =>
+  JSON.stringify(timer);
+
 // A host's `{ type: "xstate.timer", id }` becomes the firing input XState
 // expects, `{ type: "xstate.timer", ...timer }`. Anything else passes through.
 function toTimerInput(event: EventObject): EventObject {
@@ -3579,6 +3584,9 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
   // ─── Timers ───
   const inProcessTimers = options.timers === undefined || options.timers === "in-process";
   const timerHandles = new Map<string, ReturnType<typeof setTimeout>>();
+  // A root host timer's scheduled id, by its logical id, so `cancel` gets the
+  // id the host was asked to `schedule`.
+  const hostTimerIds = new Map<string, string>();
   const timerKey = (source: AnyActorRef | undefined, id: string) =>
     `${(source as { address?: string } | undefined)?.address ?? "(root)"}::${id}`;
   // Arms one timer. A root timer fires into the mailbox; a child's timer is
@@ -3592,10 +3600,11 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
   ) => {
     const id = timerId(timer);
     if (isRoot && !inProcessTimers) {
+      hostTimerIds.set(logicalTimerId(timer), id);
       (options.timers as Exclude<AgentTimerScheduler, "in-process">).schedule({ id, delay });
       return;
     }
-    const key = timerKey(isRoot ? undefined : source, id);
+    const key = timerKey(isRoot ? undefined : source, logicalTimerId(timer));
     clearTimeout(timerHandles.get(key));
     timerHandles.set(
       key,
@@ -3870,13 +3879,15 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       armTimer(source, (source as AnyActor).address === execution.rootAddress, timer, delay);
     },
     cancelTimer: (source: AnyActorRef, timer: TimerKey) => {
-      const id = timerId(timer);
+      const logicalId = logicalTimerId(timer);
       const isRoot = (source as { address?: string }).address === execution.rootAddress;
       if (isRoot && !inProcessTimers) {
+        const id = hostTimerIds.get(logicalId) ?? timerId(timer);
+        hostTimerIds.delete(logicalId);
         (options.timers as Exclude<AgentTimerScheduler, "in-process">).cancel(id);
         return;
       }
-      const key = timerKey(isRoot ? undefined : source, id);
+      const key = timerKey(isRoot ? undefined : source, logicalId);
       clearTimeout(timerHandles.get(key));
       timerHandles.delete(key);
     },

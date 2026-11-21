@@ -665,6 +665,7 @@ export function createTimerRecorder(): {
 }
 
 type PersistedTimer = {
+  occurrence?: number;
   id?: string;
   seq?: number;
   delay?: unknown;
@@ -673,9 +674,11 @@ type PersistedTimer = {
 
 // The scheduler `id` the runtime hands a host for this timer: its XState
 // `TimerKey`, as JSON. Built-in timers are keyed by their event's identity.
+// Each scheduling's `occurrence` follows the identity.
 function timerId(timer: PersistedTimer): string {
-  if (timer.id !== undefined) return JSON.stringify({ id: timer.id });
-  if (timer.seq !== undefined) return JSON.stringify({ seq: timer.seq });
+  const occurrence = timer.occurrence !== undefined ? { occurrence: timer.occurrence } : {};
+  if (timer.id !== undefined) return JSON.stringify({ id: timer.id, ...occurrence });
+  if (timer.seq !== undefined) return JSON.stringify({ seq: timer.seq, ...occurrence });
   const event = timer.event!;
   const identity =
     event.type === "xstate.after"
@@ -685,7 +688,7 @@ function timerId(timer: PersistedTimer): string {
         : event.type === "xstate.timeout.actor"
           ? { type: event.type, actorId: event.actorId }
           : event;
-  return JSON.stringify({ event: identity });
+  return JSON.stringify({ event: identity, ...occurrence });
 }
 
 /** The root timers a persisted snapshot holds — what a restore would re-arm. */

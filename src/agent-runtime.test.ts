@@ -391,6 +391,37 @@ describe("createAgentRuntime", () => {
     expect(resumed.status === "done" ? resumed.output : undefined).toEqual({ expired: true });
   });
 
+  test("host-owned timers: leaving the state cancels the id the host was asked to schedule", async () => {
+    const scheduled: string[] = [];
+    const cancelled: string[] = [];
+    const host = {
+      schedule: ({ id }: { id: string }) => scheduled.push(id),
+      cancel: (id: string) => cancelled.push(id),
+    };
+    const machine = setupAgent({
+      context: z.object({}),
+      events: { SKIP: z.object({}) },
+    }).createMachine({
+      context: {},
+      initial: "waiting",
+      states: {
+        waiting: { after: { 20: { target: "expired" } }, on: { SKIP: { target: "skipped" } } },
+        expired: {},
+        skipped: {},
+      },
+    });
+
+    const first = await runToQuiescence(createAgentRuntime(machine, { timers: host }));
+    expect(scheduled).toHaveLength(1);
+    await runToQuiescence(createAgentRuntime(machine, { timers: host }), {
+      snapshot: first.persist(),
+      event: { type: "SKIP" },
+    });
+    // The resume re-armed the restored timer under the same id, then left the state.
+    expect(new Set(scheduled)).toEqual(new Set([scheduled[0]]));
+    expect(cancelled).toEqual([scheduled[0]]);
+  });
+
   test("a pending timer resumes with what is left of its delay, not the whole delay", async () => {
     const scheduled: Array<{ id: string; delay: number }> = [];
     const host = {

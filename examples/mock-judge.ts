@@ -67,6 +67,9 @@ function answerFor(question: DecisionQuestion, raw: MockJudgeAnswer, id: string)
     }
     return { type: "choice", choice, probabilities: distribution(labels, choice) };
   }
+  if (question.type === "box") {
+    throw new Error(`mock judge: question "${id}" is a box question, which scripts cannot answer`);
+  }
   const score = Number(raw);
   if (!Number.isInteger(score) || score < 0 || score >= question.criteria.length) {
     throw new Error(

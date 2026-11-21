@@ -37,8 +37,11 @@ export function AgentChat({ api = "/api/chat" }: AgentChatProps) {
   const [input, setInput] = useState("");
   // The machine state currently producing tokens, from the step events.
   const [step, setStep] = useState<string | null>(null);
+  // One conversation per mounted chat: `useChat` requires a stable thread id.
+  const [threadId] = useState(() => crypto.randomUUID());
 
   const { messages, sendMessage, isLoading, error } = useChat({
+    threadId,
     connection: fetchServerSentEvents(api),
     onChunk: (chunk: StreamChunk) => {
       if (chunk.type === EventType.STEP_STARTED) {

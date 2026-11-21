@@ -1663,7 +1663,7 @@ describe("createAiSdkExecutors — decision models in the models map", () => {
         const pick = list[Math.min(calls.length, list.length) - 1]!;
         const answers = Object.fromEntries(
           Object.entries(options.questions).map(([id, question]) => {
-            const labels = Object.keys(question.criteria ?? {});
+            const labels = question.type === "choice" ? Object.keys(question.criteria) : [];
             const rest = labels.length > 1 ? (1 - share) / (labels.length - 1) : 0;
             return [
               id,

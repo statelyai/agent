@@ -185,14 +185,21 @@ class TanStackAiRunError extends Error {
   }
 }
 
+/** The usage of every model call of one `chat()` run, summed as `onUsage` reports it. */
+type BilledUsage = { usage: AgentCallUsage | undefined };
+
 /**
  * Reads a `chat()` stream to the end. Text arrives as `TEXT_MESSAGE_CONTENT`
- * deltas; every model turn ends in its own `RUN_FINISHED`, so a tool loop's
- * usage is summed and the last finish reason wins. A provider failure arrives
- * as a `RUN_ERROR` chunk rather than a throw, and is thrown here.
+ * deltas; every model turn ends in its own `RUN_FINISHED`, so turns are counted
+ * and the last finish reason wins. Usage comes from `billed`, not the chunks:
+ * when a combined structured output fails to parse, `chat()` drops the final
+ * turn's `RUN_FINISHED`, though `onUsage` still reported it. A provider
+ * failure arrives as a `RUN_ERROR` chunk rather than a throw, and is thrown
+ * here.
  */
 async function readRun(
   stream: AsyncIterable<StreamChunk>,
+  billed: BilledUsage,
   onDelta?: (delta: string) => void,
 ): Promise<RunSummary> {
   const summary: RunSummary = {
@@ -277,9 +284,6 @@ async function readRun(
               ?.finishReason;
           summary.finishReason = toAgentFinishReason(finishReason);
           summary.modelCalls++;
-          if (chunk.usage && !Array.isArray(chunk.usage)) {
-            summary.usage = addUsage(summary.usage, toAgentCallUsage(chunk.usage));
-          }
           break;
         }
         case "RUN_ERROR":
@@ -288,8 +292,9 @@ async function readRun(
     }
   } catch (error) {
     // The failed turn was a call too.
-    throw withModelCalls(error, summary.modelCalls + 1, summary.usage);
+    throw withModelCalls(error, summary.modelCalls + 1, billed.usage);
   }
+  summary.usage = billed.usage;
   const invalid = new Set<string>();
   for (const { part, json } of args.values()) {
     try {
@@ -332,7 +337,11 @@ export type TanStackAiCallSettings = Omit<
   | "stream"
   | "abortController"
   | "agentLoopStrategy"
->;
+  | "threadId"
+> & {
+  /** The AG-UI thread id `chat()` requires. Defaults to a new random id per call. */
+  threadId?: string;
+};
 
 /**
  * One entry in a {@link TanStackAiModelMap}: a bare text adapter, or an adapter
@@ -539,12 +548,23 @@ async function runChat(
   } else {
     signal?.addEventListener("abort", abort, { once: true });
   }
+  const billed: BilledUsage = { usage: undefined };
+  const countUsage: ChatMiddleware = {
+    name: "statelyai:usage",
+    onUsage: (_ctx, usage) => {
+      billed.usage = addUsage(billed.usage, toAgentCallUsage(usage));
+    },
+  };
   let run: RunSummary;
   try {
     run = await readRun(
-      chat({ ...options, abortController: controller } as Parameters<
-        typeof chat
-      >[0]) as AsyncIterable<StreamChunk>,
+      chat({
+        ...options,
+        threadId: options.threadId ?? crypto.randomUUID(),
+        middleware: [...((options.middleware as ChatMiddleware[] | undefined) ?? []), countUsage],
+        abortController: controller,
+      } as unknown as Parameters<typeof chat>[0]) as AsyncIterable<StreamChunk>,
+      billed,
       onDelta,
     );
   } finally {
