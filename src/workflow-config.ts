@@ -422,6 +422,9 @@ type WorkflowTranslation = {
   // layer erases targets from transitions that carry a context patch (they
   // become opaque resolver functions), so lint reads reachability from here.
   transitionTargets: Record<string, string[]>;
+  // The config's machine id, if any: xstate ids each state `<id>.<path>`, or
+  // `<path>` without one.
+  machineId: string | undefined;
 };
 
 // Translates a transition's `guard` into a ConditionJSON: `{{ }}` template →
@@ -700,8 +703,8 @@ function translateWorkflowState(
   translation: WorkflowTranslation,
 ): Record<string, unknown> {
   const location = `state '${stateKey}'`;
-  // State paths are '.'-joined here (transition-target keys, the synthetic
-  // `@state.<path>` done id), so a key containing a '.' would be indistinguishable
+  // State paths are '.'-joined here (transition-target keys, the state's
+  // default `<id>.<path>` id), so a key containing a '.' would be indistinguishable
   // from a nested path — mis-keying static targets and false-flagging the
   // reachability lint. Reject it at build time instead.
   if (stateKey.includes(".")) {
@@ -719,11 +722,13 @@ function translateWorkflowState(
   );
 
   // The JSON layer has no state-level `onDone`; translate it to the state's
-  // own done event, keyed by an explicit synthetic id (the `@state.` prefix
-  // avoids colliding with the machine id — states themselves cannot declare
-  // ids in an AgentWorkflowConfig).
+  // own done event, matched on the state's default id. States cannot declare
+  // ids in an AgentWorkflowConfig, so the default id stays, and `#<id>.<path>`
+  // targets still resolve to this state.
   const doneStateId =
-    stateConfig.onDone !== undefined ? `@state.${childPath.join(".")}` : undefined;
+    stateConfig.onDone !== undefined
+      ? [...(translation.machineId ? [translation.machineId] : []), ...childPath].join(".")
+      : undefined;
   const translatedOn = {
     ...Object.fromEntries(
       Object.entries(stateConfig.on ?? {}).map(([eventType, transitionConfig]) => [
@@ -744,7 +749,6 @@ function translateWorkflowState(
   return {
     ...(stateConfig.description !== undefined ? { description: stateConfig.description } : {}),
     ...(stateConfig.type !== undefined ? { type: stateConfig.type } : {}),
-    ...(doneStateId ? { id: doneStateId } : {}),
     ...(stateConfig.initial !== undefined ? { initial: stateConfig.initial } : {}),
     ...(stateConfig.states !== undefined
       ? {
@@ -908,6 +912,7 @@ export function setupAgentFromConfig(
     actions: options.actions ?? {},
     syntheticGuards: {},
     transitionTargets: {},
+    machineId: config.id,
   };
   const json = translateWorkflowConfig(config, translation);
 
