@@ -219,6 +219,12 @@ export interface AgentRunMeta {
   logId?: string;
   /** The log's length at the moment this snapshot was taken. */
   logIndex: number;
+  /**
+   * The snapshot carries XState's timer occurrence counters (6.0.0-beta.4 and
+   * later). A snapshot without them is never trusted over the log, whose fold
+   * rebuilds them.
+   */
+  timerOccurrences?: true;
 }
 
 // The recorded `verification.stateHash` of a log entry is taken from a
@@ -236,6 +242,33 @@ function hashResumeSnapshot(snapshot: unknown): string {
     return getSnapshotStateHash(rest);
   }
   return getSnapshotStateHash(snapshot);
+}
+
+// Copies each pending timer's `scheduledAt` from a checkpoint written before
+// timer occurrences onto the snapshot its log refolds to, so a restored timer
+// waits only what is left of its delay. Timers match on everything but the
+// occurrence, which the checkpoint does not have, in any key order (another
+// XState version wrote it); children are matched too.
+function carryTimerStarts(from: unknown, to: unknown): void {
+  const timersOf = (snapshot: unknown) =>
+    ((snapshot as { timers?: unknown } | null)?.timers ?? []) as Array<Record<string, unknown>>;
+  const identity = ({ occurrence: _o, scheduledAt: _s, ...timer }: Record<string, unknown>) =>
+    canonicalEventJson(timer);
+  const starts = new Map(timersOf(from).map((timer) => [identity(timer), timer.scheduledAt]));
+  for (const timer of timersOf(to)) {
+    const scheduledAt = starts.get(identity(timer));
+    if (scheduledAt !== undefined) timer.scheduledAt = scheduledAt;
+  }
+  const childrenOf = (snapshot: unknown) =>
+    ((snapshot as { children?: unknown } | null)?.children ?? {}) as Record<
+      string,
+      { snapshot?: unknown } | undefined
+    >;
+  const fromChildren = childrenOf(from);
+  for (const [key, child] of Object.entries(childrenOf(to))) {
+    if (child?.snapshot !== undefined)
+      carryTimerStarts(fromChildren[key]?.snapshot, child.snapshot);
+  }
 }
 
 function readAgentMeta(snapshot: unknown): Partial<AgentRunMeta> | undefined {
@@ -2380,6 +2413,11 @@ export interface AgentTimerEvent {
 // XState keys a timer by a `TimerKey` object; hosts see it as an opaque `id`.
 const timerId = (timer: TimerKey): string => JSON.stringify(timer);
 
+// A scheduling's key carries an `occurrence`, so a cancelled firing cannot
+// consume its replacement; XState cancels by the key without it.
+const logicalTimerId = ({ occurrence: _occurrence, ...timer }: TimerKey): string =>
+  JSON.stringify(timer);
+
 // A host's `{ type: "xstate.timer", id }` becomes the firing input XState
 // expects, `{ type: "xstate.timer", ...timer }`. Anything else passes through.
 function toTimerInput(event: EventObject): EventObject {
@@ -3579,6 +3617,9 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
   // ─── Timers ───
   const inProcessTimers = options.timers === undefined || options.timers === "in-process";
   const timerHandles = new Map<string, ReturnType<typeof setTimeout>>();
+  // A root host timer's scheduled id, by its logical id, so `cancel` gets the
+  // id the host was asked to `schedule`.
+  const hostTimerIds = new Map<string, string>();
   const timerKey = (source: AnyActorRef | undefined, id: string) =>
     `${(source as { address?: string } | undefined)?.address ?? "(root)"}::${id}`;
   // Arms one timer. A root timer fires into the mailbox; a child's timer is
@@ -3592,10 +3633,16 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
   ) => {
     const id = timerId(timer);
     if (isRoot && !inProcessTimers) {
-      (options.timers as Exclude<AgentTimerScheduler, "in-process">).schedule({ id, delay });
+      const host = options.timers as Exclude<AgentTimerScheduler, "in-process">;
+      // XState replaces a timer under the same key without cancelling it, so
+      // the replaced scheduling is cancelled here, as an in-process one is.
+      const replaced = hostTimerIds.get(logicalTimerId(timer));
+      if (replaced !== undefined && replaced !== id) host.cancel(replaced);
+      hostTimerIds.set(logicalTimerId(timer), id);
+      host.schedule({ id, delay });
       return;
     }
-    const key = timerKey(isRoot ? undefined : source, id);
+    const key = timerKey(isRoot ? undefined : source, logicalTimerId(timer));
     clearTimeout(timerHandles.get(key));
     timerHandles.set(
       key,
@@ -3870,13 +3917,15 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       armTimer(source, (source as AnyActor).address === execution.rootAddress, timer, delay);
     },
     cancelTimer: (source: AnyActorRef, timer: TimerKey) => {
-      const id = timerId(timer);
+      const logicalId = logicalTimerId(timer);
       const isRoot = (source as { address?: string }).address === execution.rootAddress;
       if (isRoot && !inProcessTimers) {
+        const id = hostTimerIds.get(logicalId) ?? timerId(timer);
+        hostTimerIds.delete(logicalId);
         (options.timers as Exclude<AgentTimerScheduler, "in-process">).cancel(id);
         return;
       }
-      const key = timerKey(isRoot ? undefined : source, id);
+      const key = timerKey(isRoot ? undefined : source, logicalId);
       clearTimeout(timerHandles.get(key));
       timerHandles.delete(key);
     },
@@ -4080,13 +4129,14 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
           // hash, no fast path — the log is the truth.
           const cachedMeta = readAgentMeta(init.snapshot);
           const tailStateHash = tail.verification?.stateHash;
-          const trustedCache =
+          const tailCache =
             init.snapshot !== undefined &&
             inheritedExecutionId !== undefined &&
             cachedMeta?.logId === inheritedExecutionId &&
             cachedMeta.logIndex === resumeEvents.length &&
             tailStateHash !== undefined &&
             hashResumeSnapshot(init.snapshot) === tailStateHash;
+          const trustedCache = tailCache && cachedMeta?.timerOccurrences === true;
 
           if (!trustedCache) {
             const cachedIndex = cachedMeta?.logIndex;
@@ -4110,6 +4160,9 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
             }
             logFold = foldLog(logMachine, resumeEvents, { machineVersion, verify: true });
             effectiveSnapshot = logFold.persistedSnapshot as Snapshot<unknown>;
+            // A tail checkpoint without timer occurrences: the fold rebuilt its
+            // counters, and the checkpoint still knows when its timers started.
+            if (tailCache) carryTimerStarts(init.snapshot, effectiveSnapshot);
           }
         } else {
           // Version bridge. Without a snapshot there is nothing to migrate FROM.
@@ -4535,6 +4588,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
           version: machineVersion,
           ...(logExecutionId !== undefined ? { logId: logExecutionId } : {}),
           logIndex: logIndexAtSettle,
+          timerOccurrences: true,
         };
         return persistedSnapshot;
       };

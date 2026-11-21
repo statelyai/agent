@@ -484,7 +484,8 @@ function normalizeEventErrors(
 // --- Hashing ---------------------------------------------------------------
 
 // Keys stripped from a persisted snapshot before hashing: they are re-minted on
-// every fold (actor session identity, the actor/timer id counters) and so
+// every fold (actor session identity, the actor/timer id and occurrence
+// counters) and so
 // differ between two runs that are otherwise identical.
 //
 // Stripping is POSITION-AWARE. A persisted snapshot nests application data
@@ -494,11 +495,20 @@ function normalizeEventErrors(
 // shape and only strips at the structural positions XState itself writes:
 // the snapshot root, and each `children[*]` entry (whose `snapshot` is itself
 // a persisted snapshot).
-const SNAPSHOT_VOLATILE_KEYS = new Set(["sessionId", "_nextTimerId", "_nextActorIds"]);
+const SNAPSHOT_VOLATILE_KEYS = new Set([
+  "sessionId",
+  "_nextTimerId",
+  // XState 6.0.0-beta.4 added the occurrence counter: `_nextTimerOccurrence`
+  // on a live snapshot, `nextTimerOccurrence` on a persisted one.
+  "_nextTimerOccurrence",
+  "nextTimerOccurrence",
+  "_nextActorIds",
+]);
 const CHILD_VOLATILE_KEYS = new Set(["sessionId"]);
 // A live runtime stamps each timer with its wall-clock start; a replayed
-// snapshot never has one.
-const TIMER_VOLATILE_KEYS = new Set(["scheduledAt"]);
+// snapshot never has one. A timer's `occurrence` comes from the snapshot's
+// counter, and XState 6.0.0-beta.2 logs predate it.
+const TIMER_VOLATILE_KEYS = new Set(["scheduledAt", "occurrence"]);
 
 /**
  * Where the walk is inside a persisted snapshot: the snapshot object itself,

@@ -37,6 +37,7 @@ function answerFor(question: DecisionQuestion, raw: string | number): ModelAnswe
       probabilities: distribution(Object.keys(question.criteria), choice, 0.9),
     };
   }
+  if (question.type === "box") throw new Error("test judge: box questions are not scripted");
   // All mass on the scripted level: the SDK checks that a score equals the
   // probability-weighted mean of its levels.
   const levels = question.criteria.map((_level, index) => String(index));
