@@ -15,9 +15,7 @@ import {
   type EventFromSnapshot,
   matchesHandlerDescriptor,
 } from "./events.js";
-import type { DecisionStrategy } from "./decision-strategy.js";
 import { isRecord } from "./internal/is-record.js";
-import type { AgentRequestExecutor } from "./text-logic.js";
 import type { ChosenEvent, StandardSchemaV1 } from "./types.js";
 
 /** Options for {@link decideNext}. */
@@ -39,17 +37,12 @@ export interface DecideNextOptions<TSnapshot extends AnyMachineSnapshot = AnyMac
   prompt?: string;
   /** Semantic request name, for traces and scripted executors. Default `'decideNext'`. */
   name?: string;
-  /**
-   * Passed through as `request.metadata`, as `agent.decide` input's
-   * `metadata` is. {@link createPolicyDecider}'s default policy input reads
-   * `metadata.facts`.
-   */
+  /** Passed through as `request.metadata`, as `agent.decide` input's `metadata` is. */
   metadata?: Record<string, unknown>;
   /**
    * The decision's idempotency key, unique per decision and the same when a
    * crashed host asks again. Each attempt's executor `info.callKey` is
-   * `${callKey}.${attempt}`, as under `agent.decide`. {@link createPolicyDecider}
-   * with a `store` names each policy thread from it. Default: none.
+   * `${callKey}.${attempt}`, as under `agent.decide`. Default: none.
    */
   callKey?: string;
   /**
@@ -62,14 +55,6 @@ export interface DecideNextOptions<TSnapshot extends AnyMachineSnapshot = AnyMac
   /** Retries after a failed choice. Default `2`. */
   maxRetries?: number;
   signal?: AbortSignal;
-  /** How the decision is split into model calls. Default `'auto'`; see {@link DecisionStrategy}. */
-  strategy?: DecisionStrategy;
-  /** Model ref that fills open payload fields under `'pick-then-fill'`. */
-  fillModel?: string;
-  /** Named groups of event types for `'grouped'`; the rest group by prefix before the first `.`. */
-  groups?: Record<string, readonly string[]>;
-  /** Fills open payload fields with `fillModel`. */
-  generateText?: AgentRequestExecutor;
 }
 
 /** Result of {@link decideNext}. */
@@ -165,9 +150,6 @@ export async function decideNext<TSnapshot extends AnyMachineSnapshot>(
     events,
     options: offered,
     withheld,
-    ...(options.strategy !== undefined ? { strategy: options.strategy } : {}),
-    ...(options.fillModel !== undefined ? { fillModel: options.fillModel } : {}),
-    ...(options.groups !== undefined ? { groups: options.groups } : {}),
   });
 
   if (offered.length === 0) {
@@ -182,7 +164,6 @@ export async function decideNext<TSnapshot extends AnyMachineSnapshot>(
         attempts = attemptRequest.attempts;
         return options.decide(attemptRequest, info);
       },
-      ...(options.generateText ? { generateText: options.generateText } : {}),
     },
     {
       maxRetries: options.maxRetries,

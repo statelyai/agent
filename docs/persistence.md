@@ -137,7 +137,7 @@ Run it in CI next to the machine's other tests. It needs no API key.
 
 ## Snapshot as cache
 
-`persist()` output carries `agentMeta: { machineId, version, logId, logIndex }`: the lineage and position of the log it caches.
+`persist()` output carries `agentMeta: { machineId, version, logId, logIndex, timerOccurrences }`: the lineage and position of the log it caches, and `timerOccurrences: true` when the snapshot holds the timer occurrence counters that XState 6.0.0-beta.4 added.
 
 Pass `snapshot` alongside `events` to skip the fold:
 
@@ -150,7 +150,7 @@ const resumed = await runAgent(machine, {
 });
 ```
 
-- Fast path: `agentMeta.logId` names the log, `logIndex` equals the log length, and the snapshot's state hash matches the tail entry's `verification.stateHash`. Length alone is not enough, because a fork or a sibling thread can sit at the same index.
+- Fast path: `agentMeta.logId` names the log, `logIndex` equals the log length, `timerOccurrences` is `true`, and the snapshot's state hash matches the tail entry's `verification.stateHash`. Length alone is not enough, because a fork or a sibling thread can sit at the same index. A snapshot persisted by an earlier release has no `timerOccurrences`, so the log is replayed once to rebuild its timer counters.
 - Otherwise the log is replayed and the run resumes from the replayed state.
 - A cache that disagrees with the state the log replays to throws `AgentSnapshotDivergedError` (code `snapshot-diverged`). Drop the snapshot and resume from `events` alone.
 

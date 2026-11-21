@@ -18,16 +18,17 @@ Stately Agent is XState plus typed model requests, decisions, and host executors
 
 ## Core APIs
 
-| API                                         | Purpose                                                                    |
-| ------------------------------------------- | -------------------------------------------------------------------------- |
-| `runAgent`                                  | Run a machine to done or idle; the default entry point                     |
-| `setupAgent`                                | Schema-first XState setup with Agent request actors                        |
-| `createAgentRuntime`                        | Advanced, own the loop: bind executors, expose one durable transition loop |
-| `getInteraction` / `eventFromInteraction`   | Render and validate human interactions                                     |
-| `describeMachine`                           | Render a machine as plain text for a model, or as a Mermaid diagram        |
-| `wrapWorkflow`                              | Wrap an existing async workflow, unchanged, as a machine                   |
-| `isAgentIdle`                               | Distinguish a human wait from a stuck settled machine                      |
-| `ContextOf` / `EventOf` / other `*Of` types | Extract setup and machine types                                            |
+| API                                         | Purpose                                                                               |
+| ------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `runAgent`                                  | Run a machine to done or idle; the default entry point                                |
+| `setupAgent`                                | Schema-first XState setup with Agent request actors                                   |
+| `createAgentRuntime`                        | Advanced, own the loop: bind executors, expose one durable transition loop            |
+| `agent.act`                                 | Send any number of the state's events from one tool loop ([Acting on events](act.md)) |
+| `getInteraction` / `eventFromInteraction`   | Render and validate human interactions                                                |
+| `describeMachine`                           | Render a machine as plain text for a model, or as a Mermaid diagram                   |
+| `wrapWorkflow`                              | Wrap an existing async workflow, unchanged, as a machine                              |
+| `isAgentIdle`                               | Distinguish a human wait from a stuck settled machine                                 |
+| `ContextOf` / `EventOf` / other `*Of` types | Extract setup and machine types                                                       |
 
 ## Entry points
 
@@ -40,9 +41,7 @@ Stately Agent is XState plus typed model requests, decisions, and host executors
 | `@statelyai/agent/ai-sdk`      | `createAiSdkExecutors`: the Vercel AI SDK adapter, for language and decision models        |
 | `@statelyai/agent/openai`      | Executors over the raw `openai` package                                                    |
 | `@statelyai/agent/tanstack-ai` | `createTanStackAiExecutors`, the TanStack AI adapter                                       |
-| `@statelyai/agent/machines`    | `createApprovalBatchMachine`, a preset that gates a turn's tool calls on approval          |
 | `@statelyai/agent/otel`        | OpenTelemetry trace handler                                                                |
-| `@statelyai/agent/policy`      | `decideNext` for any XState snapshot, and `createPolicyDecider` for a policy machine       |
 | `@statelyai/agent/validate`    | JSON workflow config validation and `verifyAgentConfig` pre-run gates                      |
 
 Core has no runtime dependency on the AI SDK.

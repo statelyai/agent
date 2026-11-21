@@ -308,6 +308,95 @@ describe("createTanStackAiExecutors — tools", () => {
     });
   });
 
+  test("a loop that fails after a turn reports the calls it made and their usage on the error", async () => {
+    const adapter = new FakeTextAdapter([
+      { toolCalls: [{ name: "lookup", input: { city: "Oslo" } }] },
+      { error: { message: "upstream down" } },
+    ]);
+    const { generateText } = createTanStackAiExecutors({ models: { quick: adapter } });
+
+    await expect(
+      generateText(textRequest({ tools: { lookup } as unknown as AgentTools, maxSteps: 2 })),
+    ).rejects.toMatchObject({
+      message: "upstream down",
+      modelCalls: 2,
+      usage: { inputTokens: 5, outputTokens: 2, totalTokens: 7 },
+    });
+  });
+
+  test("a structured loop truncated after a turn keeps its calls and usage on the truncation error", async () => {
+    const adapter = new FakeTextAdapter([
+      { toolCalls: [{ name: "lookup", input: { city: "Oslo" } }] },
+      { error: { message: "cut off", code: "max_tokens" } },
+    ]);
+    const { generateText } = createTanStackAiExecutors({ models: { quick: adapter } });
+
+    const error = await generateText(
+      textRequest({
+        tools: { lookup } as unknown as AgentTools,
+        maxSteps: 2,
+        outputSchema: z.object({ title: z.string() }),
+      }),
+    ).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(AgentTruncatedError);
+    expect(error).toMatchObject({
+      modelCalls: 2,
+      usage: { inputTokens: 5, outputTokens: 2, totalTokens: 7 },
+    });
+  });
+
+  test("a structured loop whose final answer is not JSON still reports every turn's usage", async () => {
+    // Combined mode: `chat()` drops the final turn's RUN_FINISHED when the
+    // answer fails to parse, and reports only a RUN_ERROR.
+    const adapter = new FakeTextAdapter([
+      { toolCalls: [{ name: "lookup", input: { city: "Oslo" } }] },
+      { text: "not json", usage: { promptTokens: 8, completionTokens: 3, totalTokens: 11 } },
+    ]);
+    const { generateText } = createTanStackAiExecutors({ models: { quick: adapter } });
+
+    await expect(
+      generateText(
+        textRequest({
+          tools: { lookup } as unknown as AgentTools,
+          maxSteps: 2,
+          outputSchema: z.object({ title: z.string() }),
+        }),
+      ),
+    ).rejects.toMatchObject({
+      modelCalls: 2,
+      usage: { inputTokens: 13, outputTokens: 5, totalTokens: 18 },
+    });
+    expect(adapter.requests).toHaveLength(2);
+  });
+
+  test("a loop cancelled mid-run reports the turns it completed on the abort reason", async () => {
+    const controller = new AbortController();
+    const reason = new Error("state exited");
+    const stopping = {
+      ...lookup,
+      execute: async (input: { city: string }) => {
+        controller.abort(reason);
+        return lookup.execute(input);
+      },
+    };
+    const adapter = new FakeTextAdapter([
+      { toolCalls: [{ name: "lookup", input: { city: "Oslo" } }] },
+      { toolCalls: [{ name: "lookup", input: { city: "Bergen" } }] },
+      { text: "done" },
+    ]);
+    const { generateText } = createTanStackAiExecutors({ models: { quick: adapter } });
+
+    await expect(
+      generateText(
+        textRequest({ tools: { lookup: stopping } as unknown as AgentTools, maxSteps: 3 }),
+        {
+          signal: controller.signal,
+        },
+      ),
+    ).rejects.toBe(reason);
+    expect(reason).toMatchObject({ usage: { inputTokens: 5, outputTokens: 2, totalTokens: 7 } });
+  });
+
   test("without maxSteps the run is a single model turn", async () => {
     const adapter = new FakeTextAdapter([
       { toolCalls: [{ name: "lookup", input: { city: "Oslo" } }] },
@@ -315,9 +404,12 @@ describe("createTanStackAiExecutors — tools", () => {
     ]);
     const { generateText } = createTanStackAiExecutors({ models: { quick: adapter } });
 
-    await generateText(textRequest({ tools: { lookup } as unknown as AgentTools }));
+    const result = await generateText(textRequest({ tools: { lookup } as unknown as AgentTools }));
 
     expect(adapter.requests).toHaveLength(1);
+    // The loop-stop marker `chat()` adds after the tool runs is not a model call.
+    expect(result.modelCalls).toBe(1);
+    expect(result.usage).toEqual({ inputTokens: 5, outputTokens: 2, totalTokens: 7 });
   });
 
   test("a tool with no execute stops the run at its call", async () => {

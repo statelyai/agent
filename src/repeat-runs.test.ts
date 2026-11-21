@@ -8,7 +8,7 @@ import {
   type AgentTraceEvent,
 } from "./index.js";
 import { runToQuiescence } from "./run-agent.js";
-import { foldTraces, repeatRuns, summarizeRepeats } from "./evals/index.js";
+import { foldTraces, repeatRuns } from "./evals/index.js";
 
 const schemas = createAgentSchemas({
   context: z.object({}),
@@ -120,15 +120,36 @@ describe("repeatRuns", () => {
   });
 });
 
-describe("summarizeRepeats", () => {
+describe("repeatRuns report", () => {
+  type Run = { passed: boolean; trace?: readonly { type: string }[] };
+  // Replays recorded runs through repeatRuns: run `attempt` of each scenario.
+  const repeat = (groups: { id: string; runs: Run[] }[]) => {
+    let current: Run;
+    return repeatRuns({
+      scenarios: groups,
+      k: groups[0]!.runs.length,
+      run: async (scenario, attempt) => {
+        current = scenario.runs[attempt]!;
+        return { trace: current.trace ?? [] };
+      },
+      passed: () => current.passed,
+    });
+  };
   const group = (id: string, results: boolean[]) => ({
     id,
-    scenario: { id },
     runs: results.map((passed) => ({ passed })),
   });
+  const moved = [
+    {
+      type: "machine.transition",
+      from: { value: "a" },
+      event: { type: "GO" },
+      snapshot: { value: "b" },
+    },
+  ];
 
-  test("passHat is the unbiased pass^j estimate, averaged over scenarios", () => {
-    const report = summarizeRepeats([
+  test("passHat is the unbiased pass^j estimate, averaged over scenarios", async () => {
+    const report = await repeat([
       group("none", [false, false, false, false]),
       group("all", [true, true, true, true]),
       group("half", [true, true, false, false]),
@@ -141,15 +162,8 @@ describe("summarizeRepeats", () => {
     expect(report.passHat(4)).toBeCloseTo(1 / 3);
   });
 
-  test("scenarios with fewer than j runs are left out of passHat", () => {
-    const report = summarizeRepeats([group("short", [false]), group("long", [true, true])]);
-
-    expect(report.passHat(1)).toBeCloseTo(1 / 2);
-    expect(report.passHat(2)).toBe(1);
-  });
-
-  test("passHat rejects j outside 1 to the most runs", () => {
-    const report = summarizeRepeats([group("a", [true, true])]);
+  test("passHat rejects j outside 1 to the most runs", async () => {
+    const report = await repeat([group("a", [true, true])]);
 
     for (const j of [0, 3, 1.5]) {
       expect(() => report.passHat(j)).toThrow(
@@ -158,59 +172,57 @@ describe("summarizeRepeats", () => {
     }
   });
 
-  test("an empty first trace does not abort the summary", () => {
-    const moved = [
-      {
-        type: "machine.transition",
-        from: { value: "a" },
-        event: { type: "GO" },
-        snapshot: { value: "b" },
-      },
-    ];
-
-    const [row] = summarizeRepeats([
-      {
-        id: "a",
-        scenario: {},
-        runs: [
-          { passed: false, trace: [] },
-          { passed: true, trace: moved },
-        ],
-      },
-    ]).scenarios;
+  test("an empty first trace does not abort the summary", async () => {
+    const [row] = (
+      await repeat([
+        {
+          id: "a",
+          runs: [
+            { passed: false, trace: [] },
+            { passed: true, trace: moved },
+          ],
+        },
+      ])
+    ).scenarios;
 
     expect(row).toMatchObject({ distinctPaths: 2, divergedAt: "a" });
   });
 
-  test("a first trace with no transitions is not the reference", () => {
-    const moved = [
-      {
-        type: "machine.transition",
-        from: { value: "a" },
-        event: { type: "GO" },
-        snapshot: { value: "b" },
-      },
-    ];
+  test("a first trace with no transitions is not the reference", async () => {
     const partial = [{ type: "request.start", request: { kind: "text" } }];
 
-    const [row] = summarizeRepeats<object, readonly { type: string }[]>([
-      {
-        id: "a",
-        scenario: {},
-        runs: [
-          { passed: false, trace: partial },
-          { passed: true, trace: moved },
-        ],
-      },
-    ]).scenarios;
+    const [row] = (
+      await repeat([
+        {
+          id: "a",
+          runs: [
+            { passed: false, trace: partial },
+            { passed: true, trace: moved },
+          ],
+        },
+      ])
+    ).scenarios;
 
     expect(row).toMatchObject({ distinctPaths: 2, divergedAt: "a" });
   });
 
-  test("untraced runs count toward passes but not paths", () => {
-    const [row] = summarizeRepeats([group("a", [true, false])]).scenarios;
+  test("a run that throws counts toward no path", async () => {
+    const report = await repeatRuns({
+      scenarios: [{ id: "a" }],
+      k: 2,
+      run: async (_, attempt) => {
+        if (attempt === 1) throw new Error("provider down");
+        return run("refund");
+      },
+      passed: () => true,
+    });
 
-    expect(row).toMatchObject({ passes: 1, passAny: true, passAll: false, distinctPaths: 0 });
-    expect(row!.divergedAt).toBeUndefined();
+    expect(report.scenarios[0]).toMatchObject({
+      passes: 1,
+      passAny: true,
+      passAll: false,
+      distinctPaths: 1,
+    });
+    expect(report.scenarios[0]!.divergedAt).toBeUndefined();
   });
 });

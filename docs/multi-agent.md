@@ -59,10 +59,9 @@ collecting: {
 
 - **Release per child instead.** Send `RELEASE` in the `CHILD_READY` handler itself; the barrier disappears and each child proceeds on its own.
 - **Safety lives in the child.** The child takes `RELEASE` only in its checkpoint state, so a stray or forged release cannot skip a step. Check it with `canReach` on the child machine.
-- **Preset.** `createApprovalBatchMachine` is this pattern for tool calls: one child per call, the checkpoint is approval, and `executeWhen` picks barrier or per-child release. See [Preset machines](machines-presets.md#createapprovalbatchmachine).
 
 ## Events from one model turn
 
-[`agent.act`](act.md) sends several events from one tool loop, each applied as it arrives. Use it when every event the model calls is safe to apply; use the approval batch when each needs a verdict first.
+[`agent.act`](act.md) sends several events from one tool loop, each applied as it arrives. Use it when every event the model calls is safe to apply; when each needs a verdict first, put the calls in context and wait for a person's event per call. See [Approval gate](tools.md#approval-gate).
 
 See [hierarchical teams](https://github.com/statelyai/agent/blob/next/examples/hierarchical-teams), [swarm handoff](https://github.com/statelyai/agent/blob/next/examples/swarm-handoff), [deep research](https://github.com/statelyai/agent/blob/next/examples/deep-research), and [game loop agent](https://github.com/statelyai/agent/blob/next/examples/game-loop-agent).

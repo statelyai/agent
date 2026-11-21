@@ -2584,6 +2584,38 @@ describe("setupAgent", () => {
     expect(actor.getSnapshot().output).toEqual({ finished: true });
   });
 
+  test.each([
+    ["with a machine id", "m", "#m.working"],
+    ["without a machine id", undefined, "#working"],
+  ])(
+    "fromConfig: a state with onDone keeps its default id, so #id targets reach it (%s)",
+    async (_label, id, target) => {
+      const { machine } = setupAgent.fromConfig(
+        {
+          ...(id !== undefined ? { id } : {}),
+          schemas: { context: { type: "object", properties: {} } },
+          context: {},
+          initial: "idle",
+          states: {
+            idle: { on: { GO: { target } } },
+            working: {
+              initial: "step",
+              states: { step: { type: "final" } },
+              onDone: { target: "done" },
+            },
+            done: { type: "final" },
+          },
+        },
+        { compileSchema: ajvCompiler() },
+      );
+
+      const actor = createActor(machine).start();
+      actor.send({ type: "GO" });
+      await waitFor(actor, (snapshot) => snapshot.status === "done");
+      expect(actor.getSnapshot().value).toBe("done");
+    },
+  );
+
   test("fromConfig resolves named action types against options.actions", () => {
     const notified: unknown[] = [];
     const { machine } = setupAgent.fromConfig(

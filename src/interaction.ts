@@ -66,7 +66,10 @@ export type AgentInteractionEventMeta =
  * names an event the machine never declared is a compile error.
  */
 export interface AgentInteractionDescriptor<TEvent extends string = string> {
-  /** Label text, or a function of the machine context. `{path.to.field}` interpolates. */
+  /**
+   * Label text, where `{path.to.field}` interpolates from the context, or a
+   * function of the context whose result is used as written (braces in it stay).
+   */
   label?: string | ((args: { context: any }) => string);
   events?: { [K in TEvent]?: AgentInteractionEventMeta };
   /**
@@ -252,7 +255,11 @@ function interpolate(label: string, context: unknown, preserveWhitespace: boolea
     const value = readPath(context, path.trim());
     return value === undefined || value === null ? "" : String(value);
   });
-  return preserveWhitespace ? interpolated : interpolated.replace(/\s+/g, " ").trim();
+  return collapseWhitespace(interpolated, preserveWhitespace);
+}
+
+function collapseWhitespace(text: string, preserveWhitespace: boolean): string {
+  return preserveWhitespace ? text : text.replace(/\s+/g, " ").trim();
 }
 
 // The event schemas to judge payloads with: the pack `setupAgent` registered,
@@ -284,10 +291,12 @@ export function getInteraction<TSnapshot extends AnyMachineSnapshot>(
   // complete before the guard is consulted.
   const eventSchemas = eventSchemasOf(snapshot);
   const accepted = new Set(getAcceptedEvents(snapshot).map((event) => event.type));
+  // A function label already read the context, so its text is not interpolated
+  // again: braces in it (a JSON argument, say) are shown as written.
   const label =
     typeof interaction.label === "function"
-      ? interaction.label({ context: snapshot.context })
-      : (interaction.label ?? "");
+      ? collapseWhitespace(interaction.label({ context: snapshot.context }), preserveWhitespace)
+      : interpolate(interaction.label ?? "", snapshot.context, preserveWhitespace);
   const events = Object.entries(interaction.events ?? {})
     .filter(
       (entry): entry is [string, AgentInteractionEventMeta] =>
@@ -360,7 +369,7 @@ export function getInteraction<TSnapshot extends AnyMachineSnapshot>(
       : interaction.textEvent;
 
   return {
-    label: interpolate(label, snapshot.context, preserveWhitespace),
+    label,
     events,
     ...(declaresChoices ? { choices } : {}),
     ...(text && accepted.has(text.type)

@@ -140,13 +140,14 @@ export function toAgentCallUsage(usage: LanguageModelUsage): AiSdkCallUsage {
 
 /**
  * Maps the AI SDK's unified finish reason onto the portable
- * {@link AgentFinishReason}. Only `'error'` differs: core's union has no
- * `'error'` member, since a call that failed outright rejects instead of
- * returning, so it lands on `'other'`. The SDK's own value stays on the
+ * {@link AgentFinishReason}. `'error'` and `'interrupted'` land on `'other'`:
+ * core's union has no `'error'` member, since a call that failed outright
+ * rejects instead of returning, and no `'interrupted'` member (a stream that
+ * ended without a completion signal). The SDK's own value stays on the
  * result's `raw`.
  */
 export function toAgentFinishReason(finishReason: FinishReason): AgentFinishReason {
-  return finishReason === "error" ? "other" : finishReason;
+  return finishReason === "error" || finishReason === "interrupted" ? "other" : finishReason;
 }
 
 /** Drops keys whose value is `undefined`, so a spread cannot erase what it lands on. */

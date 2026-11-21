@@ -46,8 +46,8 @@ export type {
 } from "./decision.js";
 export { ACT_STATE_EXITED, DEFAULT_ACT_MAX_STEPS } from "./act.js";
 export type { AgentActInput } from "./act.js";
-export { MAX_FINITE_PAYLOADS } from "./decision-strategy.js";
-export type { DecisionStrategy } from "./decision-strategy.js";
+export { decideNext } from "./decide-next.js";
+export type { DecideNextOptions, DecideNextResult } from "./decide-next.js";
 export { AgentInvalidEventPayloadError, getAcceptedEvents, parseAgentEvent } from "./events.js";
 export { eventFromInteraction, getInteraction, interactionMetaSchema } from "./interaction.js";
 export type {
@@ -142,8 +142,6 @@ export type {
   AgentRunResult,
   AgentRunErrorCause,
 } from "./run-agent.js";
-export { createGeneratorBridge } from "./generator-bridge.js";
-export type { ForwardResult, GeneratorBridge } from "./generator-bridge.js";
 export { wrapWorkflow } from "./wrap-workflow.js";
 export type {
   EffectCallEvent,

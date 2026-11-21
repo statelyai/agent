@@ -62,7 +62,7 @@ function scripted(
   extra: Record<string, unknown> = {},
 ) {
   const requests: AgentExecutorTextRequest[] = [];
-  // Settles when the script ends: after a state exit, the run does not wait for it.
+  // Settles when the script ends.
   let ended!: () => void;
   const done = new Promise<void>((resolve) => (ended = resolve));
   const generateText = async (
@@ -280,6 +280,122 @@ describe("agent.act", () => {
       ACT_STATE_EXITED,
     ]);
   });
+
+  test("offers every event the invoking state and its descendants accept, from the start", async () => {
+    const ticketSchemas = createAgentSchemas({
+      context: z.object({}),
+      input: z.object({}),
+      events: {
+        LABEL: z.object({}),
+        ASSIGN: z.object({}),
+        APPROVE: z.object({}),
+        CANCEL: z.object({}),
+      },
+    });
+    // ASSIGN is accepted only once LABEL has moved T1 on; APPROVE only by a person.
+    const machine = setupAgent({ schemas: ticketSchemas }).createMachine({
+      context: {},
+      initial: "work",
+      on: { CANCEL: { target: ".cancelled" } },
+      states: {
+        work: {
+          type: "parallel",
+          invoke: { src: "agent.act", input: { model: "m", prompt: "Triage." } },
+          onDone: { target: "triaged" },
+          states: {
+            T1: {
+              initial: "open",
+              states: {
+                open: { on: { LABEL: { target: "labeled" } } },
+                labeled: {
+                  on: {
+                    ASSIGN: { target: "assigned" },
+                    APPROVE: { target: "assigned", meta: { actor: "human" } },
+                  },
+                },
+                assigned: { type: "final" },
+              },
+            },
+          },
+        },
+        triaged: { type: "final" },
+        cancelled: { type: "final" },
+      },
+    });
+    const results: unknown[] = [];
+    const { generateText, requests } = scripted(async (call) => {
+      results.push(await call("send_event_ASSIGN", {}));
+      results.push(await call("send_event_LABEL", {}));
+      results.push(await call("send_event_ASSIGN", {}));
+      return undefined;
+    });
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, { executors: { generateText } }),
+      { input: {} },
+    );
+
+    expect(Object.keys(requests[0]!.tools ?? {}).sort()).toEqual([
+      "send_event_ASSIGN",
+      "send_event_CANCEL",
+      "send_event_LABEL",
+    ]);
+    // Not accepted yet: refused, not sent.
+    expect(results[0]).toBe(`'ASSIGN' is not allowed in state {"work":{"T1":"open"}}`);
+    expect(results.slice(1)).toEqual([
+      { state: { work: { T1: "labeled" } } },
+      { state: "triaged" },
+    ]);
+    expect(result.status).toBe("done");
+    expect(result.snapshot.value).toBe("triaged");
+  });
+
+  test.each([
+    ["returns", false],
+    ["rejects", true],
+  ])(
+    "usage counts every request of a loop a state exit ends (the executor %s)",
+    async (_label, rejects) => {
+      const spent = { modelCalls: 3, usage: { inputTokens: 6, outputTokens: 3, totalTokens: 9 } };
+      const { generateText } = scripted(async (call) => {
+        await call("send_event_ADD", { item: "apple" });
+        await call("send_event_CHECKOUT", {});
+        // The host's tool loop settles a while after the exit aborted it.
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        if (rejects) throw Object.assign(new Error("aborted"), spent);
+        return undefined;
+      }, spent);
+      const result = await runToQuiescence(
+        createAgentRuntime(cartMachine(), { executors: { generateText } }),
+        { input: {} },
+      );
+
+      expect(result.status).toBe("done");
+      expect(result.usage).toEqual({
+        modelCalls: 3,
+        inputTokens: 6,
+        outputTokens: 3,
+        totalTokens: 9,
+      });
+    },
+  );
+
+  test("a stop ends the wait for an act loop a state exit aborted", async () => {
+    const { generateText } = scripted(async (call) => {
+      await call("send_event_ADD", { item: "apple" });
+      await call("send_event_CHECKOUT", {});
+      // The host's tool loop never settles after the exit aborted it.
+      return new Promise<undefined>(() => {});
+    });
+    const controller = new AbortController();
+    const reason = new Error("host stopped");
+    setTimeout(() => controller.abort(reason), 20);
+    const result = await runToQuiescence(
+      createAgentRuntime(cartMachine(), { executors: { generateText }, signal: controller.signal }),
+      { input: {} },
+    );
+
+    expect(result).toMatchObject({ status: "error", error: reason });
+  }, 2000);
 
   test("allowedEvents is typed against the machine's events", () => {
     setupAgent({ schemas }).createMachine({

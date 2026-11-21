@@ -271,7 +271,7 @@ export function genericDecisionModel(): DecisionModel {
               labels.map((label, index) => [label, index === 0 ? 1 : 0]),
             ),
           };
-        } else {
+        } else if (question.type === "score") {
           const top = question.criteria.length - 1;
           answers[id] = {
             type: "score",

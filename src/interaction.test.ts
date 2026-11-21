@@ -156,6 +156,30 @@ describe("interactionMetaSchema", () => {
       events: [{ type: "APPROVE", label: "Approve" }],
     });
   });
+
+  test("a function label is shown as written: braces in it are not read as context paths", () => {
+    const braces = createActor(
+      setupAgent({
+        context: z.object({ args: z.record(z.string(), z.unknown()) }),
+        meta: interactionMetaSchema,
+      }).createMachine({
+        context: { args: { opts: { dryRun: false }, note: "keep {this}" } },
+        initial: "review",
+        states: {
+          review: {
+            meta: {
+              interaction: {
+                label: ({ context }) => `Run writeFile(${JSON.stringify(context.args)})?`,
+              },
+            },
+          },
+        },
+      }),
+    ).getSnapshot();
+    expect(getInteraction(braces)?.label).toBe(
+      'Run writeFile({"opts":{"dryRun":false},"note":"keep {this}"})?',
+    );
+  });
 });
 
 describe("default meta typing", () => {

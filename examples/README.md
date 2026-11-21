@@ -72,6 +72,7 @@ it survives a snapshot round-trip instead of living in a closure.
 
 - [human-in-the-loop](human-in-the-loop): the base shape — an idle review state, a `REJECT`-with-feedback redraft loop bounded by a counter, and a real JSON round-trip
 - [review-tool-calls](review-tool-calls): who owns the tool loop — the machine gates each proposed call behind `APPROVE`/`EDIT`/`REJECT`, or the AI SDK runs the whole loop under `maxSteps` and the machine only appends the messages it returns
+- [approve-tool-calls](approve-tool-calls): approval as plain states. A person approves, denies, or approves-always each proposed tool call; calls run in proposal order, rules match the same tool and arguments only, and `canReach` proves nothing runs without approval
 - [customer-support](customer-support): one Jev call routes safe questions past the gate and sensitive actions into it, selecting the confirmation code and new flight from candidates found in code rather than generating them
 - [answer-reuse](answer-reuse): Jev checks the help article the search already found before any agent call, reusing it at `yes` and confidence `0.8` or higher, otherwise investigating exactly once, rechecking, and waiting for a person when the answer still fails
 - [sql-agent](sql-agent): the model plans the query, a human approves, and only then does the engine run it

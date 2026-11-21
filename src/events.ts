@@ -2,6 +2,8 @@ import {
   getNextTransitions,
   type AnyMachineSnapshot,
   type AnyStateMachine,
+  type AnyStateNode,
+  type AnyTransitionDefinition,
   type EventFromLogic,
   type EventObject,
   type MachineSnapshot,
@@ -84,8 +86,9 @@ function disambiguateEventToolName(
  * `'*'` (every event), or a `'prefix.*'` wildcard matching any deeper
  * segment (`'todo.*'` matches `'todo.add'` and `'todo.list.clear'`, not
  * `'todo'` itself — mirroring xstate's partial wildcard events).
+ * @internal
  */
-function matchesEventPattern(eventType: string, pattern: string): boolean {
+export function matchesEventPattern(eventType: string, pattern: string): boolean {
   if (pattern === "*") {
     return true;
   }
@@ -265,21 +268,69 @@ export function getAcceptedEvents(
     actor?: "agent";
   } = {},
 ): AgentEventDescriptor[] {
-  const eventTypes = options.eventTypes;
   const humanEventTypes: ReadonlySet<string> =
     options.actor === "agent"
       ? getHumanEventTypes(snapshot, options.events ?? options.schemas?.events)
       : new Set();
+  return describeEventTransitions(snapshot, getNextTransitions(snapshot), humanEventTypes, options);
+}
+
+/**
+ * The events an `agent.act` invoke offers as tools: what the snapshot accepts
+ * now, plus every event the invoking state node can accept while it stays
+ * active (its own and its ancestors' handlers, and all of its descendants').
+ * An event is left out when every one of those handlers is tagged
+ * `meta: { actor: "human" }`. Filters, wildcard expansion and tool names match
+ * {@link getAcceptedEvents}. @internal
+ */
+export function getActEvents(
+  snapshot: AnyMachineSnapshot,
+  invokeId: string,
+  options: Pick<AgentRequestOptions, "events" | "schemas"> & {
+    eventTypes?: readonly string[];
+  } = {},
+): AgentEventDescriptor[] {
+  const transitions = [...getNextTransitions(snapshot)];
+  const node = snapshot.nodes.find((stateNode) =>
+    stateNode.invoke.some((invoke) => invoke.id === invokeId),
+  );
+  const collect = (stateNode: AnyStateNode, descend: boolean): void => {
+    for (const list of stateNode.transitions.values()) transitions.push(...list);
+    if (descend) for (const child of Object.values(stateNode.states)) collect(child, true);
+  };
+  if (node) {
+    collect(node, true);
+    for (let parent = node.parent; parent; parent = parent.parent) collect(parent, false);
+  }
+  const schemas = options.events ?? options.schemas?.events;
+  const humanOnly = new Set<string>();
+  const agentSendable = new Set<string>();
+  for (const transition of transitions) {
+    const human = (transition.meta as { actor?: unknown } | undefined)?.actor === "human";
+    const into = human ? humanOnly : agentSendable;
+    into.add(transition.eventType);
+    for (const type of expandHandlerType(snapshot, transition.eventType, schemas)) into.add(type);
+  }
+  for (const eventType of agentSendable) humanOnly.delete(eventType);
+  return describeEventTransitions(snapshot, transitions, humanOnly, options);
+}
+
+function describeEventTransitions(
+  snapshot: AnyMachineSnapshot,
+  transitions: readonly AnyTransitionDefinition[],
+  excludedEventTypes: ReadonlySet<string>,
+  options: Pick<AgentRequestOptions, "events" | "schemas"> & { eventTypes?: readonly string[] },
+): AgentEventDescriptor[] {
+  const eventTypes = options.eventTypes;
   const seen = new Set<string>();
   const usedToolNames = new Set<string>();
-
   const schemas = options.events ?? options.schemas?.events;
 
-  return getNextTransitions(snapshot).flatMap((transitionDefinition) => {
+  return transitions.flatMap((transitionDefinition) => {
     const handlerType = transitionDefinition.eventType;
     if (!handlerType) return [];
     // A wildcard transition tagged `meta: { actor: "human" }` covers what it expands to.
-    const humanHandler = humanEventTypes.has(handlerType);
+    const humanHandler = excludedEventTypes.has(handlerType);
     return expandHandlerType(snapshot, handlerType, schemas).flatMap((eventType) =>
       describeAcceptedEvent(eventType, humanHandler, eventType !== handlerType),
     );
@@ -295,7 +346,7 @@ export function getAcceptedEvents(
       eventType.startsWith("xstate.") ||
       isReservedAgentEvent(eventType) ||
       humanHandler ||
-      humanEventTypes.has(eventType) ||
+      excludedEventTypes.has(eventType) ||
       (eventTypes && !eventTypes.some((pattern) => matchesEventPattern(eventType, pattern))) ||
       seen.has(eventType)
     ) {

@@ -290,7 +290,7 @@ agent.createMachine({
 
 An AI SDK decision model, such as TypeSafe's Jev, goes in the same `createAiSdkExecutors` models map as the language models. A decide request whose model ref names it is answered through `experimental_decide`.
 
-- The request must be a closed choice: `payloads` on `agent.decide`, `decideNext`, or the pick step of a [decision strategy](#decision-strategies). A request without options throws.
+- The request must be a closed choice: `payloads` on `agent.decide`, or `decideNext`. A decision model answers closed choices, so give the decision `payloads`. A request without options throws.
 - It asks one `choice` question. Each option id is a label, and its criterion is the option's description, or the event as JSON when it has none.
 - A label that is not an option is retried as an `unknown-event` attempt, like any failed choice.
 - The result carries `confidence` when the model reports it. Branch on it in your own code.
@@ -307,97 +307,33 @@ const { decide } = createAiSdkExecutors({
 
 See [Decision models](models-and-providers.md#decision-models).
 
-## Decision strategies
-
-A **decision strategy** splits one decision into several model calls. Set `strategy` on the `agent.decide` input (or on `createDecisionLogic`). Core runs the strategy around the `decide` executor, so validation and retries apply to the combined answer, and any adapter works.
-
-| Strategy           | Model calls                                                                                                              |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------ |
-| `'direct'`         | One decide call over every candidate event.                                                                              |
-| `'pick-then-fill'` | Pick the event type as a closed choice over bare `{ type }` options, then fill its payload.                              |
-| `'grouped'`        | Pick a group of event types as a closed choice, then one decide call within that group.                                  |
-| `'auto'` (default) | `'pick-then-fill'` when `fillModel` is set; `'grouped'` over more than 24 events in two or more groups; else `'direct'`. |
-
-Filling a payload under `'pick-then-fill'`:
-
-- An event with no payload fields: no fill call.
-- Every payload field finite (an `enum`, a `const`, a boolean, or a union of those), with at most 32 combinations (`MAX_FINITE_PAYLOADS`): a closed choice over the enumerated payloads, on the same model.
-- Any open field: a structured `generateText` call on `fillModel`, with the event's payload schema as its output schema and `type` fixed. This needs a `generateText` executor.
-- Open fields with no `fillModel` throw `missing-fill-model` at runtime. `verifyAgentConfig` reports it at setup when `strategy: 'pick-then-fill'` is literal.
-
-Groups under `'grouped'`:
-
-- `groups` maps a group name to its event types: `groups: { cart: ["cart.add", "cart.clear"] }`.
-- An event type in no group is grouped by its prefix before the first `.`. `cart.add` and `cart.clear` group as `cart`.
-- Each group option's description lists its member types. A request with fewer than two groups makes one direct call.
-
-Every sub-call counts against the model-call budget, emits its own trace events, and receives the decision's prior `attempts`. Its `info.callKey` adds the role to the attempt key: `<key>.<attempt>.pick`, `.group`, or `.fill`. See [Idempotency keys](hosts.md#idempotency-keys).
-
-```ts
-import { createAgentSchemas, setupAgent } from "@statelyai/agent";
-import { z } from "zod";
-
-const agent = setupAgent({
-  schemas: createAgentSchemas({
-    context: z.object({}),
-    events: {
-      refund: z.object({ amount: z.number(), reason: z.string() }),
-      escalate: z.object({ queue: z.enum(["billing", "tech"]) }),
-    },
-  }),
-});
-
-agent.createMachine({
-  context: {},
-  initial: "triaging",
-  states: {
-    triaging: {
-      invoke: {
-        src: "agent.decide",
-        input: {
-          model: "judge",
-          fillModel: "writer",
-          allowedEvents: ["refund", "escalate"],
-        },
-      },
-      on: { refund: { target: "refunded" }, escalate: { target: "escalated" } },
-    },
-    refunded: {},
-    escalated: {},
-  },
-});
-```
-
-`fillModel` is set, so `'auto'` resolves to `'pick-then-fill'`. `judge` picks `refund` or `escalate`. `escalate` has one finite field, so `judge` also picks its `queue`. `refund` has open fields, so `writer` writes `amount` and `reason`.
-
-### Decision models with `fillModel`
-
-A decision model such as Jev answers only closed choices. `'pick-then-fill'` turns an open choice into closed ones, so a decision model can pick the event type while `fillModel` names a language model that writes the open payload. In the example above, `judge` can be `typeSafeAi.decisionModel("jev-latest")` and `writer` a language model in the same models map.
-
 ## A policy as the decider
 
-A decision can be answered by another machine: a policy that applies a rule when the facts are enough and asks a model only for the rest. `createPolicyDecider` turns a policy machine into a decide executor.
+A decision can be answered by another machine: a policy that applies a rule when the facts are enough and asks a model only for the rest. The host passes a `decide` executor that runs the policy and returns its output event.
 
 ```ts no-check
-import { runAgent } from "@statelyai/agent";
-import { createPolicyDecider } from "@statelyai/agent/policy";
+import { runAgent, type AgentDecisionExecutor } from "@statelyai/agent";
 
-const decide = createPolicyDecider(policyMachine, { executors: modelExecutors });
+const policyDecide: AgentDecisionExecutor = async (request, info) => {
+  const result = await runAgent(policyMachine, {
+    input: { facts: request.metadata?.facts, options: request.options?.map((o) => o.event) ?? [] },
+    executors: modelExecutors,
+    ...(info?.signal ? { signal: info.signal } : {}),
+  });
+  if (result.status !== "done") throw new Error(`policy settled '${result.status}'`);
+  // Report the policy's model usage so the enclosing run counts it.
+  const { modelCalls, ...usage } = result.usage;
+  return { event: result.output, ...(modelCalls > 0 ? { usage } : {}) };
+};
 
-await runAgent(deskMachine, { input, executors: { ...modelExecutors, decide } });
+await runAgent(deskMachine, { input, executors: { ...modelExecutors, decide: policyDecide } });
 ```
 
 - Each decision request starts one run of the policy. Its output, an event, is the choice. The environment still judges it: an event it does not accept is retried like any decider's.
-- The policy's input defaults to `{ facts, options, system, prompt }`: the request's `metadata.facts`, the offered events, and its prompt. The policy's input schema validates it. Pass `input: (request) => ...` to build it another way.
-- `facts` comes from the caller's `metadata`. Under `agent.decide`, it is the invoke input's `metadata.facts`. Under [`decideNext`](#decisions-at-the-boundary-of-a-plain-machine), it is the `metadata.facts` option. A caller that sets no `metadata` leaves `facts` out of the input, so a policy whose input schema requires `facts` fails validation.
 - The policy's own `agent.decide` invokes are answered by `executors`. Pass the environment's `metadata` on to them, so the model sees what it would without the policy.
-- The result carries the policy's token usage, and none when it decided with a rule.
-- A run that does not end `done` with an event throws `AgentError` with code `policy-not-done`. Give each of the policy's decisions an `onError` that falls back to an event the environment always accepts.
-- Every other `runAgent` option passes through: `store` and `metadata` to journal the policy's runs, `onTrace` to trace them.
-- Each decision's policy run gets its own `store` thread, `policy:${info.callKey}:${hash}` by default, where `hash` is the SHA-256 of the policy input: a thread that already has entries is resumed, so a shared one would return an earlier choice. The hash keeps a machine that asks something else at the same call site after a version bridge, which keeps the call key, off the earlier thread. Pass `threadId: (request, info) => ...` to name them yourself; it is required with a `store` when the decider is called without a `callKey`. Under `agent.decide`, the runtime supplies the call key. Under `decideNext`, pass the `callKey` option.
-- The policy's input must be JSON, since it opens the run's event log. The default drops keys whose value is `undefined`; any other value that is not JSON throws before the run.
+- With a `store`, give each decision's policy run its own `threadId`, for example from `info.callKey`. A thread that already has entries is resumed, so a shared one would return an earlier choice.
 
-To route by request name, wrap it: `decide: (request, info) => (request.name === "chooseResolution" ? policyDecide(request, info) : modelExecutors.decide!(request, info))`, where `policyDecide` is the executor `createPolicyDecider` returned.
+To route by request name, branch in the executor: `request.name === "chooseResolution" ? policyDecide(request, info) : modelExecutors.decide!(request, info)`.
 
 ## Decisions at the boundary of a plain machine
 
@@ -410,13 +346,13 @@ A machine does not have to know about AI. `decideNext` asks a model to pick one 
   - `true` reports every changed key.
   - An array of context keys reports only those keys. A state value change is always reported.
   - Each reported value is cut at 120 characters.
-- `metadata` (optional): passed through as `request.metadata`, as `agent.decide` input's `metadata` is. A [policy decider](#a-policy-as-the-decider) reads its default `facts` from `metadata.facts`.
-- `callKey` (optional): the decision's idempotency key. Give each decision its own key, and the same key when a crashed host asks the same decision again. Each attempt's executor `info.callKey` is `${callKey}.${attempt}`, as under `agent.decide`. A policy decider with a `store` names each policy thread from it. With no `callKey`, the executor gets none.
+- `metadata` (optional): passed through as `request.metadata`, as `agent.decide` input's `metadata` is.
+- `callKey` (optional): the decision's idempotency key. Give each decision its own key, and the same key when a crashed host asks the same decision again. Each attempt's executor `info.callKey` is `${callKey}.${attempt}`, as under `agent.decide`. With no `callKey`, the executor gets none.
 - With no options, it returns `{ event: null }` without calling the executor.
 - It never sends. The host sends the event, after checking `can` again, because the actor may have moved while the model was choosing.
 
 ```ts
-import { decideNext } from "@statelyai/agent/policy";
+import { decideNext } from "@statelyai/agent";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import { openai } from "@ai-sdk/openai";
 import { createActor, createMachine } from "xstate";

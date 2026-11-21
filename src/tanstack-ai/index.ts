@@ -186,13 +186,36 @@ class TanStackAiRunError extends Error {
 }
 
 /**
+ * The model calls of one `chat()` run and their summed usage, as the run's
+ * middleware observed them: `onConfig` runs before each provider call, and
+ * `onUsage` reports each call's usage.
+ */
+type CallTally = { calls: number; usage: AgentCallUsage | undefined };
+
+/** Counts a run's provider calls and their usage into `tally`. */
+function tallyCalls(tally: CallTally): ChatMiddleware {
+  return {
+    name: "statelyai:call-tally",
+    onConfig: (ctx) => {
+      if (ctx.phase === "beforeModel" || ctx.phase === "structuredOutput") tally.calls++;
+    },
+    onUsage: (_ctx, usage) => {
+      tally.usage = addUsage(tally.usage, toAgentCallUsage(usage));
+    },
+  };
+}
+
+/**
  * Reads a `chat()` stream to the end. Text arrives as `TEXT_MESSAGE_CONTENT`
- * deltas; every model turn ends in its own `RUN_FINISHED`, so a tool loop's
- * usage is summed and the last finish reason wins. A provider failure arrives
- * as a `RUN_ERROR` chunk rather than a throw, and is thrown here.
+ * deltas, and the last `RUN_FINISHED` sets the finish reason. Calls and usage
+ * come from `tally`, not the chunks: `chat()` adds a `RUN_FINISHED` of its own
+ * when the tool loop stops, and drops the final turn's when a combined
+ * structured output fails to parse. A provider failure arrives as a
+ * `RUN_ERROR` chunk rather than a throw, and is thrown here.
  */
 async function readRun(
   stream: AsyncIterable<StreamChunk>,
+  tally: CallTally,
   onDelta?: (delta: string) => void,
 ): Promise<RunSummary> {
   const summary: RunSummary = {
@@ -276,10 +299,6 @@ async function readRun(
             (chunk.metadata?.tanstack as { finishReason?: string | null } | undefined)
               ?.finishReason;
           summary.finishReason = toAgentFinishReason(finishReason);
-          summary.modelCalls++;
-          if (chunk.usage && !Array.isArray(chunk.usage)) {
-            summary.usage = addUsage(summary.usage, toAgentCallUsage(chunk.usage));
-          }
           break;
         }
         case "RUN_ERROR":
@@ -287,9 +306,10 @@ async function readRun(
       }
     }
   } catch (error) {
-    // The failed turn was a call too.
-    throw withModelCalls(error, summary.modelCalls + 1);
+    throw withModelCalls(error, tally.calls, tally.usage);
   }
+  summary.modelCalls = tally.calls;
+  summary.usage = tally.usage;
   const invalid = new Set<string>();
   for (const { part, json } of args.values()) {
     try {
@@ -332,7 +352,11 @@ export type TanStackAiCallSettings = Omit<
   | "stream"
   | "abortController"
   | "agentLoopStrategy"
->;
+  | "threadId"
+> & {
+  /** The AG-UI thread id `chat()` requires. Defaults to a new random id per call. */
+  threadId?: string;
+};
 
 /**
  * One entry in a {@link TanStackAiModelMap}: a bare text adapter, or an adapter
@@ -539,19 +563,32 @@ async function runChat(
   } else {
     signal?.addEventListener("abort", abort, { once: true });
   }
+  const tally: CallTally = { calls: 0, usage: undefined };
   let run: RunSummary;
   try {
     run = await readRun(
-      chat({ ...options, abortController: controller } as Parameters<
-        typeof chat
-      >[0]) as AsyncIterable<StreamChunk>,
+      chat({
+        ...options,
+        threadId: options.threadId ?? crypto.randomUUID(),
+        middleware: [
+          ...((options.middleware as ChatMiddleware[] | undefined) ?? []),
+          tallyCalls(tally),
+        ],
+        abortController: controller,
+      } as unknown as Parameters<typeof chat>[0]) as AsyncIterable<StreamChunk>,
+      tally,
       onDelta,
     );
   } finally {
     signal?.removeEventListener("abort", abort);
   }
   if (signal?.aborted) {
-    throw signal.reason ?? new Error("createTanStackAiExecutors: the request was aborted.");
+    // The stream can end normally after a cancel: its turns still count.
+    throw withModelCalls(
+      signal.reason ?? new Error("createTanStackAiExecutors: the request was aborted."),
+      run.modelCalls,
+      run.usage,
+    );
   }
   return run;
 }
@@ -706,16 +743,21 @@ export function createTanStackAiExecutors<TModels extends TanStackAiModelMap>(
         info?.signal,
       );
     } catch (error) {
-      throw structured && isTruncationError(error)
-        ? truncated(request, info, undefined, error)
-        : error;
+      if (!(structured && isTruncationError(error))) throw error;
+      // The replacement error carries the turns `readRun` recorded on the cause.
+      const { modelCalls, usage } = error as { modelCalls?: number; usage?: AgentCallUsage };
+      throw withModelCalls(truncated(request, info, undefined, error), modelCalls ?? 1, usage);
     }
 
     if (outputSchema) {
       // A structured output the model DID close, but only because it stopped
       // mid-thought, is not something to hand a machine as a final answer.
       if (run.finishReason === "length") {
-        throw withModelCalls(truncated(request, info, run.structured ?? run.text), run.modelCalls);
+        throw withModelCalls(
+          truncated(request, info, run.structured ?? run.text),
+          run.modelCalls,
+          run.usage,
+        );
       }
       let parsed: ReturnType<typeof parseProviderOutput>;
       try {
@@ -724,7 +766,7 @@ export function createTanStackAiExecutors<TModels extends TanStackAiModelMap>(
           run.structured !== undefined ? run.structured : JSON.parse(run.text),
         );
       } catch (error) {
-        throw withModelCalls(error, run.modelCalls);
+        throw withModelCalls(error, run.modelCalls, run.usage);
       }
       return {
         result: parsed.result,
