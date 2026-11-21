@@ -354,18 +354,19 @@ describe("createTanStackAiExecutors — tools", () => {
     ]);
     const { generateText } = createTanStackAiExecutors({ models: { quick: adapter } });
 
-    const error = await generateText(
-      textRequest({
-        tools: { lookup } as unknown as AgentTools,
-        maxSteps: 2,
-        outputSchema: z.object({ title: z.string() }),
-      }),
-    ).catch((caught: unknown) => caught);
-    expect(adapter.requests).toHaveLength(2);
-    expect(error).toMatchObject({
+    await expect(
+      generateText(
+        textRequest({
+          tools: { lookup } as unknown as AgentTools,
+          maxSteps: 2,
+          outputSchema: z.object({ title: z.string() }),
+        }),
+      ),
+    ).rejects.toMatchObject({
       modelCalls: 2,
       usage: { inputTokens: 13, outputTokens: 5, totalTokens: 18 },
     });
+    expect(adapter.requests).toHaveLength(2);
   });
 
   test("a loop cancelled mid-run reports the turns it completed on the abort reason", async () => {
