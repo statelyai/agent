@@ -244,6 +244,32 @@ function hashResumeSnapshot(snapshot: unknown): string {
   return getSnapshotStateHash(snapshot);
 }
 
+// Copies each pending timer's `scheduledAt` from a checkpoint written before
+// timer occurrences onto the snapshot its log refolds to, so a restored timer
+// waits only what is left of its delay. Timers match on everything but the
+// occurrence, which the checkpoint does not have; children are matched too.
+function carryTimerStarts(from: unknown, to: unknown): void {
+  const timersOf = (snapshot: unknown) =>
+    ((snapshot as { timers?: unknown } | null)?.timers ?? []) as Array<Record<string, unknown>>;
+  const identity = ({ occurrence: _o, scheduledAt: _s, ...timer }: Record<string, unknown>) =>
+    JSON.stringify(timer);
+  const starts = new Map(timersOf(from).map((timer) => [identity(timer), timer.scheduledAt]));
+  for (const timer of timersOf(to)) {
+    const scheduledAt = starts.get(identity(timer));
+    if (scheduledAt !== undefined) timer.scheduledAt = scheduledAt;
+  }
+  const childrenOf = (snapshot: unknown) =>
+    ((snapshot as { children?: unknown } | null)?.children ?? {}) as Record<
+      string,
+      { snapshot?: unknown } | undefined
+    >;
+  const fromChildren = childrenOf(from);
+  for (const [key, child] of Object.entries(childrenOf(to))) {
+    if (child?.snapshot !== undefined)
+      carryTimerStarts(fromChildren[key]?.snapshot, child.snapshot);
+  }
+}
+
 function readAgentMeta(snapshot: unknown): Partial<AgentRunMeta> | undefined {
   const meta = (snapshot as { agentMeta?: unknown } | undefined)?.agentMeta;
   return meta !== null && typeof meta === "object" ? (meta as Partial<AgentRunMeta>) : undefined;
@@ -4102,14 +4128,14 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
           // hash, no fast path — the log is the truth.
           const cachedMeta = readAgentMeta(init.snapshot);
           const tailStateHash = tail.verification?.stateHash;
-          const trustedCache =
+          const tailCache =
             init.snapshot !== undefined &&
             inheritedExecutionId !== undefined &&
             cachedMeta?.logId === inheritedExecutionId &&
             cachedMeta.logIndex === resumeEvents.length &&
-            cachedMeta.timerOccurrences === true &&
             tailStateHash !== undefined &&
             hashResumeSnapshot(init.snapshot) === tailStateHash;
+          const trustedCache = tailCache && cachedMeta?.timerOccurrences === true;
 
           if (!trustedCache) {
             const cachedIndex = cachedMeta?.logIndex;
@@ -4133,6 +4159,9 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
             }
             logFold = foldLog(logMachine, resumeEvents, { machineVersion, verify: true });
             effectiveSnapshot = logFold.persistedSnapshot as Snapshot<unknown>;
+            // A tail checkpoint without timer occurrences: the fold rebuilt its
+            // counters, and the checkpoint still knows when its timers started.
+            if (tailCache) carryTimerStarts(init.snapshot, effectiveSnapshot);
           }
         } else {
           // Version bridge. Without a snapshot there is nothing to migrate FROM.

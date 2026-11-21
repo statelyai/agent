@@ -4214,6 +4214,38 @@ describe("runAgent event log", () => {
     expect(replayed.status).toBe("done");
   });
 
+  test("a checkpoint written before timer occurrences keeps its pending timers' elapsed time", async () => {
+    const scheduled: Array<{ id: string; delay: number }> = [];
+    const timers = {
+      schedule: (timer: { id: string; delay: number }) => scheduled.push(timer),
+      cancel: () => {},
+    };
+    const machine = setupAgent({ context: z.object({}) }).createMachine({
+      id: "legacy-deadline",
+      context: {},
+      initial: "waiting",
+      states: { waiting: { after: { 60_000: { target: "expired" } } }, expired: { type: "final" } },
+    });
+
+    const started = await runToQuiescence(createAgentRuntime(machine, { timers }), {});
+    const legacy = JSON.parse(JSON.stringify(started.persist()));
+    delete legacy.nextTimerOccurrence;
+    delete legacy.agentMeta.timerOccurrences;
+    for (const timer of legacy.timers) {
+      delete timer.occurrence;
+      // Scheduled 40 seconds before this resume.
+      timer.scheduledAt -= 40_000;
+    }
+
+    await runToQuiescence(createAgentRuntime(machine, { timers }), {
+      events: started.events,
+      snapshot: legacy,
+    });
+    const restored = scheduled.at(-1)!;
+    expect(restored.delay).toBeLessThanOrEqual(20_000);
+    expect(restored.delay).toBeGreaterThan(19_000);
+  });
+
   test("resume precedence: a tail-stamped snapshot is trusted, a stale one is not", async () => {
     const machine = makeLoggedMachine();
     const first = await runToQuiescence(
