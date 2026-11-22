@@ -178,13 +178,13 @@ settled?.resolvedRequest; // { kind: 'text', src: 'parse', id: 'parse', outcome:
 - A decision with no candidate the snapshot takes, because its guards refuse every one or the closed choice offers nothing, exhausts as it does in a live run. That branch records `{ type: 'xstate.error.actor', actorId }` and takes the invoke's `onError`. With no `onError`, it ends in an `error` terminal.
 - At an idle wait, it forks one branch per externally accepted event and per armed timer. See [Timers](#timers).
 - `outputs` is a map of output lists, keyed by src: a text request's src or any other invoked actor's src. A one-element list is a canned output, reused every time that src is reached. A text request resolves with it as its `result`. A longer list forks one branch per output. See [Payloads and invoke outputs](#payloads-and-invoke-outputs).
-- A src with one canned output resolves without a fork, so it does not appear in the path. `steps: true` records it. See [Steps](#steps).
+- A src with one canned output resolves without a fork when it is the only pending work, so it does not appear in the path. `steps: true` records it. See [Steps](#steps).
 - Each `done` terminal carries the machine's `output`, so one report lists every output the search reached.
 - A src with no `outputs` entry halts that branch with a `needs-output` terminal instead of throwing. The terminal's `missingSrc` names it.
 - `errors` is a map of canned failures per src. A src listed there forks an extra branch where that invoke is rejected, so states behind an `onError` are explored. A decision keys on its src, usually `agent.decide`, or on its invoke id; its success branch stays the per-candidate-event fork, so the failure is explored in addition to the candidates. The failure and the candidates are sibling branches: each spends one level of `maxDepth`.
 - An `errors` array forks one failing branch per element, each recording `{ type: 'xstate.error.actor', actorId, error }`. `[]` is no entry. Any other value is one failure, recorded without `error`. Wrap a single array-valued failure: `[[...]]`.
 - A rejection that reaches no `onError` errors the machine, and that path ends in an `error` terminal carrying the failure value on `error`.
-- Every invoke a state is still waiting on counts as work, concurrent ones included. They are settled one per branch, in invoke-id order, and a src in `errors` forks per invoke.
+- Every invoke a state is still waiting on counts as work, concurrent ones included. When more than one invoke or text request is pending, each can settle first: the search forks one branch per settlement, each spending one level of `maxDepth` and recording its `xstate.done.actor` or `xstate.error.actor` event, so a bug that needs one sibling to finish before another is reachable. A src in `errors` forks per invoke. A pending decision's choices branch from the same point.
 
 <!-- viz: branch exploration tree for the refund machine: deciding -> AUTO_APPROVE (pruned by guard) / NEEDS_REVIEW -> awaitingHuman -> refunded, denied -->
 

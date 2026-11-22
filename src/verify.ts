@@ -2620,9 +2620,9 @@ function explore(
     !(invoke.src in outputScript) &&
     !errorsFor(invoke.src) &&
     isMachineLogic(invoke.logic);
-  // Every settlement that can come next while an explored child is pending:
-  // text requests, scripted invokes, and the children themselves, each a fork
-  // of its own, so whichever settles first (and leaves the state) is a branch.
+  // Every settlement that can come next while work runs concurrently: text
+  // requests, scripted invokes, and explored children, each a fork of its
+  // own, so whichever settles first (and leaves the state) is a branch.
   // Undefined when there is at most one: the usual one-at-a-time advance.
   // A blocked one (no `outputs` entry) is no fork, but settling first is
   // still a branch the search cannot follow: it ends `needs-output`.
@@ -2637,16 +2637,10 @@ function explore(
         kids?: PendingInvoke[];
       }
     | undefined => {
-    if (options.children !== "explore" && !coupled) {
-      return undefined;
-    }
     const invokes = pendingInvokes(step);
     // Coupled: a finished child machine is stepped like the others, so
     // `register` delivers its entry sends before its completion.
     const finishedKids = coupled ? finishedInvokes(step).filter(isExploredChild) : [];
-    if (!invokes.some(isExploredChild) && finishedKids.length === 0) {
-      return undefined;
-    }
     const kids = coupled ? [...invokes.filter(isExploredChild), ...finishedKids] : [];
     const blocked: string[] = [];
     const asFork = (
@@ -2715,7 +2709,7 @@ function explore(
         });
       }
     }
-    if (coupled) {
+    if (kids.length > 0) {
       return { forks, blocked, decisions, kids };
     }
     return forks.length > 0 && forks.length + blocked.length + decisions.length > 1

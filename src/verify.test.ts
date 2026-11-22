@@ -1425,6 +1425,52 @@ describe("concurrent invokes — every pending invoke stays visible", () => {
     expect(report.terminals.map((terminal) => terminal.state)).toContain("failed");
   });
 
+  test.each([{ children: undefined }, { children: "coupled" as const }])(
+    "concurrent invokes settle in any order, so a sibling-order bug is reachable (children: $children)",
+    async ({ children }) => {
+      // Whichever lookup finishes first decides the state: a live run where
+      // `slow` is faster reaches `slowFirst`.
+      const agent = setupAgent({
+        context: z.object({}),
+        actors: {
+          fast: createAsyncLogic<string>({ run: async () => "fast" }),
+          slow: createAsyncLogic<string>({ run: async () => "slow" }),
+        },
+      });
+      const machine = agent.createMachine({
+        context: {},
+        initial: "waiting",
+        states: {
+          waiting: {
+            invoke: [
+              { id: "fast", src: "fast", onDone: { target: "fastFirst" } },
+              { id: "slow", src: "slow", onDone: { target: "slowFirst" } },
+            ],
+          },
+          fastFirst: { type: "final" },
+          slowFirst: { type: "final" },
+        },
+      });
+      const options = {
+        outputs: { fast: ["fast"], slow: ["slow"] },
+        ...(children ? { children } : {}),
+      };
+
+      const report = await explorePaths(machine, options);
+      expect(report.terminals.map((terminal) => terminal.state).sort()).toEqual([
+        "fastFirst",
+        "slowFirst",
+      ]);
+      expect(report.complete).toBe(true);
+
+      const result = await canReach(machine, "slowFirst", options);
+      expect(result.reachable).toBe(true);
+      expect(result.witness).toEqual([
+        { type: "xstate.done.actor", actorId: "slow", output: "slow" },
+      ]);
+    },
+  );
+
   test("canReach finds the error-only state behind three failed slots", async () => {
     const { reachable, witness } = await canReach(createFanOutMachine(), "failed", {
       errors: { draft: new Error("truncated") },
