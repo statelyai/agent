@@ -22,6 +22,7 @@ This page lists the breaking changes an app on an earlier 2.0 alpha is most like
 | `assertAgentMachine`, `lintAgentMachine`, `simulateAgent`, `explorePaths`, `canReach` from `@statelyai/agent` | The same names from `@statelyai/agent/testing`. `assertAgentMachine(machine)` is also `lintAgentMachine(machine, { throw: true })`.                                |
 | `replay`, `initEntry`, `createReplayEntry`, `getUsageFromEvents`, the stores from `@statelyai/agent`          | The same names from `@statelyai/agent/log`.                                                                                                                        |
 | `setupAgent({ isIdle })`, `idleTags`                                                                          | Removed. A run settles `idle` when the machine waits on an event; `isAgentIdle(snapshot)` tells a human wait from a stuck machine.                                 |
+| `explorePaths`/`canReach` option `maxNodes`                                                                   | `budget: { nodes }`, the one node cap. It counts branch points across the whole call, child searches included. Default 250,000.                                    |
 
 ## Changed shapes
 

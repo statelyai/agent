@@ -1175,16 +1175,11 @@ export interface ExplorePathsOptions<
   maxDepth?: number;
   /**
    * Path cap per search before it stops (reported via `hitPathCap`). Default
-   * 10,000. Each explored child search has its own; see `budget` for a total.
+   * 10,000. Each explored child search has its own. It counts terminals; a
+   * loopy machine expands many nodes per terminal, which `budget.nodes`
+   * bounds.
    */
   maxPaths?: number;
-  /**
-   * Branch points expanded per search before it stops (reported via
-   * `hitPathCap`). Default 100,000. It bounds work and memory where
-   * `maxPaths` cannot: a loopy machine expands many nodes per terminal.
-   * Each explored child search has its own; see `budget` for a total.
-   */
-  maxNodes?: number;
   /**
    * Limits on the whole call. When one runs out, the search stops cleanly:
    * the report is `partial` and not `complete`, and `unexplored` notes
@@ -1194,9 +1189,10 @@ export interface ExplorePathsOptions<
   budget?: {
     /**
      * Branch points expanded in total: the top-level search and every child
-     * search it triggers (`children: "explore"`). A cached child outcome
-     * counts once, when it is computed; a cache hit costs nothing. Default
-     * 250,000; raise it explicitly for a bigger machine.
+     * search it triggers (`children: "explore"`). It bounds work and memory
+     * where `maxPaths` cannot. A cached child outcome counts once, when it is
+     * computed; a cache hit costs nothing. Default 250,000; raise it
+     * explicitly for a bigger machine.
      */
     nodes?: number;
     /**
@@ -1432,7 +1428,7 @@ export interface AgentPathReport {
   unexplored: string[];
   /** Total paths explored. */
   pathsExplored: number;
-  /** True when `maxPaths` or `maxNodes` cut exploration short (report is partial). */
+  /** True when `maxPaths` cut exploration short (report is partial). */
   hitPathCap: boolean;
   /**
    * True when a cap or the `budget` cut exploration short: `hitPathCap`, or
@@ -1505,9 +1501,6 @@ interface InvokeFork {
 
 // Cap on the cartesian product a schema's finite fields expand to.
 const FINITE_PAYLOAD_CAP = 64;
-
-// Default cap on branch points expanded per exploration.
-const DEFAULT_MAX_NODES = 100_000;
 
 // A lossless key for plain data: JSON values plus `undefined`, `-0`, null
 // prototypes, key order, and shared references within the key. Anything else
@@ -2203,7 +2196,6 @@ function explore(
 } {
   const maxDepth = options.maxDepth ?? 8;
   const maxPaths = options.maxPaths ?? 10_000;
-  const maxNodes = options.maxNodes ?? DEFAULT_MAX_NODES;
   const errorScript = options.errors ?? {};
   const outputScript = options.outputs ?? {};
   const coupled = options.children === "coupled";
@@ -2768,12 +2760,11 @@ function explore(
   };
   let prunedByGuard = 0;
   let pathsExplored = 0;
-  let nodesExpanded = 0;
   let hitPathCap = false;
   // True, and recorded, once a cap or the shared budget leaves a node unexpanded.
   const capped = (): boolean => {
     // A coupled child's moves are bounded by its parent's search, not its own caps.
-    if (!stepping && (pathsExplored >= maxPaths || nodesExpanded >= maxNodes)) {
+    if (!stepping && pathsExplored >= maxPaths) {
       hitPathCap = true;
     }
     if (budget.exhausted === undefined) {
@@ -3492,7 +3483,6 @@ function explore(
     if (witness !== undefined || capped()) {
       return;
     }
-    nodesExpanded++;
     budget.nodes++;
     const queuedLength = path?.length ?? 0;
 
@@ -4195,10 +4185,11 @@ function withMachineInput<T extends { input?: unknown }>(
  * `dedupeBy` explores each projected snapshot once, which keeps a large
  * payload table tractable.
  *
- * Combinatorics are bounded by `maxDepth` (default 8), `maxPaths` (default
- * 10,000), and `maxNodes` (default 100,000) per search, the last two reported
- * via `hitPathCap`, and by `budget` across the whole call, child searches
- * included. A cut-short report is `partial` and not `complete`.
+ * Combinatorics are bounded by `maxDepth` (default 8) and `maxPaths`
+ * (default 10,000, reported via `hitPathCap`) per search, and by `budget`
+ * across the whole call, child searches included: `budget.nodes` (default
+ * 250,000) caps the branch points expanded. A cut-short report is `partial`
+ * and not `complete`.
  *
  * @example
  * ```ts
@@ -4229,7 +4220,7 @@ export interface CanReachResult {
   witness?: ChosenEvent[];
   /**
    * False when the search left a branch it could not rule out unexplored: a
-   * cap (`maxPaths` or `maxNodes`) or the `budget` cut it short, a path reached `maxDepth`, a
+   * cap (`maxPaths`) or the `budget` cut it short, a path reached `maxDepth`, a
    * branch stopped `needs-output` on a src with no `outputs` entry, or an event type
    * was not expanded to all its payload variants (`unexpandedEvents` in the
    * {@link explorePaths} report). `reachable: false` is a proof of
@@ -4355,9 +4346,7 @@ export async function canReach<
           unexplored: [
             ...report.unexplored,
             ...(report.hitPathCap
-              ? [
-                  `path-cap: maxPaths or maxNodes cut the search short after ${report.pathsExplored} paths`,
-                ]
+              ? [`path-cap: maxPaths cut the search short after ${report.pathsExplored} paths`]
               : []),
             ...(report.unexpandedEvents.length
               ? [

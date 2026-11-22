@@ -144,7 +144,7 @@ const MAX_DETAIL_LINES = 10;
  *     `{{ }}` template. The schema check also skips an `agent.decide` closed
  *     choice (a `payloads` map) and a templated `payloads`.
  * - `explore`: `explorePaths` from each `explore.inputs` entry; every terminal
- *   must be one of `explore.terminals`, no cap (`maxPaths`, `maxNodes`) or
+ *   must be one of `explore.terminals`, neither `maxPaths` nor the
  *   `budget` may cut it short, every event's payloads must be tried (`unexpandedEvents`), and
  *   every reached text request or invoke needs an `explore.outputs` entry.
  *
@@ -448,7 +448,7 @@ async function checkExplore(
     }
     if (report.hitPathCap) {
       problems.add(
-        `${at}a cap (maxPaths ${options.maxPaths ?? 10_000} or maxNodes ${options.maxNodes ?? 100_000}) cut exploration short; the workflow branches too much to verify`,
+        `${at}the path cap (maxPaths ${options.maxPaths ?? 10_000}) cut exploration short; the workflow branches too much to verify`,
       );
     }
     for (const note of report.unexplored) {

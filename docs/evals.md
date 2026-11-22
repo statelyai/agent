@@ -223,17 +223,23 @@ const stats = foldTraces(traces, {
 
 ## Parity with the code you replace
 
-Start with `checkParity`. Pick a lower-level tool only when the old code does not route its side effects through one object.
+Start with one of two checks:
 
-| The old code                                                    | Use                                                                                 | Compares                                           |
-| --------------------------------------------------------------- | ----------------------------------------------------------------------------------- | -------------------------------------------------- |
-| Sends every side effect through one `effects` object            | `checkParity`, see [Check parity](strangler-fig.md#check-parity)                    | Each effect's name, order, arguments, and result   |
-| Calls a model client or SDK directly                            | `createRecorder` and `compareRecordings`, see [Any model client](#any-model-client) | Each recorded call and the output                  |
-| Changes on purpose, or a live model makes calls differ each run | `compareRuns`, see [Outcome labels](#outcome-labels)                                | The terminal outcome, the effects, and rule breaks |
+| The old code                                                    | Use                                                              | Compares                                           |
+| --------------------------------------------------------------- | ---------------------------------------------------------------- | -------------------------------------------------- |
+| Sends every side effect through one `effects` object            | `checkParity`, see [Check parity](strangler-fig.md#check-parity) | Each effect's name, order, arguments, and result   |
+| Changes on purpose, or a live model makes calls differ each run | `compareRuns`, see [Outcome labels](#outcome-labels)             | The terminal outcome, the effects, and rule breaks |
 
-`checkParity` records `before` with `createRecorder`, replays `after` against the recording, and compares the two with `compareRecordings`, in one call per scenario.
+`checkParity` is effect-level: it records `before` with `createRecorder`, replays `after` against the recording, and compares the two with `compareRecordings`, in one call per scenario.
 
-`compareRuns` labels a difference `intended` only when the candidate fixes a rule the baseline broke, or only the candidate reaches the scenario's `expected` outcome. Any other difference is a `regression`, including an effect the candidate adds on purpose with the same outcome. See [Outcome labels](#outcome-labels).
+`compareRuns` is outcome-level: it labels a difference `intended` only when the candidate fixes a rule the baseline broke, or only the candidate reaches the scenario's `expected` outcome. Any other difference is a `regression`, including an effect the candidate adds on purpose with the same outcome. See [Outcome labels](#outcome-labels).
+
+The rest are lower-level tools, for code neither check fits:
+
+- `createRecorder` with `compareRecordings`: old code that calls a model client or SDK directly instead of through an `effects` object. See [Any model client](#any-model-client).
+- `wrapWorkflow`: runs the old workflow unchanged inside a machine, as the `after` side of `checkParity` while you move it into states. See [Strangler-fig retrofit](strangler-fig.md).
+- `runSeam`: one request under test, every other request scripted. See [Seam evals](#seam-evals).
+- `matchesTrajectory`: checks a run's state path or events against an expected sequence.
 
 ### Outcome labels
 

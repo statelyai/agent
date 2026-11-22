@@ -1048,10 +1048,8 @@ describe("explorePaths — budget", () => {
   });
 
   test("budget.nodes defaults to 250,000 across child searches", async () => {
-    // maxNodes bounds each search on its own; the default budget bounds the call.
     const report = await explorePaths(looping, {
       maxDepth: 30,
-      maxNodes: 10_000_000,
       maxPaths: 10_000_000,
     });
     expect(report).toMatchObject({ partial: true, complete: false, hitPathCap: false });
