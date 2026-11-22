@@ -49,6 +49,13 @@ export interface CoverageReport {
   unvisitedStates: string[];
   /** Handlers no run was credited with. */
   unvisitedHandlers: HandlerRef[];
+  /**
+   * Visited handlers with a function transition (`targets.declared` is
+   * `'dynamic'`). A trace shows the handler ran, not which branches inside
+   * the function it took, so `ratio.handlers` counts it as covered whatever
+   * branches it holds.
+   */
+  opaqueHandlers: HandlerRef[];
   /** `always` handlers: they fire inside a macrostep, which a trace does not record. */
   unobservable: HandlerRef[];
   /**
@@ -183,7 +190,9 @@ const ratioOf = (visited: number, total: number) => (total === 0 ? 1 : visited /
  * definition's `matches` (an invoke's `actorId`) must accept the traced event
  * for its state to be credited. Ignored steps credit no handler. `always`
  * handlers are listed as `unobservable`, never as unvisited; a state one
- * passes through is visited, re-derived from each step's microsteps.
+ * passes through is visited, re-derived from each step's microsteps. A
+ * visited handler with a function transition is listed in `opaqueHandlers`:
+ * the branches inside the function are not counted.
  *
  * @example
  * ```ts no-check
@@ -297,12 +306,16 @@ export function traceCoverage<TTrace extends readonly { readonly type: string }[
   const unvisitedHandlers = handlers
     .filter((handler) => handler.runs === 0)
     .map(({ state, event }) => ({ state, event }));
+  const opaqueHandlers = handlers
+    .filter((handler) => handler.runs > 0 && handler.targets.declared === "dynamic")
+    .map(({ state, event }) => ({ state, event }));
 
   return {
     states,
     handlers,
     unvisitedStates,
     unvisitedHandlers,
+    opaqueHandlers,
     unobservable,
     ...(unreachable ? { unreachable } : {}),
     ...(reachableComplete === undefined ? {} : { reachableComplete }),

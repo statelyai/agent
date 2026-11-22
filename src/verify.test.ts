@@ -749,6 +749,45 @@ describe("canReach — reachability with a witness path", () => {
     expect(result.reachable).toBe(true);
   });
 
+  test("a complete search lists the canned outputs it assumed", async () => {
+    const machine = setupAgent({
+      context: z.object({}),
+      actors: {
+        classify: createAsyncLogic<string>({ run: async () => "approve" }),
+        audit: createAsyncLogic<string>({ run: async () => "ok" }),
+      },
+    }).createMachine({
+      context: {},
+      initial: "classifying",
+      states: {
+        classifying: {
+          invoke: {
+            src: "classify",
+            onDone: ({ event }) => ({
+              target: event.output === "approve" ? "approved" : "denied",
+            }),
+          },
+        },
+        approved: { type: "final" },
+        denied: { type: "final" },
+      },
+    });
+    // `audit` is never invoked, so the search assumed nothing about it.
+    const options = { outputs: { classify: ["approve"], audit: ["ok"] } };
+
+    const result = await canReach(machine, "denied", options);
+    expect(result).toEqual({
+      reachable: false,
+      complete: true,
+      target: expect.any(String),
+      assumedOutputs: { classify: ["approve"] },
+    });
+
+    const report = await explorePaths(machine, options);
+    expect(report.complete).toBe(true);
+    expect(report.assumedOutputs).toEqual({ classify: ["approve"] });
+  });
+
   test("an incomplete search says why: a path that hit maxDepth", async () => {
     const machine = setupAgent({
       context: z.object({ n: z.number() }),

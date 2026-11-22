@@ -206,6 +206,8 @@ Exploration is bounded by three limits per search, plus a [budget](#budgets) for
 
 `report.hitPathCap` is true when `maxPaths` or `maxNodes` cut exploration short. `report.partial` is true when any cap or the budget did, and `report.complete` is true only when the report covers every path.
 
+`report.assumedOutputs` lists the `outputs` entry of every src the search settled from it, keyed by src, child searches included. A src the search never reached is not listed. Every branch took one of these outputs, so `complete` covers these outputs only: an `onDone` branch that no listed output selects is not explored. `canReach` returns the same field.
+
 A src in `errors` is a branch point, and counts against `maxDepth` like a decision does. When the src has an output too, both branches are explored. When it has only an error, only the failing branch is. The failing branch records `{ type: 'xstate.error.actor', actorId }` in the path, where `actorId` is the invoke's id, and the output branch records `{ type: 'xstate.done.actor', actorId, output }`.
 
 - For a plain invoke, `output` is the canned value: what the machine's `onDone` receives.
@@ -464,6 +466,8 @@ A state the machine only passes through within one step counts as reached: one l
 When `complete` is false, `unexplored` lists why, in the wording of the `explorePaths` report's `unexplored` notes, such as `needs-output: no \`outputs\` entry for src 'resume' at path []`. A cap adds a `path-cap` note.
 
 Raise the caps, add `dedupeBy`, supply the missing outputs, or add `payloads` entries until it is true.
+
+`complete` is relative to the canned outputs. The result's `assumedOutputs` lists the outputs the search used for each src. A state that only an unlisted output reaches is reported unreachable with `complete: true`. Add an output for each `onDone` branch the proof must cover.
 
 A long-lived machine that never finishes, such as a chat loop, ends every path at `maxDepth` unless its states repeat, so `complete` is false when its context keeps growing. Its proofs are bounded:
 

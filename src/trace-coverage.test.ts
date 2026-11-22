@@ -334,6 +334,33 @@ describe("traceCoverage", () => {
     ]);
   });
 
+  test("a visited function transition is opaque: its untaken branch is not counted", () => {
+    const machine = createMachine({
+      initial: "a",
+      states: {
+        a: {
+          on: {
+            go: ({ event }) => ({ target: (event as { fast?: boolean }).fast ? "b" : "c" }),
+            stay: { target: "a" },
+            idle: () => undefined,
+          },
+        },
+        b: {},
+        c: {},
+      },
+    });
+
+    // Only the `fast` branch of `go` ran; the `c` branch never did.
+    const report = traceCoverage(machine, [
+      [step("a", "go", "b", { fast: true })],
+      [step("a", "stay", "a")],
+    ]);
+
+    expect(report.unvisitedHandlers).toEqual([{ state: "a", event: "idle" }]);
+    expect(report.opaqueHandlers).toEqual([{ state: "a", event: "go" }]);
+    expect(report.ratio.handlers).toBe(2 / 3);
+  });
+
   test("`always` handlers are unobservable, not unvisited", () => {
     const machine = createMachine({
       initial: "check",

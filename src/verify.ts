@@ -1462,6 +1462,13 @@ export interface AgentPathReport {
    * change completeness.
    */
   vacuous: string[];
+  /**
+   * The `outputs` entry of every src the search settled from it, child
+   * searches included, keyed by src in `outputs` order. Each forked or
+   * resolved branch took one of these outputs and no other, so `complete`
+   * covers these outputs only. An entry the search never reached is absent.
+   */
+  assumedOutputs: Record<string, unknown[]>;
 }
 
 // Safety bound on the deterministic advance between two branch points: each
@@ -1618,6 +1625,8 @@ interface SearchBudget {
   started: number;
   deadline: number | undefined;
   exhausted?: "nodes" | "ms";
+  /** Srcs settled from `outputs`, child searches included. */
+  assumed: Set<string>;
 }
 
 function startBudget(budget: ExplorePathsOptions["budget"]): SearchBudget {
@@ -1627,6 +1636,7 @@ function startBudget(budget: ExplorePathsOptions["budget"]): SearchBudget {
     maxNodes: budget?.nodes ?? DEFAULT_BUDGET_NODES,
     started,
     deadline: budget?.ms === undefined ? undefined : started + budget.ms,
+    assumed: new Set(),
   };
 }
 
@@ -2550,7 +2560,11 @@ function explore(
   // an explored child's outcomes), or blocked on a missing output.
   // `outputs: { src: [] }`: the src never settles (a callback bridge or a
   // long-lived listener), so its invoke stays pending and only events move on.
-  const neverSettles = (src: string): boolean => outputScript[src]?.length === 0 && !errorsFor(src);
+  const neverSettles = (src: string): boolean => {
+    const never = outputScript[src]?.length === 0 && !errorsFor(src);
+    if (never) budget.assumed.add(src);
+    return never;
+  };
   const settleFor = (
     id: string,
     src: string,
@@ -2559,6 +2573,7 @@ function explore(
     usage?: UsageChoice[],
   ): { fork: InvokeFork } | { output: unknown } | { blocked: true } | { never: true } => {
     const failures = errorsFor(src);
+    if (src in outputScript) budget.assumed.add(src);
     if (neverSettles(src)) {
       return { never: true };
     }
@@ -4141,6 +4156,9 @@ function explore(
     complete: false,
     unexpandedEvents: [...unexpanded],
     vacuous: [...vacuous],
+    assumedOutputs: Object.fromEntries(
+      Object.entries(outputScript).filter(([src]) => budget.assumed.has(src)),
+    ),
   };
   report.complete = isExplorationComplete(report);
   return {
@@ -4244,6 +4262,12 @@ export interface CanReachResult {
    * report records elsewhere.
    */
   unexplored?: string[];
+  /**
+   * The {@link explorePaths} report's `assumedOutputs`: the `outputs` entry
+   * of every src the search settled from it. `complete` and `witness` hold
+   * for these outputs only.
+   */
+  assumedOutputs: Record<string, unknown[]>;
 }
 
 /** Thrown when a string reachability target is not a state in the machine. */
@@ -4342,6 +4366,7 @@ export async function canReach<
       witness,
       complete: true,
       ...(resolvedTarget ? { target: resolvedTarget } : {}),
+      assumedOutputs: report.assumedOutputs,
     };
   }
   const complete = isExplorationComplete(report);
@@ -4369,6 +4394,7 @@ export async function canReach<
               : []),
           ],
         }),
+    assumedOutputs: report.assumedOutputs,
   };
 }
 
