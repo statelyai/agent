@@ -206,7 +206,7 @@ Exploration is bounded by three limits per search, plus a [budget](#budgets) for
 
 `report.hitPathCap` is true when `maxPaths` or `maxNodes` cut exploration short. `report.partial` is true when any cap or the budget did, and `report.complete` is true only when the report covers every path.
 
-`report.assumedOutputs` lists the `outputs` entry of every src the search settled from it, keyed by src, child searches included. A src the search never reached is not listed. Every branch took one of these outputs, so `complete` covers these outputs only: an `onDone` branch that no listed output selects is not explored. `canReach` returns the same field.
+`report.assumedOutputs` lists the `outputs` entry of every src the search settled from it, keyed by src, child searches included. A src the search never reached is not listed. Every output branch took one of these outputs. A src with `errors` also has failing branches, which take its `errors` entry and are not listed here. `complete` covers these outputs and the configured errors only: an `onDone` branch that no listed output selects is not explored. `canReach` returns the same field.
 
 A src in `errors` is a branch point, and counts against `maxDepth` like a decision does. When the src has an output too, both branches are explored. When it has only an error, only the failing branch is. The failing branch records `{ type: 'xstate.error.actor', actorId }` in the path, where `actorId` is the invoke's id, and the output branch records `{ type: 'xstate.done.actor', actorId, output }`.
 

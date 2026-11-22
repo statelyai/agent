@@ -786,6 +786,11 @@ describe("canReach — reachability with a witness path", () => {
     const report = await explorePaths(machine, options);
     expect(report.complete).toBe(true);
     expect(report.assumedOutputs).toEqual({ classify: ["approve"] });
+
+    // A copy: changing the options afterwards does not change the report.
+    options.outputs.classify.push("deny");
+    expect(result.assumedOutputs).toEqual({ classify: ["approve"] });
+    expect(report.assumedOutputs).toEqual({ classify: ["approve"] });
   });
 
   test("an incomplete search says why: a path that hit maxDepth", async () => {

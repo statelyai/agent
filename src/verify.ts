@@ -1464,9 +1464,10 @@ export interface AgentPathReport {
   vacuous: string[];
   /**
    * The `outputs` entry of every src the search settled from it, child
-   * searches included, keyed by src in `outputs` order. Each forked or
-   * resolved branch took one of these outputs and no other, so `complete`
-   * covers these outputs only. An entry the search never reached is absent.
+   * searches included, keyed by src in `outputs` order, copied. Each output
+   * branch took one of these outputs and no other; failing branches take the
+   * src's `errors` entry, not listed here. `complete` covers these outputs
+   * and the configured errors only. An entry the search never reached is absent.
    */
   assumedOutputs: Record<string, unknown[]>;
 }
@@ -4190,7 +4191,9 @@ function explore(
     unexpandedEvents: [...unexpanded],
     vacuous: [...vacuous],
     assumedOutputs: Object.fromEntries(
-      Object.entries(outputScript).filter(([src]) => budget.assumed.has(src)),
+      Object.entries(outputScript)
+        .filter(([src]) => budget.assumed.has(src))
+        .map(([src, outputs]) => [src, [...outputs]]),
     ),
   };
   report.complete = isExplorationComplete(report);
