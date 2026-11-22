@@ -1,7 +1,13 @@
 import { describe, expect, expectTypeOf, test } from "vitest";
 import { z } from "zod";
-import { createAsyncLogic, createMachine } from "xstate";
-import { createTextLogic, createAgentRuntime, setupAgent, type ChosenEvent } from "./index.js";
+import { createActor, createAsyncLogic, createMachine } from "xstate";
+import {
+  AGENT_USAGE_EVENT_TYPE,
+  createTextLogic,
+  createAgentRuntime,
+  setupAgent,
+  type ChosenEvent,
+} from "./index.js";
 import { runToQuiescence } from "./run-agent.js";
 import {
   AgentLintError,
@@ -1470,6 +1476,105 @@ describe("concurrent invokes — every pending invoke stays visible", () => {
       ]);
     },
   );
+
+  test.each([{ children: undefined }, { children: "explore" as const }])(
+    "a child that starts final settles before pending work, as in a live run (children: $children)",
+    async ({ children }) => {
+      const ready = createMachine({
+        initial: "done",
+        states: { done: { type: "final" } },
+        output: () => "ready",
+      });
+      const agent = setupAgent({
+        context: z.object({}),
+        actors: { ready, lookup: createAsyncLogic<string>({ run: async () => "found" }) },
+      });
+      const machine = agent.createMachine({
+        context: {},
+        initial: "waiting",
+        states: {
+          waiting: {
+            invoke: [
+              { id: "ready", src: "ready", onDone: { target: "readyFirst" } },
+              { id: "lookup", src: "lookup", onDone: { target: "lookupFirst" } },
+            ],
+          },
+          readyFirst: { type: "final" },
+          lookupFirst: { type: "final" },
+        },
+      });
+      const actor = createActor(machine);
+      const settled = new Promise<void>((resolve) =>
+        actor.subscribe({ complete: () => resolve() }),
+      );
+      actor.start();
+      await settled;
+      expect(actor.getSnapshot().value).toBe("readyFirst");
+
+      const report = await explorePaths(machine, {
+        outputs: { lookup: ["found"] },
+        ...(children ? { children } : {}),
+      });
+      expect(report.terminals.map((terminal) => terminal.state)).toEqual(["readyFirst"]);
+    },
+  );
+
+  test("a usage event an advance records does not lengthen the witness past a shorter order", async () => {
+    // Both requests report usage. Once `b`'s usage is counted, `a`'s is
+    // refused, so `b` first reaches `done` in two events and `a` first in three.
+    const agent = setupAgent({
+      context: z.object({ bCounted: z.boolean() }),
+      requests: {
+        a: { schemas: { output: z.string() }, model: "test", prompt: "a" },
+        b: { schemas: { output: z.string() }, model: "test", prompt: "b" },
+      },
+    });
+    const machine = agent.createMachine({
+      context: { bCounted: false },
+      initial: "working",
+      states: {
+        working: {
+          type: "parallel",
+          on: {
+            [AGENT_USAGE_EVENT_TYPE]: ({ context, event }) => {
+              const { src } = event as unknown as { src: string };
+              if (src === "a" && context.bCounted) {
+                return;
+              }
+              return { context: { bCounted: context.bCounted || src === "b" } };
+            },
+          },
+          states: {
+            ra: {
+              initial: "running",
+              states: {
+                running: { invoke: { id: "a", src: "a", onDone: { target: "finished" } } },
+                finished: { type: "final" },
+              },
+            },
+            rb: {
+              initial: "running",
+              states: {
+                running: { invoke: { id: "b", src: "b", onDone: { target: "finished" } } },
+                finished: { type: "final" },
+              },
+            },
+          },
+          onDone: { target: "done" },
+        },
+        done: { type: "final" },
+      },
+    });
+    const result = await canReach(machine, "done", {
+      outputs: { a: ["x"], b: ["y"] },
+      usage: { a: [{ totalTokens: 1 }], b: [{ totalTokens: 2 }] },
+    });
+    expect(result.reachable).toBe(true);
+    expect(result.witness?.map((event) => [event.type, event["src"] ?? event["actorId"]])).toEqual([
+      [AGENT_USAGE_EVENT_TYPE, "b"],
+      ["xstate.done.actor", "b"],
+    ]);
+  });
 
   test("canReach finds the error-only state behind three failed slots", async () => {
     const { reachable, witness } = await canReach(createFanOutMachine(), "failed", {

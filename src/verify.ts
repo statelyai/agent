@@ -1392,7 +1392,8 @@ export interface ExplorePathsOptions<
   /**
    * Record every macrostep of each path in its terminal's `steps`, with the
    * srcs each step started and settled. `path` lists only branch points, so
-   * an invoke with one canned output never appears there. Off by default:
+   * an invoke with one canned output appears there only when it races other
+   * pending work. Off by default:
    * it costs memory per step of every path.
    */
   steps?: boolean;
@@ -2892,8 +2893,19 @@ function explore(
       const request = current.requests.find(
         (pending) => pending.kind !== "text" || !neverSettles(pending.src),
       );
-      // A finished child races explored and coupled children as one of the
-      // concurrent settlements; with none pending, it settles first.
+      // A child that finished as it started queued its completion during
+      // startup, before any pending work could settle, so it settles first.
+      // Coupled children are the exception: the pump orders a finished
+      // child's entry sends and completion with its siblings'.
+      const [startedFinished] = coupled ? [] : finishedChildren(current);
+      if (startedFinished) {
+        current =
+          "error" in startedFinished
+            ? rejectStep(current, startedFinished.id, startedFinished.error)
+            : resolveStep(current, startedFinished.id, startedFinished.output);
+        recordState(current);
+        continue;
+      }
       const concurrent = concurrentForks(current);
       if (concurrent) {
         return {
@@ -3482,6 +3494,7 @@ function explore(
     }
     nodesExpanded++;
     budget.nodes++;
+    const queuedLength = path?.length ?? 0;
 
     const {
       step: settled,
@@ -3501,6 +3514,13 @@ function explore(
       nodeKids,
     );
     if (hit) {
+      // The advance recorded events (a request's usage) on the way, so this
+      // path is longer than its level. The breadth-first search requeues it
+      // there, so shorter paths at this level are tried first.
+      if (stopWhen !== undefined && (path?.length ?? 0) > queuedLength) {
+        yield { step: settled, path, depth, delivered, kids: nodeKids };
+        return;
+      }
       witness = pathOf(path);
       return;
     }
