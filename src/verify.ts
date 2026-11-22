@@ -4301,7 +4301,8 @@ export interface CanReachResult {
   /**
    * The {@link explorePaths} report's `assumedOutputs`: the `outputs` entry
    * of every src the search settled from it. `complete` and `witness` hold
-   * for these outputs only.
+   * for these outputs and the configured `errors` only; a witness can take a
+   * configured error.
    */
   assumedOutputs: Record<string, unknown[]>;
 }
