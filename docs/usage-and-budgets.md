@@ -153,7 +153,7 @@ Each kind of failure has one retry owner:
 
 - Transport and provider failures (a 429, a timeout, a dropped connection) are retried by the executor or the provider, for example AI SDK `maxRetries`. Core does not retry an executor that throws: a `generateText`, `streamText`, or `decide` executor's exception fails that request on the first throw.
 - Model output that fails validation is retried by the decision's `maxRetries`: an unknown event, an invalid payload, or a guard rejection. See [Validation and retries](decisions.md#validation-and-retries).
-- Anything that still fails reaches the invoke's `onError`: an executor exception, or a decision that exhausts its retries (`decision-exhausted`). With no `onError`, the run settles `{ status: "error", cause: "machine" }`.
+- Anything that still fails reaches the invoke's `onError`: an executor exception, or a decision that exhausts its retries (`decision-exhausted`). With no `onError`, the run settles `{ status: "error" }` with `cause: "decision-exhausted"` for an exhausted decision and `cause: "machine"` otherwise.
 
 When more than one layer retries the same request, the counts multiply:
 

@@ -201,7 +201,7 @@ For a single leg that hands the pause back to a caller, leave out `onIdle` and r
 The executors hold your existing model code:
 
 - The `createAiSdkExecutors` adapter wraps the AI SDK. `runSupportAgent` uses it by default.
-- Another SDK, or a raw `fetch`, is three plain async functions: `generateText` and `streamText` return `{ result }`, and `decide` returns `{ event }`. See [Hosts](hosts.md).
+- Another SDK, or a raw `fetch`, is three plain async functions: `generateText` and `streamText` return `{ result }`, and `decide` returns `{ event }`, or `{ rejected }` for an answer that names no valid event, so the decision asks again. See [Hosts](hosts.md).
 - The tools, retry logic, and provider calls you already wrote move across unchanged.
 
 A host that drives the transition loop itself uses `createAgentRuntime`. See [Write your own host loop](hosts.md#write-your-own-host-loop).
