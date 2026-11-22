@@ -1392,7 +1392,8 @@ export interface ExplorePathsOptions<
   /**
    * Record every macrostep of each path in its terminal's `steps`, with the
    * srcs each step started and settled. `path` lists only branch points, so
-   * an invoke with one canned output never appears there. Off by default:
+   * an invoke with one canned output appears there only when it races other
+   * pending work. Off by default:
    * it costs memory per step of every path.
    */
   steps?: boolean;
@@ -2620,9 +2621,9 @@ function explore(
     !(invoke.src in outputScript) &&
     !errorsFor(invoke.src) &&
     isMachineLogic(invoke.logic);
-  // Every settlement that can come next while an explored child is pending:
-  // text requests, scripted invokes, and the children themselves, each a fork
-  // of its own, so whichever settles first (and leaves the state) is a branch.
+  // Every settlement that can come next while work runs concurrently: text
+  // requests, scripted invokes, and explored children, each a fork of its
+  // own, so whichever settles first (and leaves the state) is a branch.
   // Undefined when there is at most one: the usual one-at-a-time advance.
   // A blocked one (no `outputs` entry) is no fork, but settling first is
   // still a branch the search cannot follow: it ends `needs-output`.
@@ -2637,16 +2638,10 @@ function explore(
         kids?: PendingInvoke[];
       }
     | undefined => {
-    if (options.children !== "explore" && !coupled) {
-      return undefined;
-    }
     const invokes = pendingInvokes(step);
     // Coupled: a finished child machine is stepped like the others, so
     // `register` delivers its entry sends before its completion.
     const finishedKids = coupled ? finishedInvokes(step).filter(isExploredChild) : [];
-    if (!invokes.some(isExploredChild) && finishedKids.length === 0) {
-      return undefined;
-    }
     const kids = coupled ? [...invokes.filter(isExploredChild), ...finishedKids] : [];
     const blocked: string[] = [];
     const asFork = (
@@ -2715,7 +2710,7 @@ function explore(
         });
       }
     }
-    if (coupled) {
+    if (kids.length > 0) {
       return { forks, blocked, decisions, kids };
     }
     return forks.length > 0 && forks.length + blocked.length + decisions.length > 1
@@ -2898,8 +2893,19 @@ function explore(
       const request = current.requests.find(
         (pending) => pending.kind !== "text" || !neverSettles(pending.src),
       );
-      // A finished child races explored and coupled children as one of the
-      // concurrent settlements; with none pending, it settles first.
+      // A child that finished as it started queued its completion during
+      // startup, before any pending work could settle, so it settles first.
+      // Coupled children are the exception: the pump orders a finished
+      // child's entry sends and completion with its siblings'.
+      const [startedFinished] = coupled ? [] : finishedChildren(current);
+      if (startedFinished) {
+        current =
+          "error" in startedFinished
+            ? rejectStep(current, startedFinished.id, startedFinished.error)
+            : resolveStep(current, startedFinished.id, startedFinished.output);
+        recordState(current);
+        continue;
+      }
       const concurrent = concurrentForks(current);
       if (concurrent) {
         return {
@@ -3488,6 +3494,7 @@ function explore(
     }
     nodesExpanded++;
     budget.nodes++;
+    const queuedLength = path?.length ?? 0;
 
     const {
       step: settled,
@@ -3507,6 +3514,13 @@ function explore(
       nodeKids,
     );
     if (hit) {
+      // The advance recorded events (a request's usage) on the way, so this
+      // path is longer than its level. The breadth-first search requeues it
+      // there, so shorter paths at this level are tried first.
+      if (stopWhen !== undefined && (path?.length ?? 0) > queuedLength) {
+        yield { step: settled, path, depth, delivered, kids: nodeKids };
+        return;
+      }
       witness = pathOf(path);
       return;
     }
