@@ -1508,6 +1508,8 @@ interface InvokeFork {
    * resolving an output.
    */
   isDecision?: boolean;
+  /** The `outputs` src this fork's outputs come from, recorded as assumed once one is applied. */
+  scriptSrc?: string;
 }
 
 // Cap on the cartesian product a schema's finite fields expand to.
@@ -2565,15 +2567,24 @@ function explore(
     if (never) budget.assumed.add(src);
     return never;
   };
+  // An `outputs` src counts as assumed once one of its outputs is applied.
+  const assume = (src: string | undefined): void => {
+    if (src !== undefined) {
+      budget.assumed.add(src);
+    }
+  };
   const settleFor = (
     id: string,
     src: string,
     isText: boolean,
     invoke?: PendingInvoke,
     usage?: UsageChoice[],
-  ): { fork: InvokeFork } | { output: unknown } | { blocked: true } | { never: true } => {
+  ):
+    | { fork: InvokeFork }
+    | { output: unknown; scriptSrc?: string }
+    | { blocked: true }
+    | { never: true } => {
     const failures = errorsFor(src);
-    if (src in outputScript) budget.assumed.add(src);
     if (neverSettles(src)) {
       return { never: true };
     }
@@ -2624,10 +2635,11 @@ function explore(
           outputs,
           isText,
           ...(usage ? { usage } : {}),
+          scriptSrc: src,
         },
       };
     }
-    return outputs.length === 1 ? { output: outputs[0] } : { blocked: true };
+    return outputs.length === 1 ? { output: outputs[0], scriptSrc: src } : { blocked: true };
   };
 
   // A pending invoke `children: "explore"` explores rather than scripts.
@@ -2676,7 +2688,16 @@ function explore(
       if ("never" in settle) {
         return [];
       }
-      return [{ id, errors: [], outputs: [settle.output], isText, ...(usage ? { usage } : {}) }];
+      return [
+        {
+          id,
+          errors: [],
+          outputs: [settle.output],
+          isText,
+          ...(usage ? { usage } : {}),
+          ...(settle.scriptSrc === undefined ? {} : { scriptSrc: settle.scriptSrc }),
+        },
+      ];
     };
     const texts = step.requests.filter(
       (request): request is AgentStepRequest & { kind: "text" } => request.kind === "text",
@@ -2889,7 +2910,7 @@ function explore(
     decisions?: AgentStepRequest[];
     /** `children: "coupled"`: child machines pending, stepped by the parent. */
     kids?: PendingInvoke[];
-    pending?: { id: string; output: unknown; usage?: AgentUsageEvent };
+    pending?: { id: string; output: unknown; usage?: AgentUsageEvent; scriptSrc?: string };
   } => {
     let current = step;
     // Bounded loop: each iteration resolves one text or scripted invoke.
@@ -2960,12 +2981,14 @@ function explore(
               id: request.id,
               output: asTextResult(settle.output),
               ...(usage?.[0] ? { usage: usage[0] } : {}),
+              ...(settle.scriptSrc === undefined ? {} : { scriptSrc: settle.scriptSrc }),
             },
           };
         }
         if (usage?.[0]) {
           recordEvent(usage[0] as unknown as ChosenEvent);
         }
+        assume(settle.scriptSrc);
         current = settleStep(current, request.id, asTextResult(settle.output), usage?.[0]).step;
         recordState(current);
         continue;
@@ -3003,8 +3026,16 @@ function explore(
           return { step: current };
         }
         if (races(current)) {
-          return { step: current, pending: { id: invoke.id, output: settle.output } };
+          return {
+            step: current,
+            pending: {
+              id: invoke.id,
+              output: settle.output,
+              ...(settle.scriptSrc === undefined ? {} : { scriptSrc: settle.scriptSrc }),
+            },
+          };
         }
+        assume(settle.scriptSrc);
         current = resolveStep(current, invoke.id, settle.output);
         recordState(current);
         continue;
@@ -3158,6 +3189,7 @@ function explore(
     fork: InvokeFork,
     output: unknown,
   ): Generator<ExploreNode> {
+    assume(fork.scriptSrc);
     const value = fork.isText ? asTextResult(output) : output;
     const recorded = fork.isText ? (value as AgentTextResult).result : output;
     const usages = fork.usage?.length ? fork.usage : [undefined];
@@ -3603,6 +3635,7 @@ function explore(
         maxDepthTerminal(settled, path);
         return;
       }
+      assume(pending.scriptSrc);
       const resolved = settleStep(settled, pending.id, pending.output, pending.usage).step;
       recordState(resolved);
       // A delivered usage event is an event the machine receives: it is on the path.

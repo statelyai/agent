@@ -69,6 +69,15 @@ describe("explorePaths — interleave", () => {
       maxDepth: 0,
     });
     expect(report.terminals).toEqual([{ status: "max-depth", path: [], state: "working" }]);
+    // The depth cap stopped the search before any output was applied.
+    expect(report.assumedOutputs).toEqual({});
+
+    const forked = await explorePaths(createCancellableMachine(), {
+      outputs: { lookup: [{ found: true }, { found: false }] },
+      maxDepth: 0,
+    });
+    expect(forked.terminals).toEqual([{ status: "max-depth", path: [], state: "working" }]);
+    expect(forked.assumedOutputs).toEqual({});
   });
 
   test("a decision races the events it does not offer", async () => {
