@@ -1188,8 +1188,9 @@ export interface ExplorePathsOptions<
    */
   budget?: {
     /**
-     * Branch points expanded in total: the top-level search and every child
-     * search it triggers (`children: "explore"`). It bounds work and memory
+     * Search nodes expanded in total, each branch point and each terminal:
+     * the top-level search and every child search it triggers
+     * (`children: "explore"`). It bounds work and memory
      * where `maxPaths` cannot. A cached child outcome counts once, when it is
      * computed; a cache hit costs nothing. Default 250,000; raise it
      * explicitly for a bigger machine.

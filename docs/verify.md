@@ -202,9 +202,9 @@ Exploration is bounded by two limits per search, plus a [budget](#budgets) for t
 
 - `maxDepth`: branch points along any path. Default 8.
 - `maxPaths`: terminals in the report. Default 10,000.
-- `budget.nodes`: branch points expanded in total. Default 250,000. It bounds work and memory on a loopy machine, which expands many nodes per terminal.
+- `budget.nodes`: search nodes expanded in total, each branch point and each terminal. Default 250,000. It bounds work and memory on a loopy machine, which expands many nodes per terminal.
 
-`maxPaths` counts finished paths and `budget.nodes` counts the branch points expanded to find them, so a loopy machine can exhaust `budget.nodes` long before it reaches `maxPaths`.
+`maxPaths` counts finished paths and `budget.nodes` counts every node expanded to find them, so a loopy machine can exhaust `budget.nodes` long before it reaches `maxPaths`.
 
 `report.hitPathCap` is true when `maxPaths` cut exploration short. `report.partial` is true when any cap or the budget did, and `report.complete` is true only when the report covers every path.
 
@@ -547,7 +547,7 @@ const leak = await canReach(
 - `machine.provide({ guards })` returns a copy of the machine with the same type, so the mutant needs no config copy and no cast. It also replaces `actions`, `actors`, and `delays` by name.
 - `provide` cannot reach a rule written inline in a transition or `choice` function. Move the rule into `setupAgent({ guards })` and call it through `guards` to make it replaceable.
 - `setupAgent` types `guards` as a string-keyed map. With `noUncheckedIndexedAccess`, call the guard as `guards.canPay!(…)`.
-- A mutant the same proof does not catch means the target or the `outputs` table never exercises the rule.
+- A mutant the same proof does not catch means the target, the `input`, or the `outputs` table never exercises the rule (with `amount: 40`, `canPay` and `() => true` both allow payment), or the search was not `complete`.
 
 ### Ordering targets
 

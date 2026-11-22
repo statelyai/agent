@@ -119,7 +119,7 @@ export async function countLosingLines(policy: AnyStateMachine, keep = 3): Promi
     count: losing.length,
     examples: losing.slice(0, keep),
     complete:
-      !report.hitPathCap &&
+      !report.partial &&
       report.unexpandedEvents.length === 0 &&
       report.terminals.every((terminal) => terminal.status === "done"),
     illegal,
