@@ -27,19 +27,20 @@ The host decides how it happens, binding `searchWeb` to the search client, cache
 
 <!-- ownership boundaries derived from src/run-agent.ts, src/steps.ts, src/types.ts, and the host/example adapters -->
 
-| Concern                                                                 | Owner                            | Stately Agent integration point                      |
-| ----------------------------------------------------------------------- | -------------------------------- | ---------------------------------------------------- |
-| Workflow states, branching, loops, parallelism, retries, approval gates | Machine                          | Machine configuration                                |
-| Model calls and structured output                                       | Host or model SDK                | `AgentRequestExecutors`                              |
-| Tools and tool loops                                                    | Host or model SDK                | Request `tools` and `metadata`                       |
-| Search, RAG, crawling, data APIs                                        | Specialized library or service   | Request `tools`, executors, or `actors`              |
-| Long-term and semantic memory                                           | Database or memory library       | Machine `input`, plus `actors` for reads and writes  |
-| Sandboxes, filesystems, generated artifacts                             | Sandbox or workspace library     | `actors`, plus artifact handles in machine context   |
-| MCP discovery, auth, sessions, and transport                            | MCP client or host framework     | Request `tools`                                      |
-| Evaluation datasets, scorers, experiments, and dashboards               | Evaluation library               | `onTrace`, `onResult`, snapshots, and machine output |
-| Snapshot persistence                                                    | Host store                       | XState persisted snapshots from `result.persist()`   |
-| Queues, schedules, leases, deployment, HTTP/SSE/WebSocket               | Runtime or application framework | XState snapshots, callbacks, and emitted events      |
-| Telemetry export                                                        | Observability library            | `onTrace` and `inspect`                              |
+| Concern                                                        | Owner                                    | Stately Agent integration point                                                   |
+| -------------------------------------------------------------- | ---------------------------------------- | --------------------------------------------------------------------------------- |
+| Workflow states, branching, loops, parallelism, approval gates | Machine                                  | Machine configuration                                                             |
+| Retries                                                        | Executor, decision, or machine `onError` | [Retries and executor budgets](usage-and-budgets.md#retries-and-executor-budgets) |
+| Model calls and structured output                              | Host or model SDK                        | `AgentRequestExecutors`                                                           |
+| Tools and tool loops                                           | Host or model SDK                        | Request `tools` and `metadata`                                                    |
+| Search, RAG, crawling, data APIs                               | Specialized library or service           | Request `tools`, executors, or `actors`                                           |
+| Long-term and semantic memory                                  | Database or memory library               | Machine `input`, plus `actors` for reads and writes                               |
+| Sandboxes, filesystems, generated artifacts                    | Sandbox or workspace library             | `actors`, plus artifact handles in machine context                                |
+| MCP discovery, auth, sessions, and transport                   | MCP client or host framework             | Request `tools`                                                                   |
+| Evaluation datasets, scorers, experiments, and dashboards      | Evaluation library                       | `onTrace`, `onResult`, snapshots, and machine output                              |
+| Snapshot persistence                                           | Host store                               | XState persisted snapshots from `result.persist()`                                |
+| Queues, schedules, leases, deployment, HTTP/SSE/WebSocket      | Runtime or application framework         | XState snapshots, callbacks, and emitted events                                   |
+| Telemetry export                                               | Observability library                    | `onTrace` and `inspect`                                                           |
 
 The repository examples show the orchestration shape. They are not replacement implementations of the systems listed above.
 

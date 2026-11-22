@@ -34,9 +34,11 @@ for another process to resume with `start({ snapshot })`.
 
 ## Host-owned timers
 
-Root `after` timers run in process by default. A durable host can provide
-`timers: { schedule, cancel }` to `createAgentRuntime`. The runtime then settles
-with an external timer pending. When it fires, deliver
+Root `after` timers run in process by default. A pending in-process timer is
+work in flight, so `runAgent` waits for it to fire and does not settle `idle`
+while it is armed. A durable host can provide
+`timers: { schedule, cancel }` to `createAgentRuntime` or `runAgent`. The run then
+settles `idle` with the external timer pending. When it fires, deliver
 `{ type: "xstate.timer", id }` through `transition` or as the `event` passed to
 `runAgent`.
 

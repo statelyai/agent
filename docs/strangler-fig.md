@@ -26,7 +26,8 @@ export async function runTicket(ticket: Ticket, effects: SupportEffects): Promis
 
 - Each effect is an async function. A wrapped or recorded effect returns a Promise even when the original returns an async iterable at once: write `yield* await effects.stream()`.
 - A call made around `effects` (a module-level client, `fetch`) is invisible to the machine, to traces, and to recordings. Move it into `effects` first.
-- Keep effect arguments and results JSON-shaped where you can: they are journaled and recorded. Pass live objects (a chat session, an `AbortSignal`) by closure, not as arguments.
+- Keep effect arguments and results JSON-shaped where you can: they are journaled and recorded. Pass live objects (a chat session, a client) by closure, not as arguments.
+- Do not pass an `AbortSignal` as an effect argument. The workflow reads the run's signal from its `run` callback's third argument, `{ signal }`, and an effect called after an abort throws the abort reason. See [Step 0: wrap](#step-0-wrap).
 - An effect whose natural result is a live object (an agent instance) returns its name or id instead. The function that starts the run keeps a `Map` from id to object, created per run. See [Live objects](#live-objects).
 - An effect that writes host state by reference (a tool mutating a shared `state` object) returns the change instead, and the wrapper applies it.
 - A synchronous host callback (a stop predicate) or a diagnostic logger is not an effect. The workflow or the machine factory closes over it.
@@ -185,7 +186,7 @@ resolving: {
 
 ### Live objects
 
-A store, a class instance, a session or a cancellation token cannot go in context, input or events: those are journaled JSON. Bind the actors and actions that need them per run, as closures, in the function that starts the run.
+A store, a class instance or a session cannot go in context, input or events: those are journaled JSON. Bind the actors and actions that need them per run, as closures, in the function that starts the run.
 
 ```ts no-check
 const machine = setupAgent({
@@ -211,7 +212,8 @@ async function agenticLoop(agent: Agent, task: Task) {
 - `runAgent`'s `actions` and `actors` are merged onto the machine for that run only. Concurrent runs each see their own objects.
 - `actions` keys and params are checked against the actions declared in `setupAgent`. Declare a no-op for each; it is the default for tests and `explorePaths`.
 - Only actors and actions read live objects. A guard, a `choice` or a transition function that reads one makes a decision the log does not record, so replay, resume and `explorePaths` can reach another state. Copy what the machine branches on into an actor's output.
-- An action runs through `enq(...)`, after the transition. A `{ context }` it returns is ignored.
+- An action runs through `enq(...)`, after the transition. A `{ context }` it returns is ignored. An action receives only what `enq` passes it, with no `AbortSignal`.
+- An actor reads cancellation from its `run` argument, `createAsyncLogic({ run: async ({ input, signal }) => ... })`, and an executor from its second argument, `info.signal`. That signal aborts when the run aborts or the invoking state exits. A host `AbortSignal` captured in a closure misses the state exit.
 - Resume binds the same way: the host builds the actors and actions again and passes them with the snapshot or `store`. Nothing about the live objects is journaled.
 - An effect whose result is a live object (an agent instance) records an id. Keep the id-to-object `Map` in the same function, created per run, never at module level.
 
