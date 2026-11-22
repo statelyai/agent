@@ -225,7 +225,7 @@ The error's code is `'truncated'`, which is what a machine's `onError` branches 
 
 ## Executor-owned structured retries
 
-Transport and provider failures are retried by the executor or the SDK. [Retries and executor budgets](usage-and-budgets.md#retries-and-executor-budgets) lists who retries which failure. For example, a host may retry a tool-free AI SDK structured-output failure once while preserving the runner's abort signal:
+Transport and provider failures are the executor's or the SDK's to retry, when configured: the AI SDK adapter passes `maxRetries: 0` by default. [Retries and executor budgets](usage-and-budgets.md#retries-and-executor-budgets) lists who retries which failure. For example, a host may retry a tool-free AI SDK structured-output failure once while preserving the runner's abort signal:
 
 ```ts no-check
 import { NoObjectGeneratedError } from "ai";
