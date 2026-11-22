@@ -1620,6 +1620,32 @@ describe("concurrent invokes — every pending invoke stays visible", () => {
     ]);
   });
 
+  test("an output a usage event cancels is not assumed", async () => {
+    // The usage event leaves `working`, so the canned output never settles.
+    const agent = setupAgent({
+      context: z.object({}),
+      requests: { draft: { schemas: { output: z.string() }, model: "test", prompt: "draft" } },
+    });
+    const machine = agent.createMachine({
+      context: {},
+      initial: "working",
+      states: {
+        working: {
+          on: { [AGENT_USAGE_EVENT_TYPE]: { target: "over" } },
+          invoke: { id: "draft", src: "draft", onDone: { target: "done" } },
+        },
+        over: { type: "final" },
+        done: { type: "final" },
+      },
+    });
+    const report = await explorePaths(machine, {
+      outputs: { draft: ["x"] },
+      usage: { draft: [{ totalTokens: 5 }] },
+    });
+    expect(report.terminals.map((terminal) => terminal.state)).toEqual(["over"]);
+    expect(report.assumedOutputs).toEqual({});
+  });
+
   test("canReach finds the error-only state behind three failed slots", async () => {
     const { reachable, witness } = await canReach(createFanOutMachine(), "failed", {
       errors: { draft: new Error("truncated") },

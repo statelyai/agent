@@ -2989,8 +2989,16 @@ function explore(
         if (usage?.[0]) {
           recordEvent(usage[0] as unknown as ChosenEvent);
         }
-        assume(settle.scriptSrc);
-        current = settleStep(current, request.id, asTextResult(settle.output), usage?.[0]).step;
+        const settledText = settleStep(
+          current,
+          request.id,
+          asTextResult(settle.output),
+          usage?.[0],
+        );
+        if (settledText.completed) {
+          assume(settle.scriptSrc);
+        }
+        current = settledText.step;
         recordState(current);
         continue;
       }
@@ -3190,7 +3198,6 @@ function explore(
     fork: InvokeFork,
     output: unknown,
   ): Generator<ExploreNode> {
-    assume(fork.scriptSrc);
     const value = fork.isText ? asTextResult(output) : output;
     const recorded = fork.isText ? (value as AgentTextResult).result : output;
     const usages = fork.usage?.length ? fork.usage : [undefined];
@@ -3199,6 +3206,9 @@ function explore(
         return;
       }
       const { step, completed } = settleStep(settled, fork.id, value, usage);
+      if (completed) {
+        assume(fork.scriptSrc);
+      }
       recordState(step);
       const charged = usage && !stepping ? extend(path, usage as unknown as ChosenEvent) : path;
       yield {
@@ -3636,8 +3646,11 @@ function explore(
         maxDepthTerminal(settled, path);
         return;
       }
-      assume(pending.scriptSrc);
-      const resolved = settleStep(settled, pending.id, pending.output, pending.usage).step;
+      const settledPending = settleStep(settled, pending.id, pending.output, pending.usage);
+      if (settledPending.completed) {
+        assume(pending.scriptSrc);
+      }
+      const resolved = settledPending.step;
       recordState(resolved);
       // A delivered usage event is an event the machine receives: it is on the path.
       const charged =
