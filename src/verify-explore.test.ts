@@ -69,6 +69,15 @@ describe("explorePaths — interleave", () => {
       maxDepth: 0,
     });
     expect(report.terminals).toEqual([{ status: "max-depth", path: [], state: "working" }]);
+    // The depth cap stopped the search before any output was applied.
+    expect(report.assumedOutputs).toEqual({});
+
+    const forked = await explorePaths(createCancellableMachine(), {
+      outputs: { lookup: [{ found: true }, { found: false }] },
+      maxDepth: 0,
+    });
+    expect(forked.terminals).toEqual([{ status: "max-depth", path: [], state: "working" }]);
+    expect(forked.assumedOutputs).toEqual({});
   });
 
   test("a decision races the events it does not offer", async () => {
@@ -264,6 +273,30 @@ describe("explorePaths — unhandled errors in parallel regions", () => {
         ],
         state: "z",
       },
+      // The regions settle in any order: `b` first, too.
+      {
+        status: "error",
+        path: [{ type: "xstate.error.actor", actorId: "b" }],
+        state: { p: { r1: "s", r2: "s" } },
+        error: errorB,
+      },
+      {
+        status: "error",
+        path: [
+          { type: "xstate.done.actor", actorId: "b", output: {} },
+          { type: "xstate.error.actor", actorId: "a" },
+        ],
+        state: { p: { r1: "s", r2: "d" } },
+        error: errorA,
+      },
+      {
+        status: "done",
+        path: [
+          { type: "xstate.done.actor", actorId: "b", output: {} },
+          { type: "xstate.done.actor", actorId: "a", output: {} },
+        ],
+        state: "z",
+      },
     ]);
     expect(isExplorationComplete(report)).toBe(true);
   });
@@ -289,7 +322,11 @@ describe("explorePaths — unhandled errors in parallel regions", () => {
         state: terminal.state,
         message: (terminal.error as Error).message,
       }));
-    expect(explored).toEqual([await live({ a: true }), await live({ b: true })]);
+    // The live runs settle in one order; the search covers both.
+    expect(explored).toEqual(
+      expect.arrayContaining([await live({ a: true }), await live({ b: true })]),
+    );
+    expect(explored).toHaveLength(4);
   });
 
   test("canReach sees the error terminal and finishes the search", async () => {
@@ -302,12 +339,12 @@ describe("explorePaths — unhandled errors in parallel regions", () => {
       reachable: true,
       witness: [{ type: "xstate.error.actor", actorId: "a" }],
     });
-    // `a` only fails, so `z` is out of reach. The failure ends the only path
-    // at its first event, so one level of depth proves it.
+    // `a` only fails, so `z` is out of reach. `b` can settle first, so the
+    // failure comes at the first or second event: two levels prove it.
     const unreachable = await canReach(createParallelMachine(), "z", {
       outputs: { b: [{}] },
       errors: { a: errorA, b: errorB },
-      maxDepth: 1,
+      maxDepth: 2,
     });
     expect(unreachable).toMatchObject({ reachable: false, complete: true });
   });
@@ -1020,10 +1057,8 @@ describe("explorePaths — budget", () => {
   });
 
   test("budget.nodes defaults to 250,000 across child searches", async () => {
-    // maxNodes bounds each search on its own; the default budget bounds the call.
     const report = await explorePaths(looping, {
       maxDepth: 30,
-      maxNodes: 10_000_000,
       maxPaths: 10_000_000,
     });
     expect(report).toMatchObject({ partial: true, complete: false, hitPathCap: false });

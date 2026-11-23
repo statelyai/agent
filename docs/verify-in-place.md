@@ -292,6 +292,7 @@ const coverage = traceCoverage(
 );
 coverage.unvisitedStates; // []
 coverage.unvisitedHandlers; // transitions no recorded run took
+coverage.opaqueHandlers; // function transitions a run took, whose inner branches are not counted
 ```
 
 An unvisited state or handler is a part of the model no recorded run exercised. Add a scenario that reaches it, or confirm that it cannot happen in production.

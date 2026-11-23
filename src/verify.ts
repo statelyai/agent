@@ -1175,16 +1175,11 @@ export interface ExplorePathsOptions<
   maxDepth?: number;
   /**
    * Path cap per search before it stops (reported via `hitPathCap`). Default
-   * 10,000. Each explored child search has its own; see `budget` for a total.
+   * 10,000. Each explored child search has its own. It counts terminals; a
+   * loopy machine expands many nodes per terminal, which `budget.nodes`
+   * bounds.
    */
   maxPaths?: number;
-  /**
-   * Branch points expanded per search before it stops (reported via
-   * `hitPathCap`). Default 100,000. It bounds work and memory where
-   * `maxPaths` cannot: a loopy machine expands many nodes per terminal.
-   * Each explored child search has its own; see `budget` for a total.
-   */
-  maxNodes?: number;
   /**
    * Limits on the whole call. When one runs out, the search stops cleanly:
    * the report is `partial` and not `complete`, and `unexplored` notes
@@ -1193,10 +1188,12 @@ export interface ExplorePathsOptions<
    */
   budget?: {
     /**
-     * Branch points expanded in total: the top-level search and every child
-     * search it triggers (`children: "explore"`). A cached child outcome
-     * counts once, when it is computed; a cache hit costs nothing. Default
-     * 250,000; raise it explicitly for a bigger machine.
+     * Search nodes expanded in total, each branch point and each terminal:
+     * the top-level search and every child search it triggers
+     * (`children: "explore"`). It bounds work and memory
+     * where `maxPaths` cannot. A cached child outcome counts once, when it is
+     * computed; a cache hit costs nothing. Default 250,000; raise it
+     * explicitly for a bigger machine.
      */
     nodes?: number;
     /**
@@ -1228,7 +1225,7 @@ export interface ExplorePathsOptions<
    * (a callback bridge, a long-lived listener): its invoke stays pending and
    * only events move the machine on.
    */
-  outputs?: Record<string, unknown[]>;
+  outputs?: Record<string, readonly unknown[]>;
   /**
    * A canned failure per src, keyed like `outputs`. A src listed here
    * forks an extra branch at that invoke, where the invoke is rejected and the
@@ -1251,7 +1248,7 @@ export interface ExplorePathsOptions<
    * single failure. A single failure that is itself an array must be wrapped:
    * `[[...]]`.
    */
-  errors?: Record<string, unknown | unknown[]>;
+  errors?: Record<string, unknown | readonly unknown[]>;
   /**
    * Where external events fork. `"idle"` (default): only at idle waits.
    * `"pending"`: also wherever an invoke is outstanding — before a text or
@@ -1315,7 +1312,7 @@ export interface ExplorePathsOptions<
    * the host sends the child directly; the parent's sends are delivered as
    * the parent makes them.
    */
-  childEvents?: Record<string, string[]>;
+  childEvents?: Record<string, readonly string[]>;
   /**
    * The event types the host can send the machine at its waits (and, with
    * `interleave: "pending"`, while work is pending). Default: every type the
@@ -1323,7 +1320,7 @@ export interface ExplorePathsOptions<
    * from the machine's own children (a child's status events), so the search
    * does not offer them as if the host sent them.
    */
-  hostEvents?: string[];
+  hostEvents?: readonly string[];
   /**
    * Payloads to try per event type at each branch point, given the settled
    * snapshot there. At a decision or an idle wait, an event type with an
@@ -1344,7 +1341,7 @@ export interface ExplorePathsOptions<
    */
   payloads?: (
     snapshot: ExploreCallbackSnapshot<TSnapshot, TChildren, "explore" | "coupled">,
-  ) => Partial<Record<string, Record<string, unknown>[]>>;
+  ) => Partial<Record<string, readonly Record<string, unknown>[]>>;
   /**
    * A projection of the snapshot that determines its future. Settled
    * snapshots with an equal key are explored once (again only when reached
@@ -1388,11 +1385,12 @@ export interface ExplorePathsOptions<
    * `vacuous` entry). Requests inside other children, and decisions, deliver
    * no usage.
    */
-  usage?: Record<string, AgentCallUsage[]>;
+  usage?: Record<string, readonly AgentCallUsage[]>;
   /**
    * Record every macrostep of each path in its terminal's `steps`, with the
    * srcs each step started and settled. `path` lists only branch points, so
-   * an invoke with one canned output never appears there. Off by default:
+   * an invoke with one canned output appears there only when it races other
+   * pending work. Off by default:
    * it costs memory per step of every path.
    */
   steps?: boolean;
@@ -1431,7 +1429,7 @@ export interface AgentPathReport {
   unexplored: string[];
   /** Total paths explored. */
   pathsExplored: number;
-  /** True when `maxPaths` or `maxNodes` cut exploration short (report is partial). */
+  /** True when `maxPaths` cut exploration short (report is partial). */
   hitPathCap: boolean;
   /**
    * True when a cap or the `budget` cut exploration short: `hitPathCap`, or
@@ -1461,6 +1459,14 @@ export interface AgentPathReport {
    * change completeness.
    */
   vacuous: string[];
+  /**
+   * The `outputs` entry of every src the search settled from it, child
+   * searches included, keyed by src in `outputs` order, copied. Each output
+   * branch took one of these outputs and no other; failing branches take the
+   * src's `errors` entry, not listed here. `complete` covers these outputs
+   * and the configured errors only. An entry the search never reached is absent.
+   */
+  assumedOutputs: Record<string, unknown[]>;
 }
 
 // Safety bound on the deterministic advance between two branch points: each
@@ -1477,7 +1483,7 @@ interface InvokeFork {
   errors: unknown[];
   /** Record each failure as `error` on its path entry (an array `errors` entry, or a child's failures). */
   recordError?: boolean;
-  outputs: unknown[];
+  outputs: readonly unknown[];
   /** An explored child can stall idle: the parent waits there forever. */
   stalls?: boolean;
   /** An explored child whose search was incomplete: the src's outputs may be partial. */
@@ -1500,13 +1506,12 @@ interface InvokeFork {
    * resolving an output.
    */
   isDecision?: boolean;
+  /** The `outputs` src this fork's outputs come from, recorded as assumed once one is applied. */
+  scriptSrc?: string;
 }
 
 // Cap on the cartesian product a schema's finite fields expand to.
 const FINITE_PAYLOAD_CAP = 64;
-
-// Default cap on branch points expanded per exploration.
-const DEFAULT_MAX_NODES = 100_000;
 
 // A lossless key for plain data: JSON values plus `undefined`, `-0`, null
 // prototypes, key order, and shared references within the key. Anything else
@@ -1617,6 +1622,8 @@ interface SearchBudget {
   started: number;
   deadline: number | undefined;
   exhausted?: "nodes" | "ms";
+  /** Srcs settled from `outputs`, child searches included. */
+  assumed: Set<string>;
 }
 
 function startBudget(budget: ExplorePathsOptions["budget"]): SearchBudget {
@@ -1626,6 +1633,7 @@ function startBudget(budget: ExplorePathsOptions["budget"]): SearchBudget {
     maxNodes: budget?.nodes ?? DEFAULT_BUDGET_NODES,
     started,
     deadline: budget?.ms === undefined ? undefined : started + budget.ms,
+    assumed: new Set(),
   };
 }
 
@@ -2202,7 +2210,6 @@ function explore(
 } {
   const maxDepth = options.maxDepth ?? 8;
   const maxPaths = options.maxPaths ?? 10_000;
-  const maxNodes = options.maxNodes ?? DEFAULT_MAX_NODES;
   const errorScript = options.errors ?? {};
   const outputScript = options.outputs ?? {};
   const coupled = options.children === "coupled";
@@ -2449,7 +2456,7 @@ function explore(
   const variantsOf = (
     type: string,
     snapshot: AnyMachineSnapshot,
-    table: Partial<Record<string, Record<string, unknown>[]>>,
+    table: Partial<Record<string, readonly Record<string, unknown>[]>>,
     requestOptions?: AgentDecisionOption[],
   ): ChosenEvent[] => {
     const listed = table[type];
@@ -2549,14 +2556,28 @@ function explore(
   // an explored child's outcomes), or blocked on a missing output.
   // `outputs: { src: [] }`: the src never settles (a callback bridge or a
   // long-lived listener), so its invoke stays pending and only events move on.
-  const neverSettles = (src: string): boolean => outputScript[src]?.length === 0 && !errorsFor(src);
+  const neverSettles = (src: string): boolean => {
+    const never = outputScript[src]?.length === 0 && !errorsFor(src);
+    if (never) budget.assumed.add(src);
+    return never;
+  };
+  // An `outputs` src counts as assumed once one of its outputs is applied.
+  const assume = (src: string | undefined): void => {
+    if (src !== undefined) {
+      budget.assumed.add(src);
+    }
+  };
   const settleFor = (
     id: string,
     src: string,
     isText: boolean,
     invoke?: PendingInvoke,
     usage?: UsageChoice[],
-  ): { fork: InvokeFork } | { output: unknown } | { blocked: true } | { never: true } => {
+  ):
+    | { fork: InvokeFork }
+    | { output: unknown; scriptSrc?: string }
+    | { blocked: true }
+    | { never: true } => {
     const failures = errorsFor(src);
     if (neverSettles(src)) {
       return { never: true };
@@ -2608,10 +2629,11 @@ function explore(
           outputs,
           isText,
           ...(usage ? { usage } : {}),
+          scriptSrc: src,
         },
       };
     }
-    return outputs.length === 1 ? { output: outputs[0] } : { blocked: true };
+    return outputs.length === 1 ? { output: outputs[0], scriptSrc: src } : { blocked: true };
   };
 
   // A pending invoke `children: "explore"` explores rather than scripts.
@@ -2620,9 +2642,9 @@ function explore(
     !(invoke.src in outputScript) &&
     !errorsFor(invoke.src) &&
     isMachineLogic(invoke.logic);
-  // Every settlement that can come next while an explored child is pending:
-  // text requests, scripted invokes, and the children themselves, each a fork
-  // of its own, so whichever settles first (and leaves the state) is a branch.
+  // Every settlement that can come next while work runs concurrently: text
+  // requests, scripted invokes, and explored children, each a fork of its
+  // own, so whichever settles first (and leaves the state) is a branch.
   // Undefined when there is at most one: the usual one-at-a-time advance.
   // A blocked one (no `outputs` entry) is no fork, but settling first is
   // still a branch the search cannot follow: it ends `needs-output`.
@@ -2637,16 +2659,10 @@ function explore(
         kids?: PendingInvoke[];
       }
     | undefined => {
-    if (options.children !== "explore" && !coupled) {
-      return undefined;
-    }
     const invokes = pendingInvokes(step);
     // Coupled: a finished child machine is stepped like the others, so
     // `register` delivers its entry sends before its completion.
     const finishedKids = coupled ? finishedInvokes(step).filter(isExploredChild) : [];
-    if (!invokes.some(isExploredChild) && finishedKids.length === 0) {
-      return undefined;
-    }
     const kids = coupled ? [...invokes.filter(isExploredChild), ...finishedKids] : [];
     const blocked: string[] = [];
     const asFork = (
@@ -2666,7 +2682,16 @@ function explore(
       if ("never" in settle) {
         return [];
       }
-      return [{ id, errors: [], outputs: [settle.output], isText, ...(usage ? { usage } : {}) }];
+      return [
+        {
+          id,
+          errors: [],
+          outputs: [settle.output],
+          isText,
+          ...(usage ? { usage } : {}),
+          ...(settle.scriptSrc === undefined ? {} : { scriptSrc: settle.scriptSrc }),
+        },
+      ];
     };
     const texts = step.requests.filter(
       (request): request is AgentStepRequest & { kind: "text" } => request.kind === "text",
@@ -2715,7 +2740,7 @@ function explore(
         });
       }
     }
-    if (coupled) {
+    if (kids.length > 0) {
       return { forks, blocked, decisions, kids };
     }
     return forks.length > 0 && forks.length + blocked.length + decisions.length > 1
@@ -2773,12 +2798,11 @@ function explore(
   };
   let prunedByGuard = 0;
   let pathsExplored = 0;
-  let nodesExpanded = 0;
   let hitPathCap = false;
   // True, and recorded, once a cap or the shared budget leaves a node unexpanded.
   const capped = (): boolean => {
     // A coupled child's moves are bounded by its parent's search, not its own caps.
-    if (!stepping && (pathsExplored >= maxPaths || nodesExpanded >= maxNodes)) {
+    if (!stepping && pathsExplored >= maxPaths) {
       hitPathCap = true;
     }
     if (budget.exhausted === undefined) {
@@ -2879,7 +2903,7 @@ function explore(
     decisions?: AgentStepRequest[];
     /** `children: "coupled"`: child machines pending, stepped by the parent. */
     kids?: PendingInvoke[];
-    pending?: { id: string; output: unknown; usage?: AgentUsageEvent };
+    pending?: { id: string; output: unknown; usage?: AgentUsageEvent; scriptSrc?: string };
   } => {
     let current = step;
     // Bounded loop: each iteration resolves one text or scripted invoke.
@@ -2898,8 +2922,19 @@ function explore(
       const request = current.requests.find(
         (pending) => pending.kind !== "text" || !neverSettles(pending.src),
       );
-      // A finished child races explored and coupled children as one of the
-      // concurrent settlements; with none pending, it settles first.
+      // A child that finished as it started queued its completion during
+      // startup, before any pending work could settle, so it settles first.
+      // Coupled children are the exception: the pump orders a finished
+      // child's entry sends and completion with its siblings'.
+      const [startedFinished] = coupled ? [] : finishedChildren(current);
+      if (startedFinished) {
+        current =
+          "error" in startedFinished
+            ? rejectStep(current, startedFinished.id, startedFinished.error)
+            : resolveStep(current, startedFinished.id, startedFinished.output);
+        recordState(current);
+        continue;
+      }
       const concurrent = concurrentForks(current);
       if (concurrent) {
         return {
@@ -2939,13 +2974,23 @@ function explore(
               id: request.id,
               output: asTextResult(settle.output),
               ...(usage?.[0] ? { usage: usage[0] } : {}),
+              ...(settle.scriptSrc === undefined ? {} : { scriptSrc: settle.scriptSrc }),
             },
           };
         }
         if (usage?.[0]) {
           recordEvent(usage[0] as unknown as ChosenEvent);
         }
-        current = settleStep(current, request.id, asTextResult(settle.output), usage?.[0]).step;
+        const settledText = settleStep(
+          current,
+          request.id,
+          asTextResult(settle.output),
+          usage?.[0],
+        );
+        if (settledText.completed) {
+          assume(settle.scriptSrc);
+        }
+        current = settledText.step;
         recordState(current);
         continue;
       }
@@ -2982,8 +3027,16 @@ function explore(
           return { step: current };
         }
         if (races(current)) {
-          return { step: current, pending: { id: invoke.id, output: settle.output } };
+          return {
+            step: current,
+            pending: {
+              id: invoke.id,
+              output: settle.output,
+              ...(settle.scriptSrc === undefined ? {} : { scriptSrc: settle.scriptSrc }),
+            },
+          };
         }
+        assume(settle.scriptSrc);
         current = resolveStep(current, invoke.id, settle.output);
         recordState(current);
         continue;
@@ -3002,7 +3055,7 @@ function explore(
   const acceptedVariants = (
     snapshot: AnyMachineSnapshot,
     path: PathLink | undefined,
-    table: Partial<Record<string, Record<string, unknown>[]>>,
+    table: Partial<Record<string, readonly Record<string, unknown>[]>>,
     except?: ReadonlySet<string>,
   ): ChosenEvent[] => [
     ...arriving(snapshot).flatMap((descriptor) => {
@@ -3145,6 +3198,9 @@ function explore(
         return;
       }
       const { step, completed } = settleStep(settled, fork.id, value, usage);
+      if (completed) {
+        assume(fork.scriptSrc);
+      }
       recordState(step);
       const charged = usage && !stepping ? extend(path, usage as unknown as ChosenEvent) : path;
       yield {
@@ -3486,8 +3542,8 @@ function explore(
     if (witness !== undefined || capped()) {
       return;
     }
-    nodesExpanded++;
     budget.nodes++;
+    const queuedLength = path?.length ?? 0;
 
     const {
       step: settled,
@@ -3507,6 +3563,13 @@ function explore(
       nodeKids,
     );
     if (hit) {
+      // The advance recorded events (a request's usage) on the way, so this
+      // path is longer than its level. The breadth-first search requeues it
+      // there, so shorter paths at this level are tried first.
+      if (stopWhen !== undefined && (path?.length ?? 0) > queuedLength) {
+        yield { step: settled, path, depth, delivered, kids: nodeKids };
+        return;
+      }
       witness = pathOf(path);
       return;
     }
@@ -3574,7 +3637,11 @@ function explore(
         maxDepthTerminal(settled, path);
         return;
       }
-      const resolved = settleStep(settled, pending.id, pending.output, pending.usage).step;
+      const settledPending = settleStep(settled, pending.id, pending.output, pending.usage);
+      if (settledPending.completed) {
+        assume(pending.scriptSrc);
+      }
+      const resolved = settledPending.step;
       recordState(resolved);
       // A delivered usage event is an event the machine receives: it is on the path.
       const charged =
@@ -4127,6 +4194,11 @@ function explore(
     complete: false,
     unexpandedEvents: [...unexpanded],
     vacuous: [...vacuous],
+    assumedOutputs: Object.fromEntries(
+      Object.entries(outputScript)
+        .filter(([src]) => budget.assumed.has(src))
+        .map(([src, outputs]) => [src, [...outputs]]),
+    ),
   };
   report.complete = isExplorationComplete(report);
   return {
@@ -4181,10 +4253,11 @@ function withMachineInput<T extends { input?: unknown }>(
  * `dedupeBy` explores each projected snapshot once, which keeps a large
  * payload table tractable.
  *
- * Combinatorics are bounded by `maxDepth` (default 8), `maxPaths` (default
- * 10,000), and `maxNodes` (default 100,000) per search, the last two reported
- * via `hitPathCap`, and by `budget` across the whole call, child searches
- * included. A cut-short report is `partial` and not `complete`.
+ * Combinatorics are bounded by `maxDepth` (default 8) and `maxPaths`
+ * (default 10,000, reported via `hitPathCap`) per search, and by `budget`
+ * across the whole call, child searches included: `budget.nodes` (default
+ * 250,000) caps the branch points expanded. A cut-short report is `partial`
+ * and not `complete`.
  *
  * @example
  * ```ts
@@ -4215,7 +4288,7 @@ export interface CanReachResult {
   witness?: ChosenEvent[];
   /**
    * False when the search left a branch it could not rule out unexplored: a
-   * cap (`maxPaths` or `maxNodes`) or the `budget` cut it short, a path reached `maxDepth`, a
+   * cap (`maxPaths`) or the `budget` cut it short, a path reached `maxDepth`, a
    * branch stopped `needs-output` on a src with no `outputs` entry, or an event type
    * was not expanded to all its payload variants (`unexpandedEvents` in the
    * {@link explorePaths} report). `reachable: false` is a proof of
@@ -4230,6 +4303,13 @@ export interface CanReachResult {
    * report records elsewhere.
    */
   unexplored?: string[];
+  /**
+   * The {@link explorePaths} report's `assumedOutputs`: the `outputs` entry
+   * of every src the search settled from it. `complete` and `witness` hold
+   * for these outputs and the configured `errors` only; a witness can take a
+   * configured error.
+   */
+  assumedOutputs: Record<string, unknown[]>;
 }
 
 /** Thrown when a string reachability target is not a state in the machine. */
@@ -4328,6 +4408,7 @@ export async function canReach<
       witness,
       complete: true,
       ...(resolvedTarget ? { target: resolvedTarget } : {}),
+      assumedOutputs: report.assumedOutputs,
     };
   }
   const complete = isExplorationComplete(report);
@@ -4341,9 +4422,7 @@ export async function canReach<
           unexplored: [
             ...report.unexplored,
             ...(report.hitPathCap
-              ? [
-                  `path-cap: maxPaths or maxNodes cut the search short after ${report.pathsExplored} paths`,
-                ]
+              ? [`path-cap: maxPaths cut the search short after ${report.pathsExplored} paths`]
               : []),
             ...(report.unexpandedEvents.length
               ? [
@@ -4355,6 +4434,7 @@ export async function canReach<
               : []),
           ],
         }),
+    assumedOutputs: report.assumedOutputs,
   };
 }
 

@@ -156,7 +156,11 @@ describe("approve-tool-calls", () => {
         ...options,
         hostEvents: ["DENY"],
       });
-      expect(result).toEqual({ reachable: false, complete: true });
+      expect(result).toEqual({
+        reachable: false,
+        complete: true,
+        assumedOutputs: { runTool: ["ok"] },
+      });
     });
 
     test("a person's approval runs it", async () => {

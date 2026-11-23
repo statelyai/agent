@@ -107,7 +107,6 @@ const proofOptions: ExplorePathsOptions = {
   // checks, triage, a person), for at most MAX_TOTAL_ROUNDS rounds.
   maxDepth: 6 * MAX_TOTAL_ROUNDS + 6,
   maxPaths: 1_000_000,
-  maxNodes: 2_000_000,
 };
 
 const SEARCH_TIMEOUT_MS = 60_000;

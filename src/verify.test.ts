@@ -1,7 +1,13 @@
 import { describe, expect, expectTypeOf, test } from "vitest";
 import { z } from "zod";
-import { createAsyncLogic, createMachine } from "xstate";
-import { createTextLogic, createAgentRuntime, setupAgent, type ChosenEvent } from "./index.js";
+import { createActor, createAsyncLogic, createMachine, type SnapshotFrom } from "xstate";
+import {
+  AGENT_USAGE_EVENT_TYPE,
+  createTextLogic,
+  createAgentRuntime,
+  setupAgent,
+  type ChosenEvent,
+} from "./index.js";
 import { runToQuiescence } from "./run-agent.js";
 import {
   AgentLintError,
@@ -616,6 +622,25 @@ describe("canReach — predicate targets", () => {
     expect(typesOnly).toBeTypeOf("function");
   });
 
+  test("options accept readonly arrays and an `as const` object", () => {
+    // Type-only: the calls below never run.
+    const typesOnly = () => {
+      const machine = createApprovalMachine();
+      const options = {
+        input: { amount: 50 },
+        outputs: { lookup: [{ found: true }, { found: false }] },
+        errors: { lookup: ["down"] },
+        hostEvents: ["APPROVE", "REJECT"],
+        childEvents: { child: ["PING"] },
+        usage: { draft: [{ totalTokens: 10 }] },
+        payloads: () => ({ APPROVE: [{}] }) as const,
+      } as const;
+      void canReach(machine, "issued", options);
+      void explorePaths(machine, options);
+    };
+    expect(typesOnly).toBeTypeOf("function");
+  });
+
   test("a snapshot predicate can express a violation property without a sentinel state", async () => {
     // The safety property: over the limit, `issued` is never entered without
     // `approved` — a predicate over context that only APPROVE can flip, so
@@ -647,6 +672,43 @@ describe("canReach — predicate targets", () => {
     );
     expect(small.reachable).toBe(true);
     expect(small.witness?.map((event) => event.type)).toEqual(["ISSUE"]);
+  });
+
+  test("a mutant built with machine.provide({ guards }) is typed and caught", async () => {
+    // docs/verify.md "Mutation checks": the rule is a named guard, so a typed
+    // copy with the rule broken needs no config spread and no cast.
+    const payout = setupAgent({
+      context: z.object({ amount: z.number(), approved: z.boolean() }),
+      input: z.object({ amount: z.number() }),
+      events: { APPROVE: {}, PAY: {} },
+      guards: {
+        canPay: ({ context }) => context.amount <= 100 || context.approved,
+      },
+    });
+    const payoutMachine = payout.createMachine({
+      context: ({ input }) => ({ amount: input.amount, approved: false }),
+      initial: "open",
+      states: {
+        open: {
+          on: {
+            APPROVE: { context: { approved: true } },
+            PAY: ({ context, event, guards }) =>
+              guards.canPay!({ context, event }) ? { target: "paid" } : undefined,
+          },
+        },
+        paid: { type: "final" },
+      },
+    });
+    const unapprovedPayout = (snapshot: SnapshotFrom<typeof payoutMachine>) =>
+      snapshot.matches("paid") && !snapshot.context.approved;
+
+    const proof = await canReach(payoutMachine, unapprovedPayout, { input: { amount: 500 } });
+    expect(proof).toMatchObject({ reachable: false, complete: true });
+
+    const mutant = payoutMachine.provide({ guards: { canPay: () => true } });
+    const leak = await canReach(mutant, unapprovedPayout, { input: { amount: 500 } });
+    expect(leak.reachable).toBe(true);
+    expect(leak.witness?.map((event) => event.type)).toEqual(["PAY"]);
   });
 });
 
@@ -741,6 +803,50 @@ describe("canReach — reachability with a witness path", () => {
     });
     const result = await canReach(machine, "done", { outputs: { resume: ["ok"] } });
     expect(result.reachable).toBe(true);
+  });
+
+  test("a complete search lists the canned outputs it assumed", async () => {
+    const machine = setupAgent({
+      context: z.object({}),
+      actors: {
+        classify: createAsyncLogic<string>({ run: async () => "approve" }),
+        audit: createAsyncLogic<string>({ run: async () => "ok" }),
+      },
+    }).createMachine({
+      context: {},
+      initial: "classifying",
+      states: {
+        classifying: {
+          invoke: {
+            src: "classify",
+            onDone: ({ event }) => ({
+              target: event.output === "approve" ? "approved" : "denied",
+            }),
+          },
+        },
+        approved: { type: "final" },
+        denied: { type: "final" },
+      },
+    });
+    // `audit` is never invoked, so the search assumed nothing about it.
+    const options = { outputs: { classify: ["approve"], audit: ["ok"] } };
+
+    const result = await canReach(machine, "denied", options);
+    expect(result).toEqual({
+      reachable: false,
+      complete: true,
+      target: expect.any(String),
+      assumedOutputs: { classify: ["approve"] },
+    });
+
+    const report = await explorePaths(machine, options);
+    expect(report.complete).toBe(true);
+    expect(report.assumedOutputs).toEqual({ classify: ["approve"] });
+
+    // A copy: changing the options afterwards does not change the report.
+    options.outputs.classify.push("deny");
+    expect(result.assumedOutputs).toEqual({ classify: ["approve"] });
+    expect(report.assumedOutputs).toEqual({ classify: ["approve"] });
   });
 
   test("an incomplete search says why: a path that hit maxDepth", async () => {
@@ -1423,6 +1529,177 @@ describe("concurrent invokes — every pending invoke stays visible", () => {
     expect(report.reachedStates).toEqual(expect.arrayContaining(["drafting", "done", "failed"]));
     expect(report.terminals.map((terminal) => terminal.state)).toContain("done");
     expect(report.terminals.map((terminal) => terminal.state)).toContain("failed");
+  });
+
+  test.each([{ children: undefined }, { children: "coupled" as const }])(
+    "concurrent invokes settle in any order, so a sibling-order bug is reachable (children: $children)",
+    async ({ children }) => {
+      // Whichever lookup finishes first decides the state: a live run where
+      // `slow` is faster reaches `slowFirst`.
+      const agent = setupAgent({
+        context: z.object({}),
+        actors: {
+          fast: createAsyncLogic<string>({ run: async () => "fast" }),
+          slow: createAsyncLogic<string>({ run: async () => "slow" }),
+        },
+      });
+      const machine = agent.createMachine({
+        context: {},
+        initial: "waiting",
+        states: {
+          waiting: {
+            invoke: [
+              { id: "fast", src: "fast", onDone: { target: "fastFirst" } },
+              { id: "slow", src: "slow", onDone: { target: "slowFirst" } },
+            ],
+          },
+          fastFirst: { type: "final" },
+          slowFirst: { type: "final" },
+        },
+      });
+      const options = {
+        outputs: { fast: ["fast"], slow: ["slow"] },
+        ...(children ? { children } : {}),
+      };
+
+      const report = await explorePaths(machine, options);
+      expect(report.terminals.map((terminal) => terminal.state).sort()).toEqual([
+        "fastFirst",
+        "slowFirst",
+      ]);
+      expect(report.complete).toBe(true);
+
+      const result = await canReach(machine, "slowFirst", options);
+      expect(result.reachable).toBe(true);
+      expect(result.witness).toEqual([
+        { type: "xstate.done.actor", actorId: "slow", output: "slow" },
+      ]);
+    },
+  );
+
+  test.each([{ children: undefined }, { children: "explore" as const }])(
+    "a child that starts final settles before pending work, as in a live run (children: $children)",
+    async ({ children }) => {
+      const ready = createMachine({
+        initial: "done",
+        states: { done: { type: "final" } },
+        output: () => "ready",
+      });
+      const agent = setupAgent({
+        context: z.object({}),
+        actors: { ready, lookup: createAsyncLogic<string>({ run: async () => "found" }) },
+      });
+      const machine = agent.createMachine({
+        context: {},
+        initial: "waiting",
+        states: {
+          waiting: {
+            invoke: [
+              { id: "ready", src: "ready", onDone: { target: "readyFirst" } },
+              { id: "lookup", src: "lookup", onDone: { target: "lookupFirst" } },
+            ],
+          },
+          readyFirst: { type: "final" },
+          lookupFirst: { type: "final" },
+        },
+      });
+      const actor = createActor(machine);
+      const settled = new Promise<void>((resolve) =>
+        actor.subscribe({ complete: () => resolve() }),
+      );
+      actor.start();
+      await settled;
+      expect(actor.getSnapshot().value).toBe("readyFirst");
+
+      const report = await explorePaths(machine, {
+        outputs: { lookup: ["found"] },
+        ...(children ? { children } : {}),
+      });
+      expect(report.terminals.map((terminal) => terminal.state)).toEqual(["readyFirst"]);
+    },
+  );
+
+  test("a usage event an advance records does not lengthen the witness past a shorter order", async () => {
+    // Both requests report usage. Once `b`'s usage is counted, `a`'s is
+    // refused, so `b` first reaches `done` in two events and `a` first in three.
+    const agent = setupAgent({
+      context: z.object({ bCounted: z.boolean() }),
+      requests: {
+        a: { schemas: { output: z.string() }, model: "test", prompt: "a" },
+        b: { schemas: { output: z.string() }, model: "test", prompt: "b" },
+      },
+    });
+    const machine = agent.createMachine({
+      context: { bCounted: false },
+      initial: "working",
+      states: {
+        working: {
+          type: "parallel",
+          on: {
+            [AGENT_USAGE_EVENT_TYPE]: ({ context, event }) => {
+              const { src } = event as unknown as { src: string };
+              if (src === "a" && context.bCounted) {
+                return;
+              }
+              return { context: { bCounted: context.bCounted || src === "b" } };
+            },
+          },
+          states: {
+            ra: {
+              initial: "running",
+              states: {
+                running: { invoke: { id: "a", src: "a", onDone: { target: "finished" } } },
+                finished: { type: "final" },
+              },
+            },
+            rb: {
+              initial: "running",
+              states: {
+                running: { invoke: { id: "b", src: "b", onDone: { target: "finished" } } },
+                finished: { type: "final" },
+              },
+            },
+          },
+          onDone: { target: "done" },
+        },
+        done: { type: "final" },
+      },
+    });
+    const result = await canReach(machine, "done", {
+      outputs: { a: ["x"], b: ["y"] },
+      usage: { a: [{ totalTokens: 1 }], b: [{ totalTokens: 2 }] },
+    });
+    expect(result.reachable).toBe(true);
+    expect(result.witness?.map((event) => [event.type, event["src"] ?? event["actorId"]])).toEqual([
+      [AGENT_USAGE_EVENT_TYPE, "b"],
+      ["xstate.done.actor", "b"],
+    ]);
+  });
+
+  test("an output a usage event cancels is not assumed", async () => {
+    // The usage event leaves `working`, so the canned output never settles.
+    const agent = setupAgent({
+      context: z.object({}),
+      requests: { draft: { schemas: { output: z.string() }, model: "test", prompt: "draft" } },
+    });
+    const machine = agent.createMachine({
+      context: {},
+      initial: "working",
+      states: {
+        working: {
+          on: { [AGENT_USAGE_EVENT_TYPE]: { target: "over" } },
+          invoke: { id: "draft", src: "draft", onDone: { target: "done" } },
+        },
+        over: { type: "final" },
+        done: { type: "final" },
+      },
+    });
+    const report = await explorePaths(machine, {
+      outputs: { draft: ["x"] },
+      usage: { draft: [{ totalTokens: 5 }] },
+    });
+    expect(report.terminals.map((terminal) => terminal.state)).toEqual(["over"]);
+    expect(report.assumedOutputs).toEqual({});
   });
 
   test("canReach finds the error-only state behind three failed slots", async () => {

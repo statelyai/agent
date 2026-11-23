@@ -6,7 +6,8 @@ Stately Agent is XState plus typed model requests, decisions, and host executors
 
 - XState owns states, events, actors, snapshots, persistence semantics, inspection, timers, parallelism, and durable execution.
 - Stately Agent owns model request logic, decision constraints, executor binding, interactions, streaming, eval helpers, and Agent-specific lint.
-- The host framework owns storage, retries, queues, interruption recovery, and provider SDK behavior.
+- The host framework owns storage, queues, interruption recovery, and provider SDK behavior.
+- Retries have one owner per failure kind: the executor or provider for transport failures, the decision for invalid model output, and the machine's `onError` for the rest. See [Retries and executor budgets](usage-and-budgets.md#retries-and-executor-budgets).
 
 ## Start here
 
@@ -32,16 +33,16 @@ Stately Agent is XState plus typed model requests, decisions, and host executors
 
 ## Entry points
 
-| Entry                          | Purpose                                                                                    |
-| ------------------------------ | ------------------------------------------------------------------------------------------ |
-| `@statelyai/agent`             | Authoring, running, human interaction, and the executor contract                           |
-| `@statelyai/agent/evals`       | Trace analytics: `foldTraces`, `traceCoverage`, `repeatRuns`, `judgeAgreement`             |
-| `@statelyai/agent/testing`     | `lintAgentMachine`, `canReach`, `checkConformance`, `checkParity`, trajectories, seams     |
-| `@statelyai/agent/log`         | The event log: `replay`, `forkEventLog`, `getDecisionAttempts`, hand-built entries, stores |
-| `@statelyai/agent/ai-sdk`      | `createAiSdkExecutors`: the Vercel AI SDK adapter, for language and decision models        |
-| `@statelyai/agent/openai`      | Executors over the raw `openai` package                                                    |
-| `@statelyai/agent/tanstack-ai` | `createTanStackAiExecutors`, the TanStack AI adapter                                       |
-| `@statelyai/agent/otel`        | OpenTelemetry trace handler                                                                |
-| `@statelyai/agent/validate`    | JSON workflow config validation and `verifyAgentConfig` pre-run gates                      |
+| Entry                          | Purpose                                                                                                            |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
+| `@statelyai/agent`             | Authoring, running, human interaction, and the executor contract                                                   |
+| `@statelyai/agent/evals`       | Trace analytics: `foldTraces`, `traceCoverage`, `repeatRuns`, `judgeAgreement`                                     |
+| `@statelyai/agent/testing`     | `checkParity`, `compareRuns`, `canReach`, `lintAgentMachine`, `checkConformance`; lower level: trajectories, seams |
+| `@statelyai/agent/log`         | The event log: `replay`, `forkEventLog`, `getDecisionAttempts`, hand-built entries, stores                         |
+| `@statelyai/agent/ai-sdk`      | `createAiSdkExecutors`: the Vercel AI SDK adapter, for language and decision models                                |
+| `@statelyai/agent/openai`      | Executors over the raw `openai` package                                                                            |
+| `@statelyai/agent/tanstack-ai` | `createTanStackAiExecutors`, the TanStack AI adapter                                                               |
+| `@statelyai/agent/otel`        | OpenTelemetry trace handler                                                                                        |
+| `@statelyai/agent/validate`    | JSON workflow config validation and `verifyAgentConfig` pre-run gates                                              |
 
 Core has no runtime dependency on the AI SDK.

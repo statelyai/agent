@@ -171,20 +171,20 @@ settled?.resolvedRequest; // { kind: 'text', src: 'parse', id: 'parse', outcome:
 
 ## Branch exploration
 
-`explorePaths(machine, { input, maxDepth?, maxPaths?, maxNodes?, budget?, outputs?, errors?, payloads?, dedupeBy?, interleave?, children?, timers?, usage?, steps? })` enumerates decision and external-event branches without a model, and reports coverage.
+`explorePaths(machine, { input, maxDepth?, maxPaths?, budget?, outputs?, errors?, payloads?, dedupeBy?, interleave?, children?, timers?, usage?, steps? })` enumerates decision and external-event branches without a model, and reports coverage.
 
 - `input` is validated against the machine's input schema, as `runAgent` does. Input the schema rejects throws `AgentError` with code `invalid-machine-input`, so a misspelled field fails loudly instead of proving a rule over a start state no run can reach. The parsed value, with defaults filled, seeds the search. `canReach` and `simulateAgent` validate `input` the same way.
 - At each decision, it forks one branch per candidate event. Guard-rejected candidates count in `prunedByGuard` and are not explored.
 - A decision with no candidate the snapshot takes, because its guards refuse every one or the closed choice offers nothing, exhausts as it does in a live run. That branch records `{ type: 'xstate.error.actor', actorId }` and takes the invoke's `onError`. With no `onError`, it ends in an `error` terminal.
 - At an idle wait, it forks one branch per externally accepted event and per armed timer. See [Timers](#timers).
 - `outputs` is a map of output lists, keyed by src: a text request's src or any other invoked actor's src. A one-element list is a canned output, reused every time that src is reached. A text request resolves with it as its `result`. A longer list forks one branch per output. See [Payloads and invoke outputs](#payloads-and-invoke-outputs).
-- A src with one canned output resolves without a fork, so it does not appear in the path. `steps: true` records it. See [Steps](#steps).
+- A src with one canned output resolves without a fork when it is the only pending work, so it does not appear in the path. `steps: true` records it. See [Steps](#steps).
 - Each `done` terminal carries the machine's `output`, so one report lists every output the search reached.
 - A src with no `outputs` entry halts that branch with a `needs-output` terminal instead of throwing. The terminal's `missingSrc` names it.
 - `errors` is a map of canned failures per src. A src listed there forks an extra branch where that invoke is rejected, so states behind an `onError` are explored. A decision keys on its src, usually `agent.decide`, or on its invoke id; its success branch stays the per-candidate-event fork, so the failure is explored in addition to the candidates. The failure and the candidates are sibling branches: each spends one level of `maxDepth`.
 - An `errors` array forks one failing branch per element, each recording `{ type: 'xstate.error.actor', actorId, error }`. `[]` is no entry. Any other value is one failure, recorded without `error`. Wrap a single array-valued failure: `[[...]]`.
 - A rejection that reaches no `onError` errors the machine, and that path ends in an `error` terminal carrying the failure value on `error`.
-- Every invoke a state is still waiting on counts as work, concurrent ones included. They are settled one per branch, in invoke-id order, and a src in `errors` forks per invoke.
+- Every invoke a state is still waiting on counts as work, concurrent ones included. When more than one invoke or text request is pending, each can settle first: the search forks one branch per settlement, each spending one level of `maxDepth` and recording its `xstate.done.actor` or `xstate.error.actor` event, so a bug that needs one sibling to finish before another is reachable. A src in `errors` forks per invoke. A pending decision's choices branch from the same point.
 
 <!-- viz: branch exploration tree for the refund machine: deciding -> AUTO_APPROVE (pruned by guard) / NEEDS_REVIEW -> awaitingHuman -> refunded, denied -->
 
@@ -198,13 +198,17 @@ const report = await explorePaths(refundMachine, {
 // report.reachedStates → ['deciding', 'awaitingHuman', 'refunded', 'denied']
 ```
 
-Exploration is bounded by three limits per search, plus a [budget](#budgets) for the whole call:
+Exploration is bounded by two limits per search, plus a [budget](#budgets) for the whole call:
 
 - `maxDepth`: branch points along any path. Default 8.
 - `maxPaths`: terminals in the report. Default 10,000.
-- `maxNodes`: branch points expanded in total. Default 100,000. It bounds work and memory on a loopy machine, which expands many nodes per terminal.
+- `budget.nodes`: search nodes expanded in total, each branch point and each terminal. Default 250,000. It bounds work and memory on a loopy machine, which expands many nodes per terminal.
 
-`report.hitPathCap` is true when `maxPaths` or `maxNodes` cut exploration short. `report.partial` is true when any cap or the budget did, and `report.complete` is true only when the report covers every path.
+`maxPaths` counts finished paths and `budget.nodes` counts every node expanded to find them, so a loopy machine can exhaust `budget.nodes` long before it reaches `maxPaths`.
+
+`report.hitPathCap` is true when `maxPaths` cut exploration short. `report.partial` is true when any cap or the budget did, and `report.complete` is true only when the report covers every path.
+
+`report.assumedOutputs` lists the `outputs` entry of every src the search settled from it, keyed by src, child searches included. A src the search never reached is not listed. Every output branch took one of these outputs. A src with `errors` also has failing branches, which take its `errors` entry and are not listed here. `complete` covers these outputs and the configured errors only: an `onDone` branch that no listed output selects is not explored. `canReach` returns the same field.
 
 A src in `errors` is a branch point, and counts against `maxDepth` like a decision does. When the src has an output too, both branches are explored. When it has only an error, only the failing branch is. The failing branch records `{ type: 'xstate.error.actor', actorId }` in the path, where `actorId` is the invoke's id, and the output branch records `{ type: 'xstate.done.actor', actorId, output }`.
 
@@ -410,7 +414,7 @@ const result = await canReach(batchMachine, executedWhileAwaiting, {
 
 ### Budgets
 
-`maxPaths` and `maxNodes` apply to each search on its own. With `children: "explore"`, every explored child is a search of its own with the same caps, so a parent with two loopy children can expand far more than `maxNodes`. `budget` bounds the whole call.
+`maxDepth` and `maxPaths` apply to each search on its own. With `children: "explore"`, every explored child is a search of its own with the same caps. `budget` bounds the whole call.
 
 - `budget.nodes`: branch points expanded in total, by the top-level search and every child search it triggers. A cached child outcome counts once, when it is computed. Default 250,000, so a search with loopy children stops instead of growing without bound. Raise it explicitly for a bigger machine.
 - `budget.ms`: wall-clock milliseconds from the start of the call. It is checked at each branch point, in child searches too. A slow `payloads` or guard call is not interrupted. No default.
@@ -456,7 +460,7 @@ A state the machine only passes through within one step counts as reached: one l
 
 `reachable: false` proves unreachability only when `complete` is true. `complete` is false when the search left a branch it could not rule out:
 
-- `maxPaths`, `maxNodes`, or the `budget` cut the search short.
+- `maxPaths` or the `budget` cut the search short.
 - A path reached `maxDepth`.
 - A branch stopped on a `needs-output` terminal, with no `outputs` entry for its src, or an explored child machine whose own search was incomplete.
 - An event type was not expanded to all its payload variants, as `explorePaths` lists in `unexpandedEvents`.
@@ -464,6 +468,8 @@ A state the machine only passes through within one step counts as reached: one l
 When `complete` is false, `unexplored` lists why, in the wording of the `explorePaths` report's `unexplored` notes, such as `needs-output: no \`outputs\` entry for src 'resume' at path []`. A cap adds a `path-cap` note.
 
 Raise the caps, add `dedupeBy`, supply the missing outputs, or add `payloads` entries until it is true.
+
+`complete` is relative to the canned outputs. The result's `assumedOutputs` lists the outputs the search used for each src. A state that only an unlisted output reaches is reported unreachable with `complete: true`. Add an output for each `onDone` branch the proof must cover.
 
 A long-lived machine that never finishes, such as a chat loop, ends every path at `maxDepth` unless its states repeat, so `complete` is false when its context keeps growing. Its proofs are bounded:
 
@@ -493,6 +499,60 @@ const failure = await canReach(machine, "failed", {
 // failure.reachable → true; failure.witness → [{ type: 'xstate.error.actor', actorId: 'parse' }]
 ```
 
+### Mutation checks
+
+A proof that passes on a machine with its rule broken proves nothing. Write the rule as a named guard, then check a copy with that guard replaced:
+
+```ts
+import { z } from "zod";
+import { setupAgent } from "@statelyai/agent";
+import { canReach } from "@statelyai/agent/testing";
+
+const payout = setupAgent({
+  context: z.object({ amount: z.number(), approved: z.boolean() }),
+  input: z.object({ amount: z.number() }),
+  events: { APPROVE: {}, PAY: {} },
+  guards: {
+    canPay: ({ context }) => context.amount <= 100 || context.approved,
+  },
+});
+
+const payoutMachine = payout.createMachine({
+  context: ({ input }) => ({ amount: input.amount, approved: false }),
+  initial: "open",
+  states: {
+    open: {
+      on: {
+        APPROVE: { context: { approved: true } },
+        PAY: ({ context, event, guards }) =>
+          guards.canPay({ context, event }) ? { target: "paid" } : undefined,
+      },
+    },
+    paid: { type: "final" },
+  },
+});
+
+const proof = await canReach(
+  payoutMachine,
+  (snapshot) => snapshot.matches("paid") && !snapshot.context.approved,
+  { input: { amount: 500 } },
+);
+// proof → { reachable: false, complete: true }
+
+const mutant = payoutMachine.provide({ guards: { canPay: () => true } });
+const leak = await canReach(
+  mutant,
+  (snapshot) => snapshot.matches("paid") && !snapshot.context.approved,
+  { input: { amount: 500 } },
+);
+// leak.reachable → true; leak.witness → [{ type: 'PAY' }]
+```
+
+- `machine.provide({ guards })` returns a copy of the machine with the same type, so the mutant needs no config copy and no cast. It also replaces `actions`, `actors`, and `delays` by name.
+- `provide` cannot reach a rule written inline in a transition or `choice` function. Move the rule into `setupAgent({ guards })` and call it through `guards` to make it replaceable.
+- `setupAgent` types `guards` as a string-keyed map. With `noUncheckedIndexedAccess`, call the guard as `guards.canPay!(…)`.
+- A mutant the same proof does not catch means the target, the `input`, or the `outputs` table never exercises the rule (with `amount: 40`, `canPay` and `() => true` both allow payment), or the search was not `complete`.
+
 ### Ordering targets
 
 A snapshot predicate sees one snapshot, so it cannot ask what happened earlier on the path. An ordering target can:
@@ -512,7 +572,7 @@ const turnAfterStop = await canReach(
 - The witness is the event sequence to the first violation.
 - A turn already running when STOP arrives started before it, so it is not a violation. Check that turn with `settled` if the rule covers it.
 - `dedupeBy` stays sound: the search adds "`after` has matched" to each key, so a snapshot reached before and after the trigger is explored both ways.
-- Test the rule with a mutant that breaks it (a loop that starts another turn after STOP), as with a loosened guard.
+- Test the rule with a mutant that breaks it (a loop that starts another turn after STOP). See [Mutation checks](#mutation-checks).
 - Don't match strings over `terminal.path` for an ordering rule: it lists branch points only and names actors by generated id.
 
 ## Recorded runs against a model

@@ -223,17 +223,23 @@ const stats = foldTraces(traces, {
 
 ## Parity with the code you replace
 
-Start with `checkParity`. Pick a lower-level tool only when the old code does not route its side effects through one object.
+Start with one of two checks:
 
-| The old code                                                    | Use                                                                                 | Compares                                           |
-| --------------------------------------------------------------- | ----------------------------------------------------------------------------------- | -------------------------------------------------- |
-| Sends every side effect through one `effects` object            | `checkParity`, see [Check parity](strangler-fig.md#check-parity)                    | Each effect's name, order, arguments, and result   |
-| Calls a model client or SDK directly                            | `createRecorder` and `compareRecordings`, see [Any model client](#any-model-client) | Each recorded call and the output                  |
-| Changes on purpose, or a live model makes calls differ each run | `compareRuns`, see [Outcome labels](#outcome-labels)                                | The terminal outcome, the effects, and rule breaks |
+| The old code                                                    | Use                                                              | Compares                                           |
+| --------------------------------------------------------------- | ---------------------------------------------------------------- | -------------------------------------------------- |
+| Sends every side effect through one `effects` object            | `checkParity`, see [Check parity](strangler-fig.md#check-parity) | Each effect's name, order, arguments, and result   |
+| Changes on purpose, or a live model makes calls differ each run | `compareRuns`, see [Outcome labels](#outcome-labels)             | The terminal outcome, the effects, and rule breaks |
 
-`checkParity` records `before` with `createRecorder`, replays `after` against the recording, and compares the two with `compareRecordings`, in one call per scenario.
+`checkParity` is effect-level: it records `before` with `createRecorder`, replays `after` against the recording, and compares the two with `compareRecordings`, in one call per scenario.
 
-`compareRuns` labels a difference `intended` only when the candidate fixes a rule the baseline broke, or only the candidate reaches the scenario's `expected` outcome. Any other difference is a `regression`, including an effect the candidate adds on purpose with the same outcome. See [Outcome labels](#outcome-labels).
+`compareRuns` is outcome-level: it labels a difference `intended` only when the candidate fixes a rule the baseline broke, or only the candidate reaches the scenario's `expected` outcome. Any other difference is a `regression`, including an effect the candidate adds on purpose with the same outcome. See [Outcome labels](#outcome-labels).
+
+The rest are lower-level tools, for code neither check fits:
+
+- `createRecorder` with `compareRecordings`: old code that calls a model client or SDK directly instead of through an `effects` object. See [Any model client](#any-model-client).
+- `wrapWorkflow`: runs the old workflow unchanged inside a machine, as the `after` side of `checkParity` while you move it into states. See [Strangler-fig retrofit](strangler-fig.md).
+- `runSeam`: one request under test, every other request scripted. See [Seam evals](#seam-evals).
+- `matchesTrajectory`: checks a run's state path or events against an expected sequence.
 
 ### Outcome labels
 
@@ -339,6 +345,7 @@ const report = traceCoverage(machine, traces, {
 });
 report.unvisitedStates; // ["refunded"]
 report.unvisitedHandlers; // [{ state: "deciding", event: "AUTO_APPROVE" }]
+report.opaqueHandlers; // visited function transitions, inner branches not counted
 report.ratio; // { states: 0.75, handlers: 0.8 }
 report.handlers[0];
 // { state: "deciding", event: "AUTO_APPROVE", runs: 0, targets: { declared: ["refunded"], seen: [], unreached: ["refunded"] } }
@@ -348,6 +355,7 @@ report.handlers[0];
 - A **handler** is a state and an event descriptor it declares: an `on` key, or the invoke and `after` handlers, which XState keys by bare type (`xstate.done.actor`, `xstate.error.actor`, `xstate.after`), one per state however many invokes it has. The machine root's handlers have `state: ""`.
 - A step credits one handler per active leaf: the nearest state, from the leaf up, whose descriptor matches the event. Exact descriptors come first, then partial (`task.*`) and wildcard (`*`) ones, longest first, as XState orders them. A done or error event credits a state only when its invoke's id matches the event's. Guards are not replayed, so a step whose nearest handler a guard rejected is credited to that handler anyway.
 - `targets.declared` lists the targets of a handler's object transitions, or is `"dynamic"` when any is a function transition. `targets.seen` lists the active states after the steps credited to it. `targets.unreached` lists declared targets no run landed in.
+- A visited handler with a function transition is listed in `opaqueHandlers`. A trace shows that the handler ran, not which branches inside the function it took, so `ratio.handlers` counts it as covered even when a branch never ran. It uses the same attribution as `runs`: a step a guard in the function rejected, which an ancestor then handled, still lists the function's handler. To check each branch, prove it with `canReach`, with a target only that branch reaches.
 - `always` handlers are listed in `unobservable`, never as unvisited. A trace records one step per macrostep, so an eventless transition inside one does not show.
 - A state an `always` transition passes through counts as visited, though no traced snapshot is in it. `traceCoverage` re-derives each step's microsteps from the snapshot before it with XState's `getMicrosteps`. It sees each snapshot's value and context only, not its live children. A step it cannot recompute, or whose recomputed route ends somewhere other than the traced snapshot, adds no such states. A guard that reads live children can still be recomputed down a different route that ends in the same place, and that route's states are credited.
 - `reachable` takes an `explorePaths` report. When the report explored every path (no cap hit, every payload expanded, no branch stopped early), states it never reached and no trace visited are listed in `unreachable` and leave the state denominator, so `ratio.states` counts only states a run could visit. `reachableComplete` says whether it did. A partial report narrows nothing: `unreachable` is absent and every state stays in the denominator.
