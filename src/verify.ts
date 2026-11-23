@@ -1225,7 +1225,7 @@ export interface ExplorePathsOptions<
    * (a callback bridge, a long-lived listener): its invoke stays pending and
    * only events move the machine on.
    */
-  outputs?: Record<string, unknown[]>;
+  outputs?: Record<string, readonly unknown[]>;
   /**
    * A canned failure per src, keyed like `outputs`. A src listed here
    * forks an extra branch at that invoke, where the invoke is rejected and the
@@ -1248,7 +1248,7 @@ export interface ExplorePathsOptions<
    * single failure. A single failure that is itself an array must be wrapped:
    * `[[...]]`.
    */
-  errors?: Record<string, unknown | unknown[]>;
+  errors?: Record<string, unknown | readonly unknown[]>;
   /**
    * Where external events fork. `"idle"` (default): only at idle waits.
    * `"pending"`: also wherever an invoke is outstanding — before a text or
@@ -1312,7 +1312,7 @@ export interface ExplorePathsOptions<
    * the host sends the child directly; the parent's sends are delivered as
    * the parent makes them.
    */
-  childEvents?: Record<string, string[]>;
+  childEvents?: Record<string, readonly string[]>;
   /**
    * The event types the host can send the machine at its waits (and, with
    * `interleave: "pending"`, while work is pending). Default: every type the
@@ -1320,7 +1320,7 @@ export interface ExplorePathsOptions<
    * from the machine's own children (a child's status events), so the search
    * does not offer them as if the host sent them.
    */
-  hostEvents?: string[];
+  hostEvents?: readonly string[];
   /**
    * Payloads to try per event type at each branch point, given the settled
    * snapshot there. At a decision or an idle wait, an event type with an
@@ -1341,7 +1341,7 @@ export interface ExplorePathsOptions<
    */
   payloads?: (
     snapshot: ExploreCallbackSnapshot<TSnapshot, TChildren, "explore" | "coupled">,
-  ) => Partial<Record<string, Record<string, unknown>[]>>;
+  ) => Partial<Record<string, readonly Record<string, unknown>[]>>;
   /**
    * A projection of the snapshot that determines its future. Settled
    * snapshots with an equal key are explored once (again only when reached
@@ -1385,7 +1385,7 @@ export interface ExplorePathsOptions<
    * `vacuous` entry). Requests inside other children, and decisions, deliver
    * no usage.
    */
-  usage?: Record<string, AgentCallUsage[]>;
+  usage?: Record<string, readonly AgentCallUsage[]>;
   /**
    * Record every macrostep of each path in its terminal's `steps`, with the
    * srcs each step started and settled. `path` lists only branch points, so
@@ -1483,7 +1483,7 @@ interface InvokeFork {
   errors: unknown[];
   /** Record each failure as `error` on its path entry (an array `errors` entry, or a child's failures). */
   recordError?: boolean;
-  outputs: unknown[];
+  outputs: readonly unknown[];
   /** An explored child can stall idle: the parent waits there forever. */
   stalls?: boolean;
   /** An explored child whose search was incomplete: the src's outputs may be partial. */
@@ -2456,7 +2456,7 @@ function explore(
   const variantsOf = (
     type: string,
     snapshot: AnyMachineSnapshot,
-    table: Partial<Record<string, Record<string, unknown>[]>>,
+    table: Partial<Record<string, readonly Record<string, unknown>[]>>,
     requestOptions?: AgentDecisionOption[],
   ): ChosenEvent[] => {
     const listed = table[type];
@@ -3055,7 +3055,7 @@ function explore(
   const acceptedVariants = (
     snapshot: AnyMachineSnapshot,
     path: PathLink | undefined,
-    table: Partial<Record<string, Record<string, unknown>[]>>,
+    table: Partial<Record<string, readonly Record<string, unknown>[]>>,
     except?: ReadonlySet<string>,
   ): ChosenEvent[] => [
     ...arriving(snapshot).flatMap((descriptor) => {

@@ -622,6 +622,25 @@ describe("canReach — predicate targets", () => {
     expect(typesOnly).toBeTypeOf("function");
   });
 
+  test("options accept readonly arrays and an `as const` object", () => {
+    // Type-only: the calls below never run.
+    const typesOnly = () => {
+      const machine = createApprovalMachine();
+      const options = {
+        input: { amount: 50 },
+        outputs: { lookup: [{ found: true }, { found: false }] },
+        errors: { lookup: ["down"] },
+        hostEvents: ["APPROVE", "REJECT"],
+        childEvents: { child: ["PING"] },
+        usage: { draft: [{ totalTokens: 10 }] },
+        payloads: () => ({ APPROVE: [{}] }) as const,
+      } as const;
+      void canReach(machine, "issued", options);
+      void explorePaths(machine, options);
+    };
+    expect(typesOnly).toBeTypeOf("function");
+  });
+
   test("a snapshot predicate can express a violation property without a sentinel state", async () => {
     // The safety property: over the limit, `issued` is never entered without
     // `approved` — a predicate over context that only APPROVE can flip, so

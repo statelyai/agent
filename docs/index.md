@@ -6,7 +6,8 @@ Stately Agent is XState plus typed model requests, decisions, and host executors
 
 - XState owns states, events, actors, snapshots, persistence semantics, inspection, timers, parallelism, and durable execution.
 - Stately Agent owns model request logic, decision constraints, executor binding, interactions, streaming, eval helpers, and Agent-specific lint.
-- The host framework owns storage, retries, queues, interruption recovery, and provider SDK behavior.
+- The host framework owns storage, queues, interruption recovery, and provider SDK behavior.
+- Retries have one owner per failure kind: the executor or provider for transport failures, the decision for invalid model output, and the machine's `onError` for the rest. See [Retries and executor budgets](usage-and-budgets.md#retries-and-executor-budgets).
 
 ## Start here
 

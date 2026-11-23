@@ -149,7 +149,13 @@ Use `maxModelCalls` as a runaway-loop backstop. Put anything the machine's own l
 
 ## Retries and executor budgets
 
-Retries can happen in three places, and the counts multiply.
+Each kind of failure has one retry owner:
+
+- Transport and provider failures (a 429, a timeout, a dropped connection) are the executor's or the provider's to retry, when configured, for example AI SDK `maxRetries`. The AI SDK adapter passes `maxRetries: 0` by default, so nothing retries until you set it. Core does not retry an executor that throws: a `generateText`, `streamText`, or `decide` executor's exception fails that request on the first throw.
+- Model output that fails validation is retried by the decision's `maxRetries`: an unknown event, an invalid payload, or a guard rejection. See [Validation and retries](decisions.md#validation-and-retries).
+- Anything that still fails reaches the invoke's `onError`: an executor exception, or a decision that exhausts its retries (`decision-exhausted`). With no `onError`, the run settles `{ status: "error" }` with `cause: "decision-exhausted"` for an exhausted decision, `cause: "max-model-calls"` for a `maxModelCalls` overrun, and `cause: "machine"` for any other failure, such as an executor exception.
+
+When more than one layer retries the same request, the counts multiply:
 
 - Machine retries. An authored `onError` transition that re-enters a state after a failure, such as a provider error, a validation rejection, or an exhausted decision, is control flow you model explicitly. Each attempt counts in `modelCalls` and in `maxModelCalls`.
 - Decision retries. `agent.decide` retries an invalid choice up to its `maxRetries`, default 2, so one decision makes up to 3 calls. Each counts in `modelCalls`.

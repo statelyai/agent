@@ -34,13 +34,15 @@ for another process to resume with `start({ snapshot })`.
 
 ## Host-owned timers
 
-Root `after` timers run in process by default. A durable host can provide
-`timers: { schedule, cancel }` to `createAgentRuntime`. The runtime then settles
-with an external timer pending. When it fires, deliver
+Root `after` timers run in process by default. A pending in-process timer is
+work in flight, so `runAgent` waits for it to fire and does not settle `idle`
+while it is armed. A durable host can provide
+`timers: { schedule, cancel }` to `createAgentRuntime` or `runAgent`. The run then
+settles `idle` with the external timer pending. When it fires, deliver
 `{ type: "xstate.timer", id }` through `transition` or as the `event` passed to
 `runAgent`.
 
-A resumed run calls `schedule` again for each timer still pending, with what is left of its delay by the wall clock. Treat `schedule` as an upsert by `id`: a host that already holds that timer keeps its own due time. An `id` names a timer by its state and delay, not by arming, so a state entered again schedules the same `id` once the earlier timer has fired or been cancelled.
+A resumed run calls `schedule` again for each timer still pending, with what is left of its delay by the wall clock. Treat `schedule` as an upsert by `id`: a host that already holds that timer keeps its own due time. An `id` names one arming: it includes the timer's occurrence, so a resumed run reuses the `id`, and re-entering the state schedules a new one. An `id` is unique within one run only. Two runs of the same machine can schedule the same `id`, so a host that stores timers for several runs keys them by the run's `executionId` (read it with `getLogExecutionId(entries)`, or use your own run id for a log written without one) and the `id`. A resume from the event log keeps the `executionId`; a resume from a snapshot alone starts a new lineage with a new one, so cancel the old run's stored timers when you resume that way. Keep the `id` from each `schedule` call and deliver that exact `id` to the run that scheduled it.
 
 An invoked child machine's `after` timers always run in process, and the run
 waits for them, whichever `timers` option you pass.
