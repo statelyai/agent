@@ -42,7 +42,7 @@ settles `idle` with the external timer pending. When it fires, deliver
 `{ type: "xstate.timer", id }` through `transition` or as the `event` passed to
 `runAgent`.
 
-A resumed run calls `schedule` again for each timer still pending, with what is left of its delay by the wall clock. Treat `schedule` as an upsert by `id`: a host that already holds that timer keeps its own due time. An `id` names one arming: it includes the timer's occurrence, so a resumed run schedules the same `id` again, and a state entered again schedules a new one. Keep the `id` from each `schedule` call and deliver that exact `id` when it fires.
+A resumed run calls `schedule` again for each timer still pending, with what is left of its delay by the wall clock. Treat `schedule` as an upsert by `id`: a host that already holds that timer keeps its own due time. An `id` names one arming: it includes the timer's occurrence, so a resumed run reuses the `id`, and re-entering the state schedules a new one. An `id` is unique within one run only. Two runs of the same machine can schedule the same `id`, so a host that stores timers for several runs keys them by the run's `executionId` (read it with `getLogExecutionId(entries)`) and the `id`. Keep the `id` from each `schedule` call and deliver that exact `id` to the run that scheduled it.
 
 An invoked child machine's `after` timers always run in process, and the run
 waits for them, whichever `timers` option you pass.
