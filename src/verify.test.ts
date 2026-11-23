@@ -1,6 +1,6 @@
 import { describe, expect, expectTypeOf, test } from "vitest";
 import { z } from "zod";
-import { createActor, createAsyncLogic, createMachine } from "xstate";
+import { createActor, createAsyncLogic, createMachine, type SnapshotFrom } from "xstate";
 import {
   AGENT_USAGE_EVENT_TYPE,
   createTextLogic,
@@ -653,6 +653,43 @@ describe("canReach — predicate targets", () => {
     );
     expect(small.reachable).toBe(true);
     expect(small.witness?.map((event) => event.type)).toEqual(["ISSUE"]);
+  });
+
+  test("a mutant built with machine.provide({ guards }) is typed and caught", async () => {
+    // docs/verify.md "Mutation checks": the rule is a named guard, so a typed
+    // copy with the rule broken needs no config spread and no cast.
+    const payout = setupAgent({
+      context: z.object({ amount: z.number(), approved: z.boolean() }),
+      input: z.object({ amount: z.number() }),
+      events: { APPROVE: {}, PAY: {} },
+      guards: {
+        canPay: ({ context }) => context.amount <= 100 || context.approved,
+      },
+    });
+    const payoutMachine = payout.createMachine({
+      context: ({ input }) => ({ amount: input.amount, approved: false }),
+      initial: "open",
+      states: {
+        open: {
+          on: {
+            APPROVE: { context: { approved: true } },
+            PAY: ({ context, event, guards }) =>
+              guards.canPay!({ context, event }) ? { target: "paid" } : undefined,
+          },
+        },
+        paid: { type: "final" },
+      },
+    });
+    const unapprovedPayout = (snapshot: SnapshotFrom<typeof payoutMachine>) =>
+      snapshot.matches("paid") && !snapshot.context.approved;
+
+    const proof = await canReach(payoutMachine, unapprovedPayout, { input: { amount: 500 } });
+    expect(proof).toMatchObject({ reachable: false, complete: true });
+
+    const mutant = payoutMachine.provide({ guards: { canPay: () => true } });
+    const leak = await canReach(mutant, unapprovedPayout, { input: { amount: 500 } });
+    expect(leak.reachable).toBe(true);
+    expect(leak.witness?.map((event) => event.type)).toEqual(["PAY"]);
   });
 });
 

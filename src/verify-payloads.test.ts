@@ -729,7 +729,7 @@ describe("canReach — proof soundness", () => {
     const result = await canReach(spin, "never", {
       maxDepth: 30,
       maxPaths: 1_000_000,
-      maxNodes: 500,
+      budget: { nodes: 500 },
       payloads: counted,
     });
     expect(result).toMatchObject({ reachable: false, complete: false });
@@ -739,10 +739,10 @@ describe("canReach — proof soundness", () => {
     const report = await explorePaths(spin, {
       maxDepth: 30,
       maxPaths: 1_000_000,
-      maxNodes: 500,
+      budget: { nodes: 500 },
       payloads: counted,
     });
-    expect(report.hitPathCap).toBe(true);
+    expect(report).toMatchObject({ partial: true, hitPathCap: false });
     expect(branchPoints).toBeLessThanOrEqual(500);
   });
 
@@ -754,7 +754,7 @@ describe("canReach — proof soundness", () => {
   }, 30_000);
 
   test("a search within the node budget is still complete", async () => {
-    expect(await canReach(spin, "never", { maxDepth: 3, maxNodes: 40 })).toMatchObject({
+    expect(await canReach(spin, "never", { maxDepth: 3, budget: { nodes: 40 } })).toMatchObject({
       reachable: false,
       complete: false, // maxDepth cut it, not the budget
     });
@@ -767,8 +767,12 @@ describe("canReach — proof soundness", () => {
         never: {},
       },
     });
-    expect(await canReach(fork, "never", { maxNodes: 3 })).toMatchObject({ complete: true });
-    expect(await canReach(fork, "never", { maxNodes: 2 })).toMatchObject({ complete: false });
+    expect(await canReach(fork, "never", { budget: { nodes: 3 } })).toMatchObject({
+      complete: true,
+    });
+    expect(await canReach(fork, "never", { budget: { nodes: 2 } })).toMatchObject({
+      complete: false,
+    });
   });
 });
 

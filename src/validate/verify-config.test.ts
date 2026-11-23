@@ -256,14 +256,14 @@ describe("verifyAgentConfig", () => {
     expect(result.gates.at(-1)!.detail).toContain("explore.inputs is empty");
   });
 
-  test("explore: a node cap that cuts exploration short names both caps", async () => {
+  test("explore: a path cap that cuts exploration short names it", async () => {
     const result = await verifyAgentConfig(
       refundConfig(),
-      options({ explore: { inputs: [{ amount: 5 }], maxNodes: 1 } }),
+      options({ explore: { inputs: [{ amount: 5 }], maxPaths: 1 } }),
     );
     expect(result.gates.at(-1)).toMatchObject({ name: "explore", ok: false });
     expect(result.gates.at(-1)!.detail).toContain(
-      "a cap (maxPaths 10000 or maxNodes 1) cut exploration short",
+      "the path cap (maxPaths 1) cut exploration short",
     );
   });
 
@@ -276,7 +276,7 @@ describe("verifyAgentConfig", () => {
     expect(result.gates.at(-1)!.detail).toMatch(
       /the explore budget ran out \(budget-exhausted: nodes \(1 nodes expanded in \d+ ms, child searches included\)\); exploration is incomplete/,
     );
-    expect(result.gates.at(-1)!.detail).not.toContain("a cap (maxPaths");
+    expect(result.gates.at(-1)!.detail).not.toContain("the path cap (maxPaths");
   });
 
   test("explore: an event whose payloads were not all tried fails and names it", async () => {
