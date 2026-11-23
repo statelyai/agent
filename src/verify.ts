@@ -1462,6 +1462,14 @@ export interface AgentPathReport {
    * change completeness.
    */
   vacuous: string[];
+  /**
+   * The `outputs` entry of every src the search settled from it, child
+   * searches included, keyed by src in `outputs` order, copied. Each output
+   * branch took one of these outputs and no other; failing branches take the
+   * src's `errors` entry, not listed here. `complete` covers these outputs
+   * and the configured errors only. An entry the search never reached is absent.
+   */
+  assumedOutputs: Record<string, unknown[]>;
 }
 
 // Safety bound on the deterministic advance between two branch points: each
@@ -1501,6 +1509,8 @@ interface InvokeFork {
    * resolving an output.
    */
   isDecision?: boolean;
+  /** The `outputs` src this fork's outputs come from, recorded as assumed once one is applied. */
+  scriptSrc?: string;
 }
 
 // Cap on the cartesian product a schema's finite fields expand to.
@@ -1618,6 +1628,8 @@ interface SearchBudget {
   started: number;
   deadline: number | undefined;
   exhausted?: "nodes" | "ms";
+  /** Srcs settled from `outputs`, child searches included. */
+  assumed: Set<string>;
 }
 
 function startBudget(budget: ExplorePathsOptions["budget"]): SearchBudget {
@@ -1627,6 +1639,7 @@ function startBudget(budget: ExplorePathsOptions["budget"]): SearchBudget {
     maxNodes: budget?.nodes ?? DEFAULT_BUDGET_NODES,
     started,
     deadline: budget?.ms === undefined ? undefined : started + budget.ms,
+    assumed: new Set(),
   };
 }
 
@@ -2550,14 +2563,28 @@ function explore(
   // an explored child's outcomes), or blocked on a missing output.
   // `outputs: { src: [] }`: the src never settles (a callback bridge or a
   // long-lived listener), so its invoke stays pending and only events move on.
-  const neverSettles = (src: string): boolean => outputScript[src]?.length === 0 && !errorsFor(src);
+  const neverSettles = (src: string): boolean => {
+    const never = outputScript[src]?.length === 0 && !errorsFor(src);
+    if (never) budget.assumed.add(src);
+    return never;
+  };
+  // An `outputs` src counts as assumed once one of its outputs is applied.
+  const assume = (src: string | undefined): void => {
+    if (src !== undefined) {
+      budget.assumed.add(src);
+    }
+  };
   const settleFor = (
     id: string,
     src: string,
     isText: boolean,
     invoke?: PendingInvoke,
     usage?: UsageChoice[],
-  ): { fork: InvokeFork } | { output: unknown } | { blocked: true } | { never: true } => {
+  ):
+    | { fork: InvokeFork }
+    | { output: unknown; scriptSrc?: string }
+    | { blocked: true }
+    | { never: true } => {
     const failures = errorsFor(src);
     if (neverSettles(src)) {
       return { never: true };
@@ -2609,10 +2636,11 @@ function explore(
           outputs,
           isText,
           ...(usage ? { usage } : {}),
+          scriptSrc: src,
         },
       };
     }
-    return outputs.length === 1 ? { output: outputs[0] } : { blocked: true };
+    return outputs.length === 1 ? { output: outputs[0], scriptSrc: src } : { blocked: true };
   };
 
   // A pending invoke `children: "explore"` explores rather than scripts.
@@ -2661,7 +2689,16 @@ function explore(
       if ("never" in settle) {
         return [];
       }
-      return [{ id, errors: [], outputs: [settle.output], isText, ...(usage ? { usage } : {}) }];
+      return [
+        {
+          id,
+          errors: [],
+          outputs: [settle.output],
+          isText,
+          ...(usage ? { usage } : {}),
+          ...(settle.scriptSrc === undefined ? {} : { scriptSrc: settle.scriptSrc }),
+        },
+      ];
     };
     const texts = step.requests.filter(
       (request): request is AgentStepRequest & { kind: "text" } => request.kind === "text",
@@ -2874,7 +2911,7 @@ function explore(
     decisions?: AgentStepRequest[];
     /** `children: "coupled"`: child machines pending, stepped by the parent. */
     kids?: PendingInvoke[];
-    pending?: { id: string; output: unknown; usage?: AgentUsageEvent };
+    pending?: { id: string; output: unknown; usage?: AgentUsageEvent; scriptSrc?: string };
   } => {
     let current = step;
     // Bounded loop: each iteration resolves one text or scripted invoke.
@@ -2945,13 +2982,23 @@ function explore(
               id: request.id,
               output: asTextResult(settle.output),
               ...(usage?.[0] ? { usage: usage[0] } : {}),
+              ...(settle.scriptSrc === undefined ? {} : { scriptSrc: settle.scriptSrc }),
             },
           };
         }
         if (usage?.[0]) {
           recordEvent(usage[0] as unknown as ChosenEvent);
         }
-        current = settleStep(current, request.id, asTextResult(settle.output), usage?.[0]).step;
+        const settledText = settleStep(
+          current,
+          request.id,
+          asTextResult(settle.output),
+          usage?.[0],
+        );
+        if (settledText.completed) {
+          assume(settle.scriptSrc);
+        }
+        current = settledText.step;
         recordState(current);
         continue;
       }
@@ -2988,8 +3035,16 @@ function explore(
           return { step: current };
         }
         if (races(current)) {
-          return { step: current, pending: { id: invoke.id, output: settle.output } };
+          return {
+            step: current,
+            pending: {
+              id: invoke.id,
+              output: settle.output,
+              ...(settle.scriptSrc === undefined ? {} : { scriptSrc: settle.scriptSrc }),
+            },
+          };
         }
+        assume(settle.scriptSrc);
         current = resolveStep(current, invoke.id, settle.output);
         recordState(current);
         continue;
@@ -3151,6 +3206,9 @@ function explore(
         return;
       }
       const { step, completed } = settleStep(settled, fork.id, value, usage);
+      if (completed) {
+        assume(fork.scriptSrc);
+      }
       recordState(step);
       const charged = usage && !stepping ? extend(path, usage as unknown as ChosenEvent) : path;
       yield {
@@ -3588,7 +3646,11 @@ function explore(
         maxDepthTerminal(settled, path);
         return;
       }
-      const resolved = settleStep(settled, pending.id, pending.output, pending.usage).step;
+      const settledPending = settleStep(settled, pending.id, pending.output, pending.usage);
+      if (settledPending.completed) {
+        assume(pending.scriptSrc);
+      }
+      const resolved = settledPending.step;
       recordState(resolved);
       // A delivered usage event is an event the machine receives: it is on the path.
       const charged =
@@ -4141,6 +4203,11 @@ function explore(
     complete: false,
     unexpandedEvents: [...unexpanded],
     vacuous: [...vacuous],
+    assumedOutputs: Object.fromEntries(
+      Object.entries(outputScript)
+        .filter(([src]) => budget.assumed.has(src))
+        .map(([src, outputs]) => [src, [...outputs]]),
+    ),
   };
   report.complete = isExplorationComplete(report);
   return {
@@ -4244,6 +4311,13 @@ export interface CanReachResult {
    * report records elsewhere.
    */
   unexplored?: string[];
+  /**
+   * The {@link explorePaths} report's `assumedOutputs`: the `outputs` entry
+   * of every src the search settled from it. `complete` and `witness` hold
+   * for these outputs and the configured `errors` only; a witness can take a
+   * configured error.
+   */
+  assumedOutputs: Record<string, unknown[]>;
 }
 
 /** Thrown when a string reachability target is not a state in the machine. */
@@ -4342,6 +4416,7 @@ export async function canReach<
       witness,
       complete: true,
       ...(resolvedTarget ? { target: resolvedTarget } : {}),
+      assumedOutputs: report.assumedOutputs,
     };
   }
   const complete = isExplorationComplete(report);
@@ -4369,6 +4444,7 @@ export async function canReach<
               : []),
           ],
         }),
+    assumedOutputs: report.assumedOutputs,
   };
 }
 
