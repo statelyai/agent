@@ -132,13 +132,17 @@ async function* carvedLoop(): AsyncGenerator<LoopEvent> {
       done: { type: "final" },
     },
   });
-  const result = yield* bridge.stream(runAgent(loop, {}));
-  if (result.status === "error") throw result.error;
+  // Reject on an error result, so a failure while unwinding also throws from `.return()`.
+  const run = runAgent(loop, {}).then((result) => {
+    if (result.status === "error") throw result.error;
+    return result;
+  });
+  yield* bridge.stream(run);
 }
 ```
 
 - Await `put` before the pass runs its next effect. That is the backpressure rule: the legacy generator stays suspended at its `yield` until the consumer pulls. A queue that pushes and moves on runs the next effect, such as a tool call that places a trade, before the consumer has seen the event before it.
-- A consumer that stops (`break`, `.return()`) makes the pending `put` resolve `false`. The pass stops iterating, the legacy generator's `finally` blocks run, and `.return()` resolves after the run settles.
+- A consumer that stops (`break`, `.return()`) makes the pending `put` resolve `false`. The pass stops iterating, the legacy generator's `finally` blocks run, and `.return()` resolves after the run settles. A stopped consumer skips the code after `yield*`, so check the run's status in the promise passed to `stream`, as above: a legacy `finally` that throws then throws from `.return()`.
 - This bridge does not forward `.throw()`. To support it, reject the pending `put` with the consumer's error and pass it to the legacy generator's `throw()`.
 - One bridge serves one run.
 
