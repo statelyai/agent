@@ -141,6 +141,8 @@ async function* carvedLoop(): AsyncGenerator<LoopEvent> {
 }
 ```
 
+This machine runs one pass. A loop head re-enters `running` from `onDone` until a pass reports that the loop is finished, and each pass hands its events to the same bridge.
+
 - Await `put` before the pass runs its next effect. That is the backpressure rule: the legacy generator stays suspended at its `yield` until the consumer pulls. A queue that pushes and moves on runs the next effect, such as a tool call that places a trade, before the consumer has seen the event before it.
 - A consumer that stops (`break`, `.return()`) makes the pending `put` resolve `false`. The pass stops iterating, the legacy generator's `finally` blocks run, and `.return()` resolves after the run settles. A stopped consumer skips the code after `yield*`, so check the run's status in the promise passed to `stream`, as above: a legacy `finally` that throws then throws from `.return()`.
 - `for await` calls the legacy generator's `return()` once and does not resume it. A legacy `finally` that yields stops at that `yield`, and the rest of the block never runs. Keep yields out of legacy `finally` blocks, or drive the generator with `next()` and `return()` by hand and forward each value it yields while unwinding.

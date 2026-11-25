@@ -355,7 +355,7 @@ checking: {
 },
 ```
 
-The returned object takes `target`, and optionally `description`, `reenter`, `meta`, and `input`. It has no `context` field, so a choice only routes: update context on the transition that enters the choice state. TypeScript does not reject an extra `context` key on the returned object, and XState `6.0.0-beta.4` applies it, but it is outside the choice contract. The function must return a target. A choice state whose function returns no target throws at run time.
+The returned object takes `target`, and optionally `description`, `reenter`, and `meta`. It has no `context` field, so a choice only routes: update context on the transition that enters the choice state. TypeScript does not reject an extra `context` key on the returned object, and XState `6.0.0-beta.4` applies it, but it is outside the choice contract. The function must return a target. A choice state whose function returns no target throws at run time.
 
 A choice state has no other behavior. `on`, `always`, `after`, `entry`, `exit`, `invoke`, and `states` are not allowed on it. Put the work in the target states.
 
