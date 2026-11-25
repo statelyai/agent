@@ -253,8 +253,10 @@ const report = await checkConformance(refundModel, {
     },
     issueRefund: {
       observes: "refund",
-      matches: ({ input, observation }) =>
-        input.orderId === observation.orderId && input.amount === observation.amount,
+      matches: ({ input, observation }) => {
+        const expected = input as { orderId: string; amount: number };
+        return expected.orderId === observation.orderId && expected.amount === observation.amount;
+      },
       error: ({ observation }) => observation.error,
     },
   },
@@ -266,7 +268,8 @@ const report = await checkConformance(refundModel, {
   },
   output: {
     observes: "returned",
-    matches: ({ output, observation }) => output.outcome === observation.outcome,
+    matches: ({ output, observation }) =>
+      (output as { outcome: string }).outcome === observation.outcome,
   },
 });
 ```
@@ -274,6 +277,7 @@ const report = await checkConformance(refundModel, {
 - An actor with `observes` consumes the next observation, which must be of that kind. `output` builds the actor's output from it.
 - The model's placeholders declare output schemas, so an `output` the schema rejects, such as a decision of an unknown `type`, is an `invalid-output` deviation instead of an error inside the model's `onDone`.
 - `matches` compares the actor's input with the observation. Here, the refund the code issued must be for the order and amount the model would refund.
+- A placeholder with no input schema types `input` as `unknown`. This model declares no output schema, so `output` is `unknown` too. Cast each to the shape the model builds, as above.
 - `events` sends an observation to the model as an event while the model waits, here the person's approval. Its `matches` compares the observation with the model's context: the person approved the amount the model is waiting to refund.
 - `output` checks the code's return value. The model must finish where the code returned, and `matches` compares the model's output with the recorded one. Pass it for runs where the code threw too: record the throw as the outcome (`recorder.output({ threw: error instanceof Error ? error.message : String(error) })` in a `catch`, since code can throw a value that is not an `Error`) and model each failure the code throws as a final state whose output `matches` compares. Give that final state an output in the same shape as a return, such as `{ outcome: { threw: message } }`, and compare the fields, such as `output.outcome.threw === observation.outcome.threw`: the recorded outcome and the model's output are different objects, so `===` on the objects never matches. A model that errors instead of finishing leaves that outcome unconsumed, which deviates. Without `output`, a run that otherwise conforms reports a recorded throw as `extra-observations`, like a return value. Leaving the throw out of the observations leaves the outcome unchecked.
 - An actor the recording cannot see takes no `observes`. It runs unchecked and is listed in `report.unobserved`.
@@ -296,6 +300,8 @@ coverage.opaqueHandlers; // function transitions a run took, whose inner branche
 ```
 
 An unvisited state or handler is a part of the model no recorded run exercised. Add a scenario that reaches it, or confirm that it cannot happen in production.
+
+Full coverage does not mean every path ran. Coverage counts the states and handlers some run visited, not the combinations of values that flowed through them. A bug that needs one output to reach a later state, such as a value read before the step that sets it, can pass with every state and handler covered. Write scenarios for the paths `explorePaths` lists, not only for each state.
 
 A choice state (a `type: "choice"` state, or one that leaves only through eventless `always` transitions) is listed in `coverage.unobservable` as `{ state, event: "always" }`, not in `unvisitedHandlers`. A trace records one step per macrostep, so it does not show which branch a run took. The branches inside a choice state are not covered: a branch no run took is not reported. To check that each branch is reachable, prove it with `canReach` in step 2, with a target only that branch reaches: a state or context value the branch sets. Reaching the branch's target state proves nothing when another branch or route also leads there.
 
