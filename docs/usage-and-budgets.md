@@ -101,7 +101,7 @@ Use these for dashboards, per-tenant metering, and cost alerts. Neither can stop
 
 ## The global backstop: `maxModelCalls`
 
-`maxModelCalls` caps the number of model and decision calls one run may make. The default is `100`. Decision retries count separately.
+`maxModelCalls` caps the number of model and decision calls one run may make. The default is `100`. Decision retries count separately. A model call inside an ordinary actor, such as a `createAsyncLogic` that calls an SDK, is not a request: neither `maxModelCalls` nor `usage` counts it.
 
 ```ts
 const result = await runAgent(machine, { executors, maxModelCalls: 20, input });

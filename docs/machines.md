@@ -212,6 +212,7 @@ const agentSetup = setupAgent({
 | `agent.generateText` | `model`, `prompt` or `messages`, optional `system`, `outputSchema`, `tools` | `{ result, messages }`: text or the value parsed from `outputSchema`, plus response messages | [Text requests](text-requests.md) |
 | `agent.streamText`   | same as `agent.generateText`                                                | same, with chunks delivered to the host as they arrive                                       | [Text requests](text-requests.md) |
 | `agent.decide`       | `model`, `prompt`, optional `system`, `allowedEvents`                       | the one chosen event, applied to the machine                                                 | [Decisions](decisions.md)         |
+| `agent.act`          | `model`, `prompt` or `messages`, optional `system`, `allowedEvents`, `tools`, `maxSteps` | each event the model calls, applied as it is called; the final text as `output` when the loop ends | [Acting on events](act.md)        |
 
 A human's turn is not a builtin: it is an idle state with accepted events. See [Human in the loop](human-in-the-loop.md).
 
@@ -354,7 +355,7 @@ checking: {
 },
 ```
 
-The returned object takes `target`, and optionally `description`, `reenter`, and `meta`. It cannot update `context`; a choice only routes. The function must return a target. A choice state whose function returns no target throws at run time.
+The returned object takes `target`, and optionally `context`, `description`, `reenter`, and `meta`. A `context` object is merged into the current context, as in any transition. The function must return a target. A choice state whose function returns no target throws at run time.
 
 A choice state has no other behavior. `on`, `always`, `after`, `entry`, `exit`, `invoke`, and `states` are not allowed on it. Put the work in the target states.
 

@@ -50,8 +50,97 @@ When the loop is a class method that calls its own private methods for the model
 | Redux thunk                                                                                       | The thunk's `extra` argument plus its nested dispatches. Wrap `dispatch` so every nested thunk gets the effects-backed `extra`.                                                                                                                                                                                                                                |
 | LangGraph graph                                                                                   | Wrap `graph.invoke`. Fake the model factory with the test runner's module mock (`vi.mock`); the fake calls the run's effects.                                                                                                                                                                                                                                  |
 | A closure inside a DI or Layer factory                                                            | Copy the module, identical outside the carved function, and swap it in with a module mock.                                                                                                                                                                                                                                                                     |
-| Async generator the consumer pulls (yields events, `.return()` on break, `.throw()` to interrupt) | Step 0: wrap the host call that drains the generator, with the collected events as the output. Carve: the machine runs the loop head and each pass is an actor. Write the pull loop by hand: the original generator starts the run and yields each value a pass hands over, one per consumer pull, and forwards `.throw()` and `.return()` to the legacy pass. |
+| Async generator the consumer pulls (yields events, `.return()` on break, `.throw()` to interrupt) | Step 0: wrap the host call that drains the generator, with the collected events as the output. Carve: the machine runs the loop head and each pass is an actor. Write the pull loop by hand: the original generator starts the run and yields each value a pass hands over, one per consumer pull, and forwards `.throw()` and `.return()` to the legacy pass. See [A generator the consumer pulls](#a-generator-the-consumer-pulls). |
 | A step loop inside the model SDK (`stopWhen`, `maxSteps`)                                         | No loop to carve. The SDK call stays one effect; carve the control flow around it, such as handoff or approval.                                                                                                                                                                                                                                                |
+
+### A generator the consumer pulls
+
+When the loop's public surface is an async generator, the carved version is still a generator: the machine runs the loop head, each pass is an actor, and the events each pass yields reach the consumer through a bridge. Hand each event over with a `put` that resolves only on the consumer's next pull:
+
+```ts
+import { createAsyncLogic } from "xstate";
+import { z } from "zod";
+import { runAgent, setupAgent } from "@statelyai/agent";
+
+function createPullBridge<T>() {
+  const pending: { value: T; pulled: (more: boolean) => void }[] = [];
+  let wake: (() => void) | undefined;
+  let ended = false;
+  const notify = () => {
+    const resume = wake;
+    wake = undefined;
+    resume?.();
+  };
+  return {
+    // Producer side: resolves true on the consumer's next pull, false once it stopped.
+    put(value: T): Promise<boolean> {
+      if (ended) return Promise.resolve(false);
+      return new Promise<boolean>((pulled) => {
+        pending.push({ value, pulled });
+        notify();
+      });
+    },
+    // Consumer side: yields each value until the run settles, then returns its result.
+    async *stream<R>(run: Promise<R>): AsyncGenerator<T, R> {
+      const end = () => {
+        ended = true;
+        for (const item of pending.splice(0)) item.pulled(false);
+        notify();
+      };
+      run.then(end, end);
+      let current: { pulled: (more: boolean) => void } | undefined;
+      try {
+        while (true) {
+          while (!pending.length && !ended) await new Promise<void>((resolve) => (wake = resolve));
+          const item = pending.shift();
+          if (!item) return await run;
+          current = item;
+          yield item.value;
+          current = undefined;
+          item.pulled(true);
+        }
+      } finally {
+        // The consumer stopped: release the pass, then wait for the run to unwind.
+        if (current) {
+          current.pulled(false);
+          await run;
+        }
+      }
+    },
+  };
+}
+
+type LoopEvent = { type: "tool_start"; name: string } | { type: "done" };
+declare function legacyPass(): AsyncGenerator<LoopEvent>;
+
+async function* carvedLoop(): AsyncGenerator<LoopEvent> {
+  const bridge = createPullBridge<LoopEvent>();
+  const pass = createAsyncLogic({
+    run: async () => {
+      for await (const event of legacyPass()) {
+        // `break` calls the legacy generator's `return()`, so its `finally` runs.
+        if (!(await bridge.put(event))) return { closed: true };
+      }
+      return { closed: false };
+    },
+  });
+  const loop = setupAgent({ context: z.object({}), actors: { pass } }).createMachine({
+    context: {},
+    initial: "running",
+    states: {
+      running: { invoke: { src: "pass", onDone: { target: "done" } } },
+      done: { type: "final" },
+    },
+  });
+  const result = yield* bridge.stream(runAgent(loop, {}));
+  if (result.status === "error") throw result.error;
+}
+```
+
+- Await `put` before the pass runs its next effect. That is the backpressure rule: the legacy generator stays suspended at its `yield` until the consumer pulls. A queue that pushes and moves on runs the next effect, such as a tool call that places a trade, before the consumer has seen the event before it.
+- A consumer that stops (`break`, `.return()`) makes the pending `put` resolve `false`. The pass stops iterating, the legacy generator's `finally` blocks run, and `.return()` resolves after the run settles.
+- This bridge does not forward `.throw()`. To support it, reject the pending `put` with the consumer's error and pass it to the legacy generator's `throw()`.
+- One bridge serves one run.
 
 ## Step 0: wrap
 
