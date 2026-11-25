@@ -48,7 +48,7 @@ Four things affect how you read these numbers.
 
 ### Billing
 
-`result.usage` is the authoritative record of what a run spent. Usage folds into the totals before the machine is involved, so a call counts even when its `@agent.usage` event is never delivered. A straggler that settles after the run resolved counts, and so does a call whose event no active state accepts. Only the machine event is dropped, and the drop is traced as `usage.dropped`. Counters in `context` are control flow, not billing: they only see the calls the machine reacted to.
+`result.usage` is the authoritative record of what the host's executors spent in a run. Calls outside them are not in it: a model call inside an ordinary actor, a judgment, and the `.withExecutor(...)` requests listed under [the global backstop](#the-global-backstop-maxmodelcalls). Track those separately. Usage folds into the totals before the machine is involved, so a call counts even when its `@agent.usage` event is never delivered. A call whose event no active state accepts counts. A straggler that settles after the run resolved adds no tokens to `result.usage`, but a call admitted before the run resolved still counts in `result.usage.modelCalls`. With a `store`, its usage is still written to the event log, and `result.drain()` waits for that write. See [Event log](event-log.md). Only the machine event is dropped, and the drop is traced as `usage.dropped`. Counters in `context` are control flow, not billing: they only see the calls the machine reacted to.
 
 Two caveats apply.
 
@@ -101,7 +101,7 @@ Use these for dashboards, per-tenant metering, and cost alerts. Neither can stop
 
 ## The global backstop: `maxModelCalls`
 
-`maxModelCalls` caps the number of model and decision calls one run may make. The default is `100`. Decision retries count separately.
+`maxModelCalls` caps the number of model and decision calls one run may make. The default is `100`. Decision retries count separately. A model call inside an ordinary actor, such as a `createAsyncLogic` that calls an SDK, is not a request: neither `maxModelCalls` nor `usage` counts it. Neither counts a text request bound with `.withExecutor(...)`, or a decision bound that way in a child machine: each runs its own executor instead of the host's. A bound decision in the root machine is counted.
 
 ```ts
 const result = await runAgent(machine, { executors, maxModelCalls: 20, input });
@@ -230,7 +230,7 @@ Model-call results reach the machine with usage stripped out.
 | **Not model-facing** | The `@agent.*` namespace is excluded from `getAcceptedEvents` and `parseAgentEvent`. The event is never a decision candidate, even under `allowedEvents: ['*']`, and cannot be forged from a wire message.                                                   |
 | **Durability**       | The event is folded into machine context, so a native snapshot from `result.persist()` retains the counters when a later runtime resumes with `{ snapshot }`.                                                                                                |
 | **Run scope**        | `result.usage` counts calls made during that run only. Persist cumulative counters in machine context when they must survive snapshot resume.                                                                                                                |
-| **Stragglers**       | A call that settles after a `runAgent` leg resolved still folds into `result.usage`, but its machine event is dropped. Watch `usage.dropped` on `onTrace` if a counter looks short.                                                                   |
+| **Stragglers**       | A call that settles after a `runAgent` leg resolved adds no tokens to that leg's `result.usage`, but still counts in `result.usage.modelCalls` if it was admitted before the leg resolved. With a `store`, its usage is written to the event log. Its machine event is dropped. Watch `usage.dropped` on `onTrace` if a counter looks short.                                                                   |
 | **Coverage**         | Only usage your executor reports is delivered. No `usage` on the result means no event. [`simulateAgent`](verify.md) scripts return no usage, so a token counter stays `0` under simulation. Test budgets with `runAgent` and a usage-reporting mock. |
 
 Opt in with a transition.

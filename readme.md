@@ -10,7 +10,7 @@ What you get:
 - **Resume and replay from the event log.** A paused run resumes with `runAgent(machine, { snapshot, event })`, and `replay(machine, result.events)` rebuilds any point of a run with no model calls. See [The event log](https://github.com/statelyai/agent/blob/next/docs/event-log.md).
 - **Checked ports.** `checkParity` records the old code's side effects, replays them against the machine, and reports every scenario where the two differ. `compareRuns` labels outcome-level differences `same`, `intended`, or `regression`. See [Parity with the code you replace](https://github.com/statelyai/agent/blob/next/docs/evals.md#parity-with-the-code-you-replace).
 
-The machine is also a diagram: stream any run to the Stately inspector with `runAgent`'s `inspect` option. See [Inspect a run](https://github.com/statelyai/agent/blob/next/docs/observability.md#inspect-a-run).
+The machine is also a diagram: stream any run to the Stately inspector with `runAgent`'s `inspect` option and `createInspector` from `@statelyai/sdk`, which connects through a hosted relay. See [Inspect a run](https://github.com/statelyai/agent/blob/next/docs/observability.md#inspect-a-run).
 
 Stately Agent adds model requests and decisions to XState:
 

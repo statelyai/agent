@@ -465,7 +465,7 @@ A state the machine only passes through within one step counts as reached: one l
 - A branch stopped on a `needs-output` terminal, with no `outputs` entry for its src, or an explored child machine whose own search was incomplete.
 - An event type was not expanded to all its payload variants, as `explorePaths` lists in `unexpandedEvents`.
 
-When `complete` is false, `unexplored` lists why, in the wording of the `explorePaths` report's `unexplored` notes, such as `needs-output: no \`outputs\` entry for src 'resume' at path []`. A cap adds a `path-cap` note.
+When `complete` is false, `unexplored` lists why. A complete result has no `unexplored` field, so read it as `result.unexplored ?? []`. The notes use the wording of the `explorePaths` report's `unexplored` notes, such as `needs-output: no \`outputs\` entry for src 'resume' at path []`. A cap adds a `path-cap` note.
 
 Raise the caps, add `dedupeBy`, supply the missing outputs, or add `payloads` entries until it is true.
 
@@ -551,7 +551,7 @@ const leak = await canReach(
 - `machine.provide({ guards })` returns a copy of the machine with the same type, so the mutant needs no config copy and no cast. It also replaces `actions`, `actors`, and `delays` by name.
 - `provide` cannot reach a rule written inline in a transition or `choice` function. Move the rule into `setupAgent({ guards })` and call it through `guards` to make it replaceable.
 - `setupAgent` types `guards` as a string-keyed map. With `noUncheckedIndexedAccess`, call the guard as `guards.canPay!(…)`.
-- A mutant the same proof does not catch means the target, the `input`, or the `outputs` table never exercises the rule (with `amount: 40`, `canPay` and `() => true` both allow payment), or the search was not `complete`.
+- A mutant the same proof does not catch means the target, the `input`, or the `outputs` table never exercises the rule (with `amount: 40`, `canPay` and `() => true` both allow payment), or the search was not `complete`. It can also mean the model enforces the rule twice, such as a guard and a state that blocks the same path, so breaking one copy leaves the other in force.
 
 ### Ordering targets
 
