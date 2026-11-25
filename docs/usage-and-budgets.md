@@ -48,7 +48,7 @@ Four things affect how you read these numbers.
 
 ### Billing
 
-`result.usage` is the authoritative record of what the host's executors spent in a run. Calls outside them are not in it: a model call inside an ordinary actor, a judgment, and the `.withExecutor(...)` requests listed under [the global backstop](#the-global-backstop-maxmodelcalls). Track those separately. Usage folds into the totals before the machine is involved, so a call counts even when its `@agent.usage` event is never delivered. A straggler that settles after the run resolved counts, and so does a call whose event no active state accepts. Only the machine event is dropped, and the drop is traced as `usage.dropped`. Counters in `context` are control flow, not billing: they only see the calls the machine reacted to.
+`result.usage` is the authoritative record of what the host's executors spent in a run. Calls outside them are not in it: a model call inside an ordinary actor, a judgment, and the `.withExecutor(...)` requests listed under [the global backstop](#the-global-backstop-maxmodelcalls). Track those separately. Usage folds into the totals before the machine is involved, so a call counts even when its `@agent.usage` event is never delivered. A call whose event no active state accepts counts. A straggler that settles after the run resolved is not in `result.usage`: with a `store`, its usage is still written to the event log, and `result.drain()` waits for that write. See [Event log](event-log.md). Only the machine event is dropped, and the drop is traced as `usage.dropped`. Counters in `context` are control flow, not billing: they only see the calls the machine reacted to.
 
 Two caveats apply.
 
