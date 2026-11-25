@@ -290,7 +290,10 @@ All runs of the unchanged code conform. The full option and deviation reference 
 Pass each report's `trace` to `traceCoverage`:
 
 ```ts no-check
-const coverage = traceCoverage(refundModel, reports.map((report) => report.trace));
+const coverage = traceCoverage(
+  refundModel,
+  reports.map((report) => report.trace),
+);
 coverage.unvisitedStates; // []
 coverage.unvisitedHandlers; // transitions no recorded run took
 coverage.opaqueHandlers; // function transitions a run took, whose inner branches are not counted

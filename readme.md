@@ -47,7 +47,7 @@ Stately Agent 2 is in alpha. APIs may change before the stable release.
 <!-- Match the published agent release with its published XState peer. -->
 
 ```sh
-pnpm add @statelyai/agent@2.0.0-alpha.41 xstate@6.0.0-beta.2 zod
+pnpm add @statelyai/agent@2.0.0-alpha.42 xstate@6.0.0-beta.2 zod
 ```
 
 XState is pinned to the exact version the package peers on while its experimental durable restoration API evolves.
